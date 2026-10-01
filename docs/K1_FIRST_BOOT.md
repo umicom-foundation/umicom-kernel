@@ -1,44 +1,63 @@
 # K1 — First Original Umicom Kernel Boot
 
-Status: source delivery baseline  
+Status: educational source delivery baseline  
 Target: QEMU RISC-V 64 `virt`  
-Implementation: C23 + minimum RV64 Assembly  
-Framework dependency: none
+Implementation: C23 + minimum required RV64 Assembly  
+Framework dependency: none  
+Python dependency: none  
+PowerShell-script dependency: none
 
 ## Purpose
 
-K1 proves only the first native-kernel vertical slice:
+K1 proves one small but real native-kernel vertical slice:
 
-1. QEMU starts an RV64 machine without OpenSBI or Linux.
-2. `arch/riscv64/boot.S` receives control.
-3. The boot hart is selected, interrupts remain disabled, the bootstrap stack is established and BSS is cleared.
-4. Execution enters `UmiKernelMain` in freestanding C23.
-5. The machine-specific NS16550 UART adapter writes deterministic boot evidence.
-6. The QEMU SiFive test-finisher ends the emulator with a success result.
+1. Clang emits RV64 machine code from original Umicom C23 and Assembly.
+2. LLD creates a freestanding RISC-V ELF at the address selected by our linker script.
+3. QEMU starts a RISC-V `virt` machine with `-bios none`.
+4. The first instruction executed from our image is in `arch/riscv64/boot.S`.
+5. The boot hart is selected.
+6. Interrupts remain disabled because K1 has no trap handler yet.
+7. The bootstrap stack is established.
+8. BSS is explicitly cleared.
+9. Execution enters `UmiKernelMain()` in freestanding C23.
+10. The QEMU NS16550 UART adapter writes deterministic serial evidence.
+11. The QEMU SiFive test-finisher terminates the emulator as a successful smoke test.
 
-K1 deliberately does **not** implement memory allocation, traps, scheduling, user mode, filesystems, devices beyond the bootstrap UART/test finisher, Framework integration or POSIX compatibility.
+K1 deliberately does **not** implement:
+
+- dynamic memory allocation;
+- page tables/virtual memory;
+- trap handling;
+- timer interrupts;
+- scheduling;
+- user mode;
+- filesystems;
+- networking;
+- normal device discovery;
+- Framework integration;
+- POSIX compatibility.
+
+Those are later milestones.
 
 ## Ownership boundaries
 
 ```text
 arch/riscv64/
-    ISA/bootstrap concerns
+    ISA/bootstrap and linker concerns
 
 platform/qemu-riscv64/
-    QEMU virt machine MMIO
+    QEMU virt machine MMIO concerns
 
 kernel/
-    architecture-neutral kernel logic
+    architecture-neutral freestanding kernel logic
 
 include/umicom/kernel/
     first native-kernel contracts
 ```
 
-Generic kernel code does not contain QEMU UART/test-device addresses.
+Generic kernel code does not contain the QEMU UART or test-finisher addresses.
 
 ## Expected serial evidence
-
-A successful run prints fields similar to:
 
 ```text
 UMICOM_KERNEL_BEGIN
@@ -49,32 +68,50 @@ arch=riscv64
 machine=qemu-virt
 build=k1-riscv64-freestanding
 hart=0
-dtb=0x00000000........
+dtb=0x................
 state=booted
 UMICOM_KERNEL_END
 ```
 
-The exact DTB address is supplied by QEMU and is not a fixed K1 contract.
+The exact DTB address is selected by QEMU and is not a fixed contract.
+
+## CMake preset comments
+
+JSON does not allow ordinary comments. Read:
+
+```text
+docs/CMAKE_PRESET_REFERENCE.md
+```
+
+for a field-by-field explanation of `CMakePresets.json`.
+
+## Windows tool setup
+
+Read:
+
+```text
+docs/WINDOWS_BEGINNER_SETUP.md
+```
+
+before configuring K1. It includes installation and PATH verification for every
+host tool used by this milestone.
 
 ## Validation boundary
 
-A successful build proves that Clang/LLD produced the requested RV64 ELF.
+A successful build proves that Clang and LLD produced the requested RV64 ELF.
 
-A successful QEMU test proves that the named QEMU `virt` machine transferred control to the kernel, the bootstrap entered C23, serial output worked and the guest reached the test finisher.
+A successful QEMU run additionally proves that:
 
-It does not prove:
+- the selected QEMU machine loaded the image;
+- our Assembly bootstrap received control;
+- the bootstrap could call C23 code;
+- MMIO serial output worked;
+- the guest reached the success finisher.
 
-- physical RISC-V hardware support;
-- interrupt handling;
-- a scheduler;
-- user mode;
-- persistent storage;
-- networking;
-- an Umicom Framework runtime;
-- a complete operating system.
-
-Those remain future milestones.
+A QEMU pass still does not prove physical hardware support or a complete
+operating system.
 
 ## Next milestone
 
-K2 introduces the architecture/HAL and trap foundation: machine trap vector, exception report, CLINT/ACLINT timer discovery strategy and deterministic timer evidence while preserving the K1 boot path.
+K2 preserves the complete K1 boot path and adds the RISC-V trap/exception/timer
+foundation with educational C23/Assembly commentary.
