@@ -1,0 +1,66 @@
+#-----------------------------------------------------------------------------
+# Umicom Kernel
+# File: .gitignore
+#
+# PURPOSE:
+#   Keep generated build files and developer-local output outside source
+#   control while retaining all kernel source, architecture documentation
+#   and test definitions.
+#
+# AUTHOR AND ORGANISATION:
+#   Sammy Hegab
+#   Umicom Foundation
+#
+# LICENCE:
+#   MIT
+#-----------------------------------------------------------------------------
+
+# CMake build directories
+/build/
+/build-*/
+cmake-build-*/
+
+# CMake generated files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+Makefile
+
+# Ninja generated files
+.ninja_deps
+.ninja_log
+build.ninja
+rules.ninja
+
+# Compiler output
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dll
+*.exe
+*.elf
+*.bin
+*.map
+
+# Kernel image output
+*.img
+*.iso
+
+# Debugging output
+*.log
+*.dmp
+*.core
+
+# IDE/editor local state
+.vscode/
+.idea/
+*.user
+*.suo
+
+# Operating-system files
+.DS_Store
+Thumbs.db
+desktop.ini

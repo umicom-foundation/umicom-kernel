@@ -1,0 +1,125 @@
+# Umicom Kernel
+
+**Umicom Kernel** is the original open-source kernel research and native-kernel implementation project for **Umicom OS**.
+
+Project lead and author: Sammy Hegab  
+Organisation: Umicom Foundation  
+Primary implementation language: C23, with architecture-specific Assembly where justified  
+Licence: MIT, unless a file or imported third-party component states otherwise
+
+## Purpose
+
+Umicom OS is a kernel-independent operating-system platform.
+
+The current production kernel for the free-system distribution track is GNU Linux-libre. FreeBSD is a portability and server/appliance evaluation target. Umicom Kernel is the original native kernel implementation under development.
+
+The long-term objective is that Umicom applications and Umicom Framework services can run unchanged above a stable Umicom System Services boundary while the kernel implementation underneath can be Linux-libre, FreeBSD or Umicom Kernel.
+
+## Repository boundary
+
+This repository owns only original kernel research and native-kernel implementation:
+
+- architecture bring-up;
+- boot and early machine initialisation;
+- virtual/physical memory;
+- interrupts and exceptions;
+- scheduler, threads and processes;
+- kernel object and handle model;
+- capabilities and privilege boundaries;
+- IPC, channels and shared memory;
+- timers and clocks;
+- kernel ABI/syscall contracts;
+- VFS foundations;
+- device-driver framework and selected drivers;
+- kernel-side security mechanisms;
+- kernel test harnesses, fuzzing and promotion evidence.
+
+It does **not** own:
+
+- Umicom Framework;
+- Umicom applications;
+- the complete installable Umicom OS distribution;
+- graphical desktop components;
+- package repository policy;
+- full recovery/distribution image composition.
+
+Those remain in their existing repositories.
+
+## Dependency rule
+
+```text
+Umicom applications
+        |
+        v
+Umicom Framework
+        |
+        v
+Umicom System Services API
+        |
+        +----------------------+----------------------+
+        |                      |                      |
+        v                      v                      v
+Linux-libre adapter       FreeBSD adapter       Umicom native adapter
+                                                       |
+                                                       v
+                                                 Umicom Kernel
+```
+
+The kernel must never depend on the full Umicom Framework.
+
+## Initial architecture target
+
+The first execution target is QEMU RISC-V 64 `virt`.
+
+The second architecture target is x86-64 with a documented firmware/boot route.
+
+ARM64 follows after the kernel model and driver interfaces are stable enough that another architecture tests the abstraction rather than multiplying unfinished ports.
+
+## Design direction
+
+Umicom Kernel is planned as a small hybrid-microkernel architecture:
+
+- keep privileged kernel mechanisms small;
+- use explicit object handles and rights;
+- make IPC/channels first-class;
+- move restartable policy/services to user space where practical;
+- keep device/server boundaries reviewable;
+- provide a small native ABI;
+- provide POSIX compatibility above the native ABI so existing free software can be ported without dictating the native design.
+
+## Originality rule
+
+The project studies operating-system concepts and public documentation from GNU/Linux, Unix, FreeBSD, Windows NT, illumos/Solaris, QNX, seL4, Fuchsia/Zircon and other systems.
+
+"Inspiration" means learning from documented concepts, interfaces, failure modes and engineering experience. Umicom Kernel source should be original unless a third-party component is deliberately imported under a compatible licence and recorded with exact provenance.
+
+Do not copy source simply to reproduce a feature.
+
+## Current production relationship
+
+Umicom Kernel is not silently selected by an Umicom OS release profile.
+
+Until the promotion gates are satisfied:
+
+```text
+Production Umicom OS -> GNU Linux-libre
+Research profile      -> Umicom Kernel
+Portability proof     -> FreeBSD
+```
+
+## Source-preservation rule
+
+Do not delete existing code, comments, experiments or superseded implementations merely because a design changes. Preserve historical implementations for review unless the project owner explicitly approves physical deletion.
+
+## Development policy
+
+- commit directly to `main`;
+- no feature branches unless the project owner changes this rule;
+- C23 first;
+- Assembly only where architecture bring-up, context switching, atomic/interrupt entry or measured low-level work requires it;
+- keep public ABI contracts small and versioned;
+- no hidden fallback that turns an unexecuted test into success;
+- QEMU evidence is separate from host unit-test evidence;
+- physical-hardware support is never inferred from QEMU success.
+
+Start with `docs/ARCHITECTURE.md`, `docs/DECISION_REGISTER.md`, `docs/ROADMAP.md` and `docs/PROMOTION_GATES.md`.
