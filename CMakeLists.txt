@@ -3,13 +3,14 @@
 # File: CMakeLists.txt
 #
 # PURPOSE:
-#   Build K1, the first original freestanding Umicom Kernel image for QEMU's
-#   RISC-V "virt" machine.
+#   Build K2 of the original freestanding Umicom Kernel for QEMU's RISC-V
+#   "virt" machine while preserving the complete K1 boot path.
 #
 # EDUCATIONAL NOTE:
-#   CMake is used only as the build description.  The kernel itself is still
-#   C23 and RISC-V Assembly.  No Python, PowerShell or shell script is needed
-#   by the K1 kernel build.
+#   CMake describes the host-side build and test graph only.  The kernel image
+#   itself is C23 plus the minimum RISC-V Assembly required for bootstrap and
+#   trap entry/return.  No Python, PowerShell or shell script is required by
+#   the kernel build.
 #
 # AUTHOR AND ORGANISATION:
 #   Sammy Hegab
@@ -19,99 +20,108 @@
 #   MIT
 #-----------------------------------------------------------------------------
 
-# Require a CMake version new enough to understand the preset/toolchain
-# behaviour used by this repository.
+# Require the first CMake release whose preset/toolchain behaviour this
+# repository deliberately targets.
 cmake_minimum_required(VERSION 3.24)
 
-# Name the project and tell CMake that this milestone contains C and Assembly.
-# "ASM" enables the RISC-V .S bootstrap file as a first-class source file.
+# Tell CMake that the source contains C and preprocessed Assembly (.S).
 project(UmicomKernel LANGUAGES C ASM)
 
-# Request the C23 language standard for every C source in this small project.
+# Compile ordinary C source using the C23 language standard.
 set(CMAKE_C_STANDARD 23)
 
-# Refuse silently falling back to an older C standard if a compiler cannot
-# satisfy the C23 request.
+# Fail configuration rather than silently compiling as an older C standard.
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
-# Disable compiler-specific C language extensions so the C sources remain
-# intentionally portable and standards-oriented.
+# Disable compiler-specific C dialect extensions in ordinary C source.
 set(CMAKE_C_EXTENSIONS OFF)
 
-# Load CMake's testing support so the real QEMU boot can be registered as a
-# CTest case when the emulator is available.
+# Enable CTest so real QEMU boots can be registered as executable tests.
 include(CTest)
 
-# K1 is intentionally one architecture only.  Failing here gives a beginner a
-# clear message instead of producing an incorrectly linked host executable.
+# K2 intentionally supports one execution architecture.  A clear configuration
+# failure is safer than accidentally building a host executable.
 if(NOT CMAKE_SYSTEM_PROCESSOR STREQUAL "riscv64")
     message(FATAL_ERROR
-        "K1 currently supports only the riscv64 cross-build preset. "
+        "K2 currently supports only the riscv64 cross-build preset. "
         "Configure with: cmake --preset riscv64-clang-debug")
 endif()
 
-# Store the linker-script path once.  The linker script controls the physical
-# addresses and section layout of the freestanding kernel image.
+# Keep the memory-layout file in one named variable because both the linker and
+# CMake dependency tracking need the same source path.
 set(
     UMICOM_KERNEL_LINKER_SCRIPT
     "${CMAKE_CURRENT_SOURCE_DIR}/arch/riscv64/linker.ld"
 )
 
-# Create the first kernel ELF executable from:
-#   - one architecture bootstrap Assembly source;
-#   - generic kernel C23 code;
-#   - the QEMU RISC-V machine adapter used only for K1.
+# Build one freestanding ELF image.
+#
+# The source grouping is intentional:
+#   boot.S
+#       Creates the initial C environment.
+#
+#   trap.S
+#       Owns the machine trap entry/return sequence because register save/restore
+#       and MRET cannot be expressed safely as ordinary portable C.
+#
+#   trap.c
+#       Decodes trap causes and owns K2's trap policy/state.
+#
+#   kernel/*.c
+#       Architecture-neutral teaching/kernel logic.
+#
+#   platform/qemu-riscv64/*.c
+#       QEMU "virt" MMIO details that generic kernel code must not know.
 add_executable(
     umicom-kernel
     arch/riscv64/boot.S
+    arch/riscv64/trap.S
+    arch/riscv64/trap.c
     kernel/console.c
     kernel/main.c
     platform/qemu-riscv64/finish.c
     platform/qemu-riscv64/serial.c
+    platform/qemu-riscv64/timer.c
 )
 
-# Make the repository's public/internal kernel headers visible while compiling
-# this target.  No hosted operating-system SDK is added here.
+# Expose only this repository's kernel headers to the target.
 target_include_directories(
     umicom-kernel
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/include"
 )
 
-# Configure the code generator for the first RISC-V target.
+# Configure code generation for the first RISC-V target.
 #
-# -march=rv64imac_zicsr:
-#   RV64 base integer ISA plus multiply/divide, atomics, compressed
-#   instructions and CSR instructions needed by early privileged code.
+# -march=rv64imac_zicsr
+#   RV64 integer ISA plus multiply/divide, atomics, compressed instructions and
+#   explicit CSR instructions used by machine-mode trap code.
 #
-# -mabi=lp64:
-#   64-bit pointers and long integers, with the standard integer calling
-#   convention and no floating-point register ABI.
+# -mabi=lp64
+#   Select the integer-only RV64 C calling convention.
 #
-# -mcmodel=medany:
-#   Generate position-addressing sequences suitable for code/data within the
-#   RISC-V medium-anywhere model used by this simple linked image.
+# -mcmodel=medany
+#   Permit code/data references appropriate for this linked kernel image.
 #
-# -msmall-data-limit=0:
-#   Do not create a small-data area that would require a global-pointer setup
-#   before C code can safely execute.
+# -msmall-data-limit=0
+#   Prevent implicit dependence on a global-pointer setup before C executes.
 #
-# -ffreestanding:
-#   Tell the compiler this is not a normal hosted C program with an OS/libc.
+# -ffreestanding
+#   Tell Clang there is no hosted operating system or C runtime beneath us.
 #
-# -fno-builtin:
-#   Do not silently replace our code with calls/assumptions about libc helpers.
+# -fno-builtin
+#   Prevent compiler substitutions that could introduce libc assumptions.
 #
-# -fno-stack-protector:
-#   A hosted stack protector needs runtime support K1 does not have yet.
+# -fno-stack-protector
+#   Hosted stack-protector runtime support does not exist yet.
 #
-# -fno-pic / -fno-pie:
-#   K1 is linked to a deliberate fixed physical address.
+# -fno-pic / -fno-pie
+#   K2 deliberately links at a fixed physical address.
 #
-# -fno-unwind-tables / -fno-asynchronous-unwind-tables:
-#   K1 has no unwinder and should not carry unused hosted-runtime metadata.
+# -fno-unwind-tables / -fno-asynchronous-unwind-tables
+#   K2 has no unwinder and does not need hosted unwind metadata.
 #
-# The warning flags intentionally make questionable beginner code visible.
+# Warning flags remain strict because low-level mistakes should be visible.
 target_compile_options(
     umicom-kernel
     PRIVATE
@@ -134,29 +144,10 @@ target_compile_options(
         -Werror
 )
 
-# Configure the final kernel link.
+# Link without any hosted startup/runtime library.
 #
-# -nostdlib:
-#   Do not link the host C runtime, startup objects or libc.
-#
-# -fuse-ld=lld:
-#   Use LLVM's LLD linker because the Clang cross-compiler is driving the link.
-#
-# -Wl,-T,<file>:
-#   Pass our memory/section layout to the ELF linker.
-#
-# -Wl,-Map,...:
-#   Produce a human-readable map file that beginners can inspect.
-#
-# --gc-sections:
-#   Discard unreachable sections instead of carrying accidental unused code.
-#
-# --build-id=none:
-#   Avoid an automatically generated note section in this tiny milestone.
-#
-# --no-relax:
-#   Keep instruction/address sequences stable while the early boot code and
-#   memory layout are still being taught and inspected.
+# --no-relax is especially useful in early teaching milestones because it keeps
+# instruction/address transformations easier to compare with the written source.
 target_link_options(
     umicom-kernel
     PRIVATE
@@ -172,25 +163,22 @@ target_link_options(
         -Wl,--no-relax
 )
 
-# Give the output a kernel-specific .elf filename and place it in a predictable
-# bin directory inside the selected build tree.
+# Give the image a predictable name/location and re-link whenever the linker
+# script changes.
 set_target_properties(
     umicom-kernel
     PROPERTIES
         OUTPUT_NAME "umicom-kernel"
         SUFFIX ".elf"
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/bin"
-
-        # Re-link if the memory-layout file changes even when C/Assembly sources
-        # are otherwise unchanged.
         LINK_DEPENDS "${UMICOM_KERNEL_LINKER_SCRIPT}"
 )
 
-# Locate QEMU automatically.
+# Discover the RISC-V QEMU system emulator.
 #
-# Beginners often install QEMU through MSYS2, which puts it in
-# C:/msys64/ucrt64/bin.  The second hint covers a common standalone Windows
-# installation.  Normal PATH discovery still works as well.
+# PATH remains the normal discovery mechanism.  The explicit hints cover the
+# MSYS2 UCRT64 installation recommended by the beginner guide and a common
+# standalone QEMU installation.
 find_program(
     UMICOM_QEMU_RISCV64
     NAMES
@@ -201,59 +189,77 @@ find_program(
         "C:/Program Files/qemu"
 )
 
-# Register a real emulator boot test only when:
-#   1. testing is enabled; and
-#   2. the RISC-V QEMU executable was actually found.
+# Register real emulator tests only when QEMU actually exists.
 if(BUILD_TESTING AND UMICOM_QEMU_RISCV64)
 
-    # CTest launches the same kernel ELF a developer would launch manually.
+    # Store the common machine arguments once so K1-regression and K2 tests boot
+    # exactly the same virtual hardware.
     #
-    # K1 is deliberately machine-mode code: boot.S reads machine CSRs such as
-    # mhartid and mie before any supervisor-mode runtime exists.
-    #
-    # Therefore load this ELF as QEMU's firmware image with "-bios <file>".
-    # QEMU's RISC-V firmware loader understands ELF, records the ELF entry as
-    # the firmware start address, and its small reset ROM then jumps to that
-    # address while providing a0=hart ID and a1=device-tree address.
-    #
-    # Do NOT use "-bios none -kernel <ELF>" for K1.  In current QEMU "virt"
-    # direct-kernel handling, "-kernel" loads our ELF at 0x80200000, but with
-    # no firmware the reset ROM's firmware start address remains 0x80000000.
-    # The processor then jumps into empty RAM before our _start instruction,
-    # producing the completely silent hang that this repair documents.
-    add_test(
-        NAME kernel.k1.riscv64.qemu_boot
-        COMMAND "${UMICOM_QEMU_RISCV64}"
-            -machine virt
-            -bios "$<TARGET_FILE:umicom-kernel>"
-            -display none
-            -monitor none
-            -serial stdio
-            -m 128M
-            -smp 1
-            -no-reboot
+    # aclint=off is explicit even though it is QEMU's current default.  K2's
+    # timer adapter intentionally uses the SiFive-compatible CLINT memory map;
+    # naming the mode here prevents an emulator option change from silently
+    # changing the device layout beneath the teaching code.
+    set(
+        UMICOM_QEMU_RISCV64_ARGUMENTS
+        -machine "virt,aclint=off"
+        -bios "$<TARGET_FILE:umicom-kernel>"
+        -display none
+        -monitor none
+        -serial stdio
+        -m 128M
+        -smp 1
+        -no-reboot
     )
 
-    # Keep a hung early kernel from blocking the test suite forever.
+    # Preserve the K1 acceptance identity as a regression test.
     #
-    # PASS_REGULAR_EXPRESSION proves the serial path reached the final K1 marker.
-    #
-    # FAIL_REGULAR_EXPRESSION prevents obvious failure text from being accepted
-    # merely because some earlier success marker happened to be printed.
+    # K2 still has to prove that the original firmware hand-off, Assembly
+    # bootstrap, C23 entry and serial path work.
+    add_test(
+        NAME kernel.k1.riscv64.qemu_boot
+        COMMAND
+            "${UMICOM_QEMU_RISCV64}"
+            ${UMICOM_QEMU_RISCV64_ARGUMENTS}
+    )
+
+    # Require the original boot marker and fail on explicit kernel/test errors.
     set_tests_properties(
         kernel.k1.riscv64.qemu_boot
         PROPERTIES
             TIMEOUT 10
-            PASS_REGULAR_EXPRESSION "UMICOM_KERNEL_END"
-            FAIL_REGULAR_EXPRESSION "panic;PANIC;failed;FAILED"
+            PASS_REGULAR_EXPRESSION "state=booted"
+            FAIL_REGULAR_EXPRESSION
+                "UMICOM_KERNEL_FAIL;panic;PANIC;failed;FAILED"
+    )
+
+    # Register the new K2 acceptance test.
+    #
+    # It boots the same image but requires the final marker that can only be
+    # reached after both the deliberate M-mode ECALL exception and the real
+    # machine-timer interrupt have been handled and returned from successfully.
+    add_test(
+        NAME kernel.k2.riscv64.trap_timer
+        COMMAND
+            "${UMICOM_QEMU_RISCV64}"
+            ${UMICOM_QEMU_RISCV64_ARGUMENTS}
+    )
+
+    # A K2 pass proves the image reached the post-trap/post-timer completion
+    # marker.  A nonzero QEMU exit is also independently treated as test failure.
+    set_tests_properties(
+        kernel.k2.riscv64.trap_timer
+        PROPERTIES
+            TIMEOUT 10
+            PASS_REGULAR_EXPRESSION "K2_TRAP_TIMER_PASS"
+            FAIL_REGULAR_EXPRESSION
+                "UMICOM_KERNEL_FAIL;unexpected-trap;panic;PANIC;failed;FAILED"
     )
 else()
 
-    # This is intentionally informational rather than a fake passing test:
-    # building an ELF is not the same evidence as actually booting it.
+    # Do not invent a passing emulator result when QEMU is absent.
     message(
         STATUS
-        "qemu-system-riscv64 not found: K1 will build, but the real QEMU CTest "
-        "is not registered. Install QEMU and re-run the CMake configure step."
+        "qemu-system-riscv64 not found: K2 will build, but real QEMU CTests "
+        "are not registered. Install QEMU and re-run the configure step."
     )
 endif()

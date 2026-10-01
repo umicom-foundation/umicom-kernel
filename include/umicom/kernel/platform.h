@@ -3,12 +3,13 @@
  * File: include/umicom/kernel/platform.h
  *
  * PURPOSE:
- *   Define the very small K1 boundary between generic kernel code and the
- *   machine-specific QEMU RISC-V adapter.
+ *   Define the small boundary between generic kernel/architecture code and the
+ *   QEMU RISC-V "virt" machine adapter used by K2.
  *
  * EDUCATIONAL NOTE:
- *   Later milestones will grow proper HAL/device contracts.  K1 keeps this
- *   interface deliberately tiny so generic code never embeds QEMU MMIO values.
+ *   A platform adapter owns machine addresses and device register layouts.
+ *   Generic kernel code therefore never needs to know where QEMU placed the
+ *   UART, timer or test-finisher devices.
  *
  * AUTHOR AND ORGANISATION:
  *   Sammy Hegab
@@ -21,17 +22,29 @@
 #ifndef UMICOM_KERNEL_PLATFORM_H
 #define UMICOM_KERNEL_PLATFORM_H
 
-/* Import the byte type used by the early serial writer. */
+/* Import the fixed-width types used by device-facing function contracts. */
 #include "umicom/kernel/types.h"
 
-/* Configure the earliest machine text-output device for polling output. */
+/* Configure the earliest polling text-output device. */
 void UmiPlatformConsoleInitialize(void);
 
-/* Send one byte to the machine text-output device. */
+/* Send one byte to the earliest machine text-output device. */
 void UmiPlatformConsoleWriteByte(UmiU8 value);
 
-/* Tell the K1 test machine that the boot milestone completed successfully. */
+/* Read the machine timer's current 64-bit time value. */
+UmiU64 UmiPlatformTimerRead(void);
+
+/* Program one hart's machine-timer compare register with an absolute deadline. */
+void UmiPlatformTimerSetCompare(UmiU64 hartId, UmiU64 deadline);
+
+/* Move one hart's compare value to the maximum so no near-term timer remains. */
+void UmiPlatformTimerDisable(UmiU64 hartId);
+
+/* Terminate the QEMU teaching machine with a successful test result. */
 void UmiPlatformFinishSuccess(void);
+
+/* Terminate the QEMU teaching machine with a bounded nonzero failure code. */
+void UmiPlatformFinishFailure(UmiU32 code);
 
 /* Stop useful execution permanently if there is nowhere safe to continue. */
 void UmiPlatformHalt(void);

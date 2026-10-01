@@ -1,8 +1,8 @@
-# K1 CMake preset — field-by-field explanation
+# K2 CMake preset — field-by-field explanation
 
 `CMakePresets.json` must remain valid JSON. JSON does not support ordinary
-comments, so this document explains every field instead of inserting invalid
-comment syntax into the preset file.
+comments, so this document explains every field rather than placing invalid
+comment syntax in the JSON file.
 
 ## Top-level `version`
 
@@ -22,60 +22,94 @@ Selects version 6 of the CMake Presets file format.
 }
 ```
 
-Records the oldest CMake version this preset file is intended to require.
+Records the oldest CMake release this preset file deliberately requires.
 
-## Configure preset
+## Configure preset name
 
 ```json
 "name": "riscv64-clang-debug"
 ```
 
-This is the machine-readable preset name typed after `cmake --preset`.
+This is the machine-readable name typed after:
 
-```json
-"displayName": "Umicom Kernel K1 - RISC-V 64 Clang Debug"
+```powershell
+cmake --preset riscv64-clang-debug
 ```
 
-This is the human-readable label shown by tools that list presets.
+K2 deliberately preserves the K1 preset name so existing developer muscle
+memory and build paths do not change merely because the kernel milestone grew.
+
+## Display name
+
+```json
+"displayName": "Umicom Kernel K2 - RISC-V 64 Clang Debug"
+```
+
+This is the human-readable description shown by tools that list presets.
+
+## Generator
 
 ```json
 "generator": "Ninja"
 ```
 
-CMake generates Ninja build rules instead of Visual Studio/MSBuild project
-files. Ninja is small and works well for cross-compilation.
+CMake generates Ninja build rules. Ninja is a small native build executor and
+does not become part of the kernel image.
+
+## Binary directory
 
 ```json
 "binaryDir": "${sourceDir}/build/riscv64-clang-debug"
 ```
 
-All generated build files stay outside the source directories in a predictable
-build tree.
+Generated object files, CMake state, the ELF image and the linker map stay
+under `build/` rather than mixing with source files.
+
+## Toolchain file
 
 ```json
 "toolchainFile": "${sourceDir}/cmake/toolchains/riscv64-clang.cmake"
 ```
 
-Loads the file that tells CMake the output is freestanding RISC-V code produced
-by Clang, not a normal Windows host application.
+Loads the cross-compilation description that tells CMake:
+
+- the target is not hosted Windows/Linux;
+- the CPU is RISC-V 64;
+- Clang emits `riscv64-unknown-elf`;
+- LLD performs the final bare-metal ELF link.
+
+## Build type
 
 ```json
 "CMAKE_BUILD_TYPE": "Debug"
 ```
 
-Build the teaching/development image with debug information rather than
-aggressive release optimisation.
+K2 favours teachability and debugger/symbol visibility over release
+optimisation.
+
+## Testing
 
 ```json
 "BUILD_TESTING": "ON"
 ```
 
-Enable CTest registration.  If QEMU is installed, the real K1 boot test is
-registered during configuration.
+Allows CMake to register the real QEMU acceptance tests when
+`qemu-system-riscv64` is present.
+
+K2 registers:
+
+```text
+kernel.k1.riscv64.qemu_boot
+kernel.k2.riscv64.trap_timer
+```
+
+The first protects the original K1 boot path.
+
+The second requires the exception and timer-interrupt milestone to complete.
 
 ## Build preset
 
-The build preset reuses the configure preset so this command is sufficient:
+The build preset points back to the same configure preset, allowing:
 
 ```powershell
 cmake --build --preset riscv64-clang-debug --parallel 2
@@ -83,5 +117,9 @@ cmake --build --preset riscv64-clang-debug --parallel 2
 
 ## Test preset
 
-The test preset points at the same configured build tree and enables
-`outputOnFailure`, so QEMU serial output is printed when a boot test fails.
+The test preset uses the same generated tree and requests failure output so a
+failed QEMU serial transcript is visible immediately:
+
+```powershell
+ctest --preset riscv64-clang-debug --output-on-failure
+```
