@@ -207,17 +207,31 @@ find_program(
 if(BUILD_TESTING AND UMICOM_QEMU_RISCV64)
 
     # CTest launches the same kernel ELF a developer would launch manually.
+    #
+    # K1 is deliberately machine-mode code: boot.S reads machine CSRs such as
+    # mhartid and mie before any supervisor-mode runtime exists.
+    #
+    # Therefore load this ELF as QEMU's firmware image with "-bios <file>".
+    # QEMU's RISC-V firmware loader understands ELF, records the ELF entry as
+    # the firmware start address, and its small reset ROM then jumps to that
+    # address while providing a0=hart ID and a1=device-tree address.
+    #
+    # Do NOT use "-bios none -kernel <ELF>" for K1.  In current QEMU "virt"
+    # direct-kernel handling, "-kernel" loads our ELF at 0x80200000, but with
+    # no firmware the reset ROM's firmware start address remains 0x80000000.
+    # The processor then jumps into empty RAM before our _start instruction,
+    # producing the completely silent hang that this repair documents.
     add_test(
         NAME kernel.k1.riscv64.qemu_boot
         COMMAND "${UMICOM_QEMU_RISCV64}"
             -machine virt
-            -bios none
+            -bios "$<TARGET_FILE:umicom-kernel>"
             -display none
             -monitor none
             -serial stdio
             -m 128M
             -smp 1
-            -kernel "$<TARGET_FILE:umicom-kernel>"
+            -no-reboot
     )
 
     # Keep a hung early kernel from blocking the test suite forever.

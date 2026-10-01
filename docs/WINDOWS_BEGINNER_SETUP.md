@@ -20,6 +20,10 @@ They are developer tools running on Windows.
 
 ## PATH versus Java CLASSPATH
 
+Umicom Kernel K1 does not use Java.
+
+`CLASSPATH` is therefore irrelevant.
+
 Windows `PATH` is the list of directories PowerShell searches when you type an
 executable name such as `cmake`, `clang` or `qemu-system-riscv64`.
 
@@ -293,3 +297,73 @@ Therefore we do not install or link a RISC-V libc, Windows SDK runtime, GTK,
 SQLite or Umicom Framework for the K1 image.
 
 The host tools build the ELF; they do not become part of the kernel.
+
+
+# Troubleshooting: QEMU opens but prints nothing
+
+If the build succeeds, `llvm-readobj` reports a RISC-V ELF, `_start` is at
+`0x80200000`, but QEMU prints absolutely nothing and never exits, first stop the
+emulator with:
+
+```text
+Ctrl+C
+```
+
+A previous K1 command used:
+
+```text
+-bios none
+-kernel .\build\riscv64-clang-debug\bin\umicom-kernel.elf
+```
+
+That command is wrong for this machine-mode K1 design.
+
+Use this corrected command:
+
+```powershell
+qemu-system-riscv64.exe `
+    -machine virt `
+    -bios ".\build\riscv64-clang-debug\bin\umicom-kernel.elf" `
+    -display none `
+    -monitor none `
+    -serial stdio `
+    -m 128M `
+    -smp 1 `
+    -no-reboot
+```
+
+K1 is loaded as firmware because its earliest Assembly runs in RISC-V machine
+mode.  No OpenSBI or Linux kernel is required for this milestone.
+
+After updating the K1 files, delete the generated build directory and configure
+again so CTest records the corrected QEMU command:
+
+```powershell
+Remove-Item -Recurse -Force ".\build\riscv64-clang-debug"
+```
+
+```powershell
+cmake --preset riscv64-clang-debug
+```
+
+```powershell
+cmake --build --preset riscv64-clang-debug --parallel 2
+```
+
+Then inspect the registered test:
+
+```powershell
+ctest --preset riscv64-clang-debug -N -V
+```
+
+The printed QEMU command should contain:
+
+```text
+-bios <path-to-umicom-kernel.elf>
+```
+
+and must not contain the old combination:
+
+```text
+-bios none -kernel
+```

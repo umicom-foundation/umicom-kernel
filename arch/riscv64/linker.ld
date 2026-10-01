@@ -32,11 +32,17 @@ ENTRY(_start)
  * 0x80200000 as its linked start so the simple direct-kernel experiment has a
  * clear fixed location with room below it reserved for future boot concerns.
  *
- * The 128 MiB length matches the "-m 128M" QEMU command used by the K1 test.
+ * QEMU's "-m 128M" RAM spans 0x80000000 through 0x87ffffff.
+ *
+ * K1 deliberately starts at 0x80200000, leaving the first 2 MiB below the
+ * kernel image outside this linker's ownership.  Therefore only 126 MiB remain
+ * between our link origin and the end of the emulated RAM.  Describing 128 MiB
+ * here would incorrectly claim ownership of two MiB beyond the real machine's
+ * configured RAM even though the tiny K1 image would not immediately reach it.
  */
 MEMORY
 {
-    RAM (rwx) : ORIGIN = 0x80200000, LENGTH = 128M
+    RAM (rwx) : ORIGIN = 0x80200000, LENGTH = 126M
 }
 
 /* Lay out each program section inside the RAM region. */
