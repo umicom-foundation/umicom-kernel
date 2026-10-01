@@ -1,0 +1,36 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 24,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "riscv64-clang-debug",
+      "displayName": "Umicom Kernel K1 - RISC-V 64 Clang Debug",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/riscv64-clang-debug",
+      "toolchainFile": "${sourceDir}/cmake/toolchains/riscv64-clang.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "BUILD_TESTING": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "riscv64-clang-debug",
+      "configurePreset": "riscv64-clang-debug"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "riscv64-clang-debug",
+      "configurePreset": "riscv64-clang-debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}
