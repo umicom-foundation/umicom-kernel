@@ -61,6 +61,15 @@ SECTIONS
          * if no normal C function has an explicit reference to _start. */
         KEEP(*(.text.boot))
 
+        /* Give the supervisor payload complete executable pages of its own.
+         * Its page table maps this range RX, not the surrounding machine code.
+         * The boot entry above remains at the established image entry address. */
+        . = ALIGN(4096);
+        __umicom_supervisor_text_start = .;
+        KEEP(*(.text.umicom_supervisor_payload))
+        . = ALIGN(4096);
+        __umicom_supervisor_text_end = .;
+
         /* Collect all other executable text sections produced by C/Assembly. */
         *(.text .text.*)
     } > RAM

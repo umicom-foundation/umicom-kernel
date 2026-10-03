@@ -85,12 +85,15 @@ add_executable(
     umicom-kernel
     arch/riscv64/boot.S
     arch/riscv64/mmu.S
+    arch/riscv64/supervisor.S
     arch/riscv64/trap.S
     arch/riscv64/trap.c
     kernel/address.c
     kernel/console.c
     kernel/device_tree.c
     kernel/main.c
+    kernel/supervisor_payload.c
+    kernel/supervisor_validation.c
     kernel/physical_memory.c
     kernel/virtual_memory.c
     platform/qemu-riscv64/finish.c
@@ -333,6 +336,26 @@ if(BUILD_TESTING AND UMICOM_QEMU_RISCV64)
                 "UMICOM_KERNEL_FAIL;unexpected-trap;corrupt-page-table;invariant-failure;panic;PANIC;failed;FAILED"
     )
 
+    # The payload lowers actual execution privilege, uses an Sv39-translated
+    # stack, and returns through a private machine trap vector. Expected page
+    # faults and a forbidden machine CSR read are checked before the final
+    # readiness marker. The existing trap implementation is left untouched.
+    add_test(
+        NAME kernel.riscv64.supervisor_execution
+        COMMAND
+            "${UMICOM_QEMU_RISCV64}"
+            ${UMICOM_QEMU_RISCV64_ARGUMENTS}
+    )
+    set_tests_properties(
+        kernel.riscv64.supervisor_execution
+        PROPERTIES
+            TIMEOUT 10
+            FIXTURES_REQUIRED kernel_current_image
+            PASS_REGULAR_EXPRESSION "UMICOM_KERNEL_SUPERVISOR_EXECUTION_READY"
+            FAIL_REGULAR_EXPRESSION
+                "UMICOM_KERNEL_FAIL;unexpected-trap;corrupt-page-table;invariant-failure;panic;PANIC;failed;FAILED"
+    )
+
     # Before any QEMU capability test is allowed to run, ask CMake/Ninja to
     # build the current Kernel image incrementally.  This guards against a
     # misleading situation where compilation fails but an older ELF remains in
@@ -380,3 +403,12 @@ else()
         "are not registered. Install QEMU and re-run the configure step."
     )
 endif()
+
+# Only the supervisor payload is constrained here. Its instruction pages are
+# mapped explicitly, while ordinary Kernel rodata is deliberately not exposed.
+# Disabling jump tables prevents switch lowering from adding an implicit data
+# dependency outside that small execution environment.
+set_source_files_properties(
+    kernel/supervisor_payload.c
+    PROPERTIES COMPILE_OPTIONS "-fno-jump-tables"
+)

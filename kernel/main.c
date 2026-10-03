@@ -69,6 +69,10 @@
 /* Import the privileged RISC-V helpers used to exercise real Sv39 translation. */
 #include "umicom/kernel/riscv64/mmu.h"
 
+/* The supervisor experiment owns its temporary vector and restores machine
+ * control before the normal Kernel startup path continues. */
+#include "umicom/kernel/riscv64/supervisor.h"
+
 /* Import Sv39 page-table construction, translation and reclamation contracts. */
 #include "umicom/kernel/virtual_memory.h"
 
@@ -1421,6 +1425,11 @@ void UmicomKernelMain(UmicomU64 hartId, UmicomAddress deviceTreeAddress)
      * returned to the physical-memory baseline. */
     UmicomKernelConsoleWriteLine("state=hardware-translation-ready");
     UmicomKernelConsoleWriteLine("UMICOM_KERNEL_HARDWARE_TRANSLATION_READY");
+
+    /* Exercise real supervisor instruction/stack translation only after the
+     * preceding machine-mode and hardware data-translation checks succeed.
+     * This call restores their control state and frees its temporary frames. */
+    UmicomKernelSupervisorExecutionValidate();
 
     /* Mark the end of deterministic Kernel capability evidence. */
     UmicomKernelConsoleWriteLine("UMICOM_KERNEL_END");
