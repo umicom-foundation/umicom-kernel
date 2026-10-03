@@ -70,6 +70,15 @@ SECTIONS
         . = ALIGN(4096);
         __umicom_supervisor_text_end = .;
 
+        /* User executable pages are separate from both supervisor payload and
+         * machine monitor code. Each user root maps only this range RX + USER;
+         * no surrounding machine function becomes callable by sharing a page. */
+        . = ALIGN(4096);
+        __umicom_user_text_start = .;
+        KEEP(*(.text.umicom_user_payload))
+        . = ALIGN(4096);
+        __umicom_user_text_end = .;
+
         /* Collect all other executable text sections produced by C/Assembly. */
         *(.text .text.*)
     } > RAM

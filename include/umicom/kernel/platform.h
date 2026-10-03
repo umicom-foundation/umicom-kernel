@@ -89,6 +89,11 @@ void UmicomPlatformPhysicalMemoryDescribe(
     UmicomPlatformPhysicalMemoryInfo *outInfo
 );
 
+/* Read the current compare threshold without changing timer delivery.
+ * The user monitor borrows one hart's deadline only while it runs a payload,
+ * then restores this value so the existing timer service keeps its ownership. */
+UmicomU64 UmicomPlatformTimerCompareRead(UmicomU64 hartId);
+
 /*-----------------------------------------------------------------------------
  * HISTORICAL SHORT PLATFORM NAMES — RETAINED FOR REVIEW, NOT COMPILED
  *

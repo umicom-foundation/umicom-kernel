@@ -73,6 +73,9 @@
  * control before the normal Kernel startup path continues. */
 #include "umicom/kernel/riscv64/supervisor.h"
 
+/* Add user-mode validation without changing the established supervisor path. */
+#include "umicom/kernel/riscv64/user_execution.h"
+
 /* Import Sv39 page-table construction, translation and reclamation contracts. */
 #include "umicom/kernel/virtual_memory.h"
 
@@ -1430,6 +1433,11 @@ void UmicomKernelMain(UmicomU64 hartId, UmicomAddress deviceTreeAddress)
      * preceding machine-mode and hardware data-translation checks succeed.
      * This call restores their control state and frees its temporary frames. */
     UmicomKernelSupervisorExecutionValidate();
+
+    /* Enter isolated user address spaces only after supervisor execution has
+     * returned safely. The private user monitor restores the original machine
+     * state and returns all temporary frames before the final completion marker. */
+    UmicomKernelUserExecutionValidate();
 
     /* Mark the end of deterministic Kernel capability evidence. */
     UmicomKernelConsoleWriteLine("UMICOM_KERNEL_END");

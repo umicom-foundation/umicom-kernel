@@ -86,6 +86,7 @@ add_executable(
     arch/riscv64/boot.S
     arch/riscv64/mmu.S
     arch/riscv64/supervisor.S
+    arch/riscv64/user_execution.S
     arch/riscv64/trap.S
     arch/riscv64/trap.c
     kernel/address.c
@@ -94,6 +95,10 @@ add_executable(
     kernel/main.c
     kernel/supervisor_payload.c
     kernel/supervisor_validation.c
+    kernel/user_payload.c
+    kernel/user_memory.c
+    kernel/user_monitor.c
+    kernel/user_validation.c
     kernel/physical_memory.c
     kernel/virtual_memory.c
     platform/qemu-riscv64/finish.c
@@ -356,6 +361,25 @@ if(BUILD_TESTING AND UMICOM_QEMU_RISCV64)
                 "UMICOM_KERNEL_FAIL;unexpected-trap;corrupt-page-table;invariant-failure;panic;PANIC;failed;FAILED"
     )
 
+    # User ECALLs resume real U-mode registers. Two independent roots share only
+    # RX text, while checked copies, expected protection faults, a call budget
+    # and a machine-timer deadline are validated before the readiness marker.
+    # This new test retains the current-image fixture; it cannot use an old ELF
+    # after a failed compile. The existing capability tests remain unchanged.
+    add_test(
+        NAME kernel.riscv64.user_execution
+        COMMAND "${UMICOM_QEMU_RISCV64}" ${UMICOM_QEMU_RISCV64_ARGUMENTS}
+    )
+    set_tests_properties(
+        kernel.riscv64.user_execution
+        PROPERTIES
+            TIMEOUT 10
+            FIXTURES_REQUIRED kernel_current_image
+            PASS_REGULAR_EXPRESSION "UMICOM_KERNEL_USER_EXECUTION_READY"
+            FAIL_REGULAR_EXPRESSION
+                "UMICOM_KERNEL_FAIL;unexpected-trap;corrupt-page-table;invariant-failure;panic;PANIC;failed;FAILED"
+    )
+
     # Before any QEMU capability test is allowed to run, ask CMake/Ninja to
     # build the current Kernel image incrementally.  This guards against a
     # misleading situation where compilation fails but an older ELF remains in
@@ -411,4 +435,12 @@ endif()
 set_source_files_properties(
     kernel/supervisor_payload.c
     PROPERTIES COMPILE_OPTIONS "-fno-jump-tables"
+)
+
+# User code may access only its isolated text and explicitly mapped data pages.
+# Prevent a compiler-generated jump table or vector constant from referring to
+# ordinary Kernel rodata that is deliberately absent from the user page table.
+set_source_files_properties(
+    kernel/user_payload.c
+    PROPERTIES COMPILE_OPTIONS "-fno-jump-tables;-fno-vectorize;-fno-slp-vectorize"
 )

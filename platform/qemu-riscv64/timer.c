@@ -121,3 +121,12 @@ void UmicomPlatformTimerDisable(UmicomU64 hartId)
      * clears once the MMIO write is observed. */
     UmicomPlatformTimerSetCompare(hartId, farFuture);
 }
+
+/* A temporary execution monitor needs the previous deadline as well as the
+ * current time. Reuse the same register locator as SetCompare: duplicated MMIO
+ * address arithmetic could otherwise make save and restore touch different harts. */
+UmicomU64 UmicomPlatformTimerCompareRead(UmicomU64 hartId)
+{
+    /* This read observes the deadline without acknowledging or changing it. */
+    return *MachineTimeCompareRegister(hartId);
+}
