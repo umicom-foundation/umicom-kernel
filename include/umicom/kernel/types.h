@@ -9,12 +9,14 @@
  *
  * EDUCATIONAL OVERVIEW:
  *   A kernel cannot assume that Windows or Linux headers describe the target
- *   machine correctly.  The types below make the intended widths explicit.
+ *   machine correctly.  The types below make the intended widths explicit and
+ *   allow the compiler to reject a target whose fundamental integer widths do
+ *   not match the assumptions made by the low-level RISC-V implementation.
  *
- *   Early experimental source used short "Umi..." type names.  The canonical
- *   Kernel vocabulary now uses the full "Umicom..." project name.  The legacy
- *   aliases remain at the bottom of this file so previously written source and
- *   educational experiments continue to compile without losing history.
+ *   The active Kernel vocabulary uses the full "Umicom..." project name.
+ *   Short compatibility aliases are deliberately not part of the interface.
+ *   Git history already preserves earlier naming experiments without making
+ *   those experiments part of today's compiled API.
  *
  * AUTHOR AND ORGANISATION:
  *   Sammy Hegab

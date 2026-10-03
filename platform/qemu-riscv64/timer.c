@@ -13,8 +13,8 @@
  *   The relevant memory map for the trap/timer foundation is:
  *
  *     CLINT base        = 0x02000000
- *     MSWI area size    = 0x00004000
- *     MTIMER base       = 0x02004000
+ *     software IRQ area = 0x00004000 bytes
+ *     timer base        = 0x02004000
  *     mtimecmp[hart 0]  = 0x02004000
  *     mtime             = 0x0200bff8
  *
@@ -99,7 +99,10 @@ UmicomU64 UmicomPlatformTimerRead(void)
     return *MachineTimeRegister();
 }
 
-void UmicomPlatformTimerSetCompare(UmicomU64 hartId, UmicomU64 deadline)
+void UmicomPlatformTimerSetCompare(
+    UmicomU64 hartId,
+    UmicomU64 deadline
+)
 {
     /* Program the selected hart's absolute timer deadline.
      *

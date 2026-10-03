@@ -3,18 +3,25 @@
  * File: include/umicom/kernel/platform.h
  *
  * PURPOSE:
- *   Define the small boundary between generic Kernel/architecture code and the
- *   QEMU RISC-V `virt` machine adapter used by the current freestanding Kernel configuration.
+ *   Define the small boundary between architecture-neutral Kernel code and the
+ *   machine adapter that knows the selected platform's device addresses and
+ *   low-level hardware behaviour.
  *
  * EDUCATIONAL OVERVIEW:
- *   Platform adapters own machine addresses and device register layouts.
- *   Generic Kernel code therefore does not need to know where QEMU placed the
- *   UART, timer, test-finisher or physical RAM.
+ *   A Kernel service should not need to know that QEMU places its UART at one
+ *   physical address, its test-finisher at another address, or that the current
+ *   virtual machine has exactly 128 MiB of RAM.  Those facts belong to the
+ *   platform adapter.
  *
- *   Canonical platform interfaces use the full `UmicomPlatform...` spelling.
- *   Earlier short-name mappings are retained at the end of this file as
- *   disabled historical material.  Current implementation and callers use
- *   only the full project name.
+ *   Keeping this contract small also prepares the project for additional
+ *   machines.  A future physical RISC-V board can provide these same operations
+ *   without changing the architecture-neutral console, memory allocator or
+ *   higher Kernel services.
+ *
+ *   The public interface uses the full `UmicomPlatform...` spelling.  No short
+ *   compatibility aliases are active or retained in this header; earlier
+ *   naming experiments remain available through Git history instead of being
+ *   allowed to complicate today's compiled interface.
  *
  * AUTHOR AND ORGANISATION:
  *   Sammy Hegab
@@ -30,40 +37,54 @@
 /* Import fixed-width/address types used by device-facing contracts. */
 #include "umicom/kernel/types.h"
 
-/* Describe one contiguous physical RAM range for the selected platform profile. */
+/* Describe one contiguous physical RAM range for the selected platform profile.
+ *
+ * This deliberately models only the single QEMU RAM region used by the current
+ * machine adapter.  The contract can grow into a region catalogue when device
+ * tree driven hardware discovery requires multiple usable/reserved ranges. */
 typedef struct UmicomPlatformPhysicalMemoryInfo {
     /* First physical byte of usable RAM in the selected machine profile. */
     UmicomAddress base;
 
-    /* Total physical RAM byte count configured for the selected machine profile. */
+    /* Total physical RAM byte count configured for the selected machine. */
     UmicomSize bytes;
 } UmicomPlatformPhysicalMemoryInfo;
 
-/* Configure the earliest polling text-output device. */
+/* Configure the earliest polling text-output device.
+ *
+ * This operation is deliberately usable before interrupts, scheduling,
+ * allocation or virtual memory exist. */
 void UmicomPlatformConsoleInitialize(void);
 
-/* Send one byte to the earliest machine text-output device. */
+/* Send exactly one byte to the earliest machine text-output device. */
 void UmicomPlatformConsoleWriteByte(UmicomU8 value);
 
-/* Read the machine timer's current 64-bit time value. */
+/* Read the machine timer's current monotonically increasing 64-bit time value. */
 UmicomU64 UmicomPlatformTimerRead(void);
 
 /* Program one hart's machine-timer compare register with an absolute deadline. */
-void UmicomPlatformTimerSetCompare(UmicomU64 hartId, UmicomU64 deadline);
+void UmicomPlatformTimerSetCompare(
+    UmicomU64 hartId,
+    UmicomU64 deadline
+);
 
-/* Move one hart's compare value to the maximum so no near-term timer remains. */
+/* Move one hart's compare value far enough into the future that the current
+ * one-shot timer validation cannot remain pending. */
 void UmicomPlatformTimerDisable(UmicomU64 hartId);
 
-/* Terminate the QEMU teaching machine with a successful test result. */
+/* Terminate the QEMU validation machine with a successful guest result.
+ *
+ * This is a test-machine convenience, not the future physical-machine power
+ * interface. */
 void UmicomPlatformFinishSuccess(void);
 
-/* Terminate the QEMU teaching machine with a bounded nonzero failure code. */
+/* Terminate the QEMU validation machine with a bounded nonzero failure code. */
 void UmicomPlatformFinishFailure(UmicomU32 code);
 
-/* Stop useful execution permanently if there is nowhere safe to continue. */
+/* Stop useful execution permanently when there is no safe continuation path. */
 void UmicomPlatformHalt(void);
 
-/* Publish the RAM geometry matched by the selected platform profile. */
+/* Publish the physical RAM geometry matched by the selected platform profile. */
 void UmicomPlatformPhysicalMemoryDescribe(
     UmicomPlatformPhysicalMemoryInfo *outInfo
 );
@@ -114,5 +135,20 @@ void UmicomPlatformPhysicalMemoryDescribe(
 void UmicomPlatformPhysicalMemoryDescribe(
     UmicomPlatformPhysicalMemoryInfo *outInfo
 );
+
+/*
+ * IMPORTANT PRESERVATION NOTE:
+ *
+ * Everything above in this disabled block is retained because it is already
+ * part of the committed source history.  It is deliberately not compiled and
+ * it must not be copied as the pattern for new interfaces.  The active API is
+ * the `UmicomPlatform...` interface declared before this block.
+ *
+ * This `#endif` closes only the historical `#if 0`.  The header guard remains
+ * open until the final `#endif` below.  Keeping those two conditionals separate
+ * fixes the build failure where the historical block accidentally consumed the
+ * header guard's closing directive.
+ */
+#endif /* HISTORICAL SHORT PLATFORM NAMES */
 
 #endif /* UMICOM_KERNEL_PLATFORM_H */

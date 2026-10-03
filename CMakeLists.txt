@@ -3,14 +3,15 @@
 # File: CMakeLists.txt
 #
 # PURPOSE:
-#   Build the original freestanding Umicom Kernel for QEMU's RISC-V "virt"
-#   machine while preserving previously established execution capabilities.
+#   Build the original freestanding Umicom Kernel for QEMU's RISC-V `virt`
+#   machine while preserving the previously established bootstrap, trap,
+#   physical-memory, virtual-memory and hardware-translation capabilities.
 #
 # EDUCATIONAL NOTE:
-#   CMake describes the host-side build and test graph only.  The kernel image
-#   itself is C23 plus the minimum RISC-V Assembly required for bootstrap and
-#   trap entry/return.  No Python, PowerShell or shell script is required by
-#   the kernel build.
+#   CMake describes the host-side build and test graph only.  The Kernel image
+#   itself is C23 plus the minimum RISC-V Assembly required for bootstrap,
+#   traps and privileged address-translation operations.  No Python,
+#   PowerShell or shell script is required by the Kernel build.
 #
 # AUTHOR AND ORGANISATION:
 #   Sammy Hegab
@@ -330,6 +331,45 @@ if(BUILD_TESTING AND UMICOM_QEMU_RISCV64)
             PASS_REGULAR_EXPRESSION "UMICOM_KERNEL_HARDWARE_TRANSLATION_READY"
             FAIL_REGULAR_EXPRESSION
                 "UMICOM_KERNEL_FAIL;unexpected-trap;corrupt-page-table;invariant-failure;panic;PANIC;failed;FAILED"
+    )
+
+    # Before any QEMU capability test is allowed to run, ask CMake/Ninja to
+    # build the current Kernel image incrementally.  This guards against a
+    # misleading situation where compilation fails but an older ELF remains in
+    # the build directory and CTest accidentally runs that stale image.
+    #
+    # This is not a clean rebuild: Ninja still compiles only files affected by
+    # the current source changes.  A failed build causes the fixture to fail,
+    # preventing dependent runtime tests from being treated as evidence for the
+    # current source tree.
+    add_test(
+        NAME kernel.build.current
+        COMMAND
+            "${CMAKE_COMMAND}"
+            --build "${CMAKE_BINARY_DIR}"
+            --target umicom-kernel
+            --parallel 2
+    )
+
+    # Mark the incremental build as a fixture setup shared by all QEMU tests.
+    set_tests_properties(
+        kernel.build.current
+        PROPERTIES
+            TIMEOUT 120
+            FIXTURES_SETUP kernel_current_image
+    )
+
+    # Every runtime capability test depends on the current-image fixture.  If
+    # the compiler or linker rejects the source, CTest will report that build
+    # failure instead of silently launching an older executable.
+    set_tests_properties(
+        kernel.riscv64.boot
+        kernel.riscv64.trap_timer
+        kernel.riscv64.physical_memory
+        kernel.riscv64.virtual_memory
+        kernel.riscv64.hardware_translation
+        PROPERTIES
+            FIXTURES_REQUIRED kernel_current_image
     )
 else()
 

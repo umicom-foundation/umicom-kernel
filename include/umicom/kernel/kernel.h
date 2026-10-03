@@ -7,9 +7,11 @@
  *   portable freestanding C23 Umicom Kernel logic.
  *
  * EDUCATIONAL NOTE:
- *   The architecture bootstrap enters one canonical C23 function after it has
- *   established the stack and zero-initialized storage required by C.  New
- *   Kernel source uses the full Umicom project name consistently.
+ *   The architecture bootstrap enters this function only after it has created
+ *   a valid stack and cleared the BSS region required by the C language.  The
+ *   entry contract intentionally carries only the information already supplied
+ *   by the RISC-V boot environment: the executing hart and the device-tree
+ *   address.
  *
  * AUTHOR AND ORGANISATION:
  *   Sammy Hegab

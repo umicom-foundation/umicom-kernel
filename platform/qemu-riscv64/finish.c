@@ -15,11 +15,11 @@
  *     low 16 bits   = status
  *     high 16 bits  = process/test exit code
  *
- *   Status 0x5555 means PASS.
- *   Status 0x3333 means FAIL.
+ *   Status 0x5555 means PASS and status 0x3333 means FAIL.
  *
- *   This mechanism is only a QEMU test convenience.  A physical Umicom machine
- *   will eventually use proper power/reboot/platform mechanisms instead.
+ *   This is intentionally a validation convenience rather than the future
+ *   physical-machine shutdown interface.  Generic Kernel code asks the
+ *   platform to finish; only this QEMU adapter knows the special MMIO protocol.
  *
  * AUTHOR AND ORGANISATION:
  *   Sammy Hegab
@@ -35,16 +35,16 @@
 /* QEMU `virt` maps the SiFive test-finisher at this physical address. */
 #define UMICOM_QEMU_TEST_BASE ((UmicomAddress)0x00100000ULL)
 
-/* Low 16-bit status accepted by QEMU as a successful guest test completion. */
+/* Low 16-bit status accepted by QEMU as successful guest completion. */
 #define UMICOM_QEMU_FINISHER_PASS ((UmicomU32)0x00005555U)
 
-/* Low 16-bit status accepted by QEMU as a failed guest test completion. */
+/* Low 16-bit status accepted by QEMU as failed guest completion. */
 #define UMICOM_QEMU_FINISHER_FAIL ((UmicomU32)0x00003333U)
 
-/* Only 16 high bits are available for the test exit code. */
+/* Only the high 16 bits are available for the bounded guest exit code. */
 #define UMICOM_QEMU_FINISHER_CODE_MASK ((UmicomU32)0x0000ffffU)
 
-/* Return a volatile pointer to the test-finisher register. */
+/* Return the test-finisher MMIO register as a volatile pointer. */
 static volatile UmicomU32 *TestFinisherRegister(void)
 {
     /* Convert the machine-specific integer MMIO address to a device pointer.

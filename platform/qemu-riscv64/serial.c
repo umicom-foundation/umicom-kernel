@@ -3,13 +3,21 @@
  * File: platform/qemu-riscv64/serial.c
  *
  * PURPOSE:
- *   Drive the NS16550-compatible UART exposed by QEMU's RISC-V "virt" machine.
+ *   Drive the NS16550-compatible UART exposed by QEMU's RISC-V `virt` machine.
  *
- * EDUCATIONAL NOTE:
- *   "MMIO" means memory-mapped input/output.  Reading or writing particular
- *   addresses talks to a device rather than ordinary RAM.  The volatile
- *   qualifier tells the C compiler that those accesses have observable
- *   hardware effects and must not be optimized away like normal memory.
+ * EDUCATIONAL OVERVIEW:
+ *   MMIO means memory-mapped input/output: a load or store to a particular
+ *   physical address communicates with a device rather than ordinary RAM.
+ *
+ *   The `volatile` qualifier is essential for these pointers.  A compiler is
+ *   normally free to remove or combine ordinary memory accesses when it can
+ *   prove the program does not need them.  Device registers have effects
+ *   outside the C abstract machine, so each access must remain visible in the
+ *   generated instructions.
+ *
+ *   The early console deliberately polls the UART instead of using interrupts.
+ *   Polling works before a scheduler or interrupt-driven console service exists
+ *   and gives trap/paging failures a small diagnostic path with few dependencies.
  *
  * AUTHOR AND ORGANISATION:
  *   Sammy Hegab
@@ -22,18 +30,18 @@
 /* Import the first-boot foundation platform declarations and fixed-width integer/address types. */
 #include "umicom/kernel/platform.h"
 
-/* QEMU virt's first NS16550-compatible UART MMIO base address. */
+/* QEMU `virt` maps its first NS16550-compatible UART at this physical address. */
 #define UMICOM_QEMU_UART_BASE ((UmicomAddress)0x10000000ULL)
 
 /* Transmit Holding Register offset.
  *
- * When DLAB is clear, writing this register sends one serial byte.
- * When DLAB is set, the same offset becomes Divisor Latch Low. */
+ * With DLAB clear, writing this byte queues one character for transmission.
+ * With DLAB set, the same address selects the divisor low byte instead. */
 #define UMICOM_UART_THR 0U
 
 /* Interrupt Enable Register offset.
  *
- * When DLAB is set, this same offset becomes Divisor Latch High. */
+ * With DLAB set, this address becomes the divisor high byte. */
 #define UMICOM_UART_IER 1U
 
 /* FIFO Control Register offset. */
@@ -48,16 +56,16 @@
 /* LSR bit indicating the transmitter can accept another byte. */
 #define UMICOM_UART_LSR_TX_EMPTY ((UmicomU8)0x20U)
 
-/* LCR bit exposing divisor-latch registers at offsets 0 and 1. */
+/* LCR bit exposing the divisor-latch registers at offsets 0 and 1. */
 #define UMICOM_UART_LCR_DLAB ((UmicomU8)0x80U)
 
-/* LCR value for 8 data bits, no parity and one stop bit ("8N1"). */
+/* LCR value for eight data bits, no parity and one stop bit (8N1). */
 #define UMICOM_UART_LCR_8N1 ((UmicomU8)0x03U)
 
-/* Return a volatile pointer to one byte-wide UART register.
+/* Convert a register offset into a volatile byte-wide MMIO pointer.
  *
- * Keeping address arithmetic in one helper reduces the chance that different
- * functions accidentally use different MMIO bases. */
+ * Keeping the address calculation in one helper prevents separate console
+ * operations from silently drifting to different device bases. */
 static volatile UmicomU8 *UartRegister(UmicomSize offset)
 {
     /* Add the requested register offset to the device base and convert the
@@ -100,14 +108,16 @@ void UmicomPlatformConsoleWriteByte(UmicomU8 value)
     /* Wait until the line-status register reports that the transmitter can
      * accept a byte.
      *
-     * Busy polling is intentional at the first-boot foundation: interrupts and scheduling do not exist
-     * yet, so there is nothing useful to block/wake a thread. */
+     * Busy polling is intentional here: this path must remain usable when
+     * scheduling, interrupt delivery or a higher-level console service is the
+     * subsystem currently being diagnosed. */
     while (
-        (*UartRegister(UMICOM_UART_LSR) & UMICOM_UART_LSR_TX_EMPTY) == (UmicomU8)0U
+        (*UartRegister(UMICOM_UART_LSR) & UMICOM_UART_LSR_TX_EMPTY) ==
+        (UmicomU8)0U
     ) {
-        /* The empty body is deliberate: reading LSR repeatedly is the wait. */
+        /* Reading the line-status register repeatedly is the complete wait. */
     }
 
-    /* Write the caller's byte into the transmit holding register. */
+    /* Writing THR sends exactly the byte supplied by the caller. */
     *UartRegister(UMICOM_UART_THR) = value;
 }

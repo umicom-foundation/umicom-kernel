@@ -34,8 +34,21 @@ clearly labelled disabled block when practical:
 #endif
 ```
 
-Physical deletion requires an explicit decision rather than being treated as
-ordinary cleanup.
+Physical deletion requires an explicit decision from the project owner rather
+than being treated as ordinary cleanup.
+
+## Do not manufacture historical compatibility code
+
+Source preservation means preserving code that really belonged to the project.
+
+It does not mean inventing compatibility aliases after a rename and then
+retaining those invented aliases as though they were valuable historical
+implementation.
+
+The previously introduced abbreviated-name compatibility aliases were an
+engineering mistake and have been removed by explicit owner direction.  Git
+history already records that mistake; the active source does not need to keep
+repeating it.
 
 ## Full Umicom names are canonical
 
