@@ -82,6 +82,9 @@
 /* Add executable loading on top of the established user-memory boundary. */
 #include "umicom/kernel/process.h"
 
+/* Add owner-scoped lifetime management above the already loaded processes. */
+#include "umicom/kernel/process_registry.h"
+
 /* QEMU's selected CLINT-compatible timer runs at 10 MHz.
  *
  * 100,000 ticks therefore represents approximately 10 ms. */
@@ -1445,6 +1448,10 @@ void UmicomKernelMain(UmicomU64 hartId, UmicomAddress deviceTreeAddress)
     /* Load a separately linked program only after the existing user monitor
      * has passed. This adds a lifetime owner without replacing its trap path. */
     UmicomKernelExecutableLoadingValidate();
+
+    /* Check handle ownership, reduced rights and shared process lifetimes only
+     * after independently loaded programs have returned safely to the Kernel. */
+    UmicomKernelProcessRegistryValidateExecution();
 
     /* Mark the end of deterministic Kernel capability evidence. */
     UmicomKernelConsoleWriteLine("UMICOM_KERNEL_END");

@@ -448,3 +448,7 @@ set_source_files_properties(
 # Build a separate native ELF and exercise its loading/lifetime through the
 # existing user monitor. All established sources and tests remain unchanged.
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/ExecutablePrograms.cmake")
+
+# Own loaded processes through bounded, rights-checked handles without changing
+# the executable loader or the established user execution path.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/ProcessRegistry.cmake")
