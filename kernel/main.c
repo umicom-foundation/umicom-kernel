@@ -79,6 +79,9 @@
 /* Import Sv39 page-table construction, translation and reclamation contracts. */
 #include "umicom/kernel/virtual_memory.h"
 
+/* Add executable loading on top of the established user-memory boundary. */
+#include "umicom/kernel/process.h"
+
 /* QEMU's selected CLINT-compatible timer runs at 10 MHz.
  *
  * 100,000 ticks therefore represents approximately 10 ms. */
@@ -1438,6 +1441,10 @@ void UmicomKernelMain(UmicomU64 hartId, UmicomAddress deviceTreeAddress)
      * returned safely. The private user monitor restores the original machine
      * state and returns all temporary frames before the final completion marker. */
     UmicomKernelUserExecutionValidate();
+
+    /* Load a separately linked program only after the existing user monitor
+     * has passed. This adds a lifetime owner without replacing its trap path. */
+    UmicomKernelExecutableLoadingValidate();
 
     /* Mark the end of deterministic Kernel capability evidence. */
     UmicomKernelConsoleWriteLine("UMICOM_KERNEL_END");

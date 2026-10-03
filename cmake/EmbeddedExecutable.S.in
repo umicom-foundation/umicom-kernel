@@ -1,0 +1,14 @@
+/* Umicom Kernel: an independently linked ELF carried as inert read-only bytes.
+ *
+ * This does not link the program's symbols into the Kernel. The loader must
+ * inspect and copy the embedded file before the user monitor can execute it.
+ * The configured absolute path avoids depending on a build command's CWD.
+ *
+ * Sammy Hegab, Umicom Foundation. MIT licence. */
+    .section .rodata.umicom_executable_image, "a", @progbits
+    .balign 16
+    .global UmicomEmbeddedExecutableStart
+    .global UmicomEmbeddedExecutableEnd
+UmicomEmbeddedExecutableStart:
+    .incbin "@UMICOM_EMBEDDED_EXECUTABLE_FILE@"
+UmicomEmbeddedExecutableEnd:
