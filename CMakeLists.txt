@@ -3,9 +3,8 @@
 # File: CMakeLists.txt
 #
 # PURPOSE:
-#   Build the freestanding Umicom Kernel for QEMU's 64-bit RISC-V `virt`
-#   machine, including bootstrap, traps, machine timer support, physical-memory
-#   ownership and the first Sv39 page-table construction layer.
+#   Build the original freestanding Umicom Kernel for QEMU's RISC-V "virt"
+#   machine while preserving previously established execution capabilities.
 #
 # EDUCATIONAL NOTE:
 #   CMake describes the host-side build and test graph only.  The kernel image
@@ -61,6 +60,10 @@ set(
 #   boot.S
 #       Creates the initial C environment.
 #
+#   mmu.S
+#       Owns privileged satp, PMP, MPRV and sfence.vma operations that cannot be
+#       expressed as ordinary portable C23.
+#
 #   trap.S
 #       Owns the machine trap entry/return sequence because register save/restore
 #       and MRET cannot be expressed safely as ordinary portable C.
@@ -80,6 +83,7 @@ set(
 add_executable(
     umicom-kernel
     arch/riscv64/boot.S
+    arch/riscv64/mmu.S
     arch/riscv64/trap.S
     arch/riscv64/trap.c
     kernel/address.c
@@ -300,6 +304,32 @@ if(BUILD_TESTING AND UMICOM_QEMU_RISCV64)
             PASS_REGULAR_EXPRESSION "UMICOM_KERNEL_VIRTUAL_MEMORY_READY"
             FAIL_REGULAR_EXPRESSION
                 "UMICOM_KERNEL_FAIL;corrupt-page-table;invariant-failure;panic;PANIC;failed;FAILED"
+    )
+
+
+    # Prove that the processor's real Sv39 translation machinery interprets
+    # the page tables produced by the Kernel the same way as the software page
+    # walker.  The validation remains in machine mode and uses MPRV for two
+    # controlled supervisor-effective data accesses, so instruction fetch and
+    # the active Kernel stack are not yet placed behind translated addresses.
+    add_test(
+        NAME kernel.riscv64.hardware_translation
+        COMMAND
+            "${UMICOM_QEMU_RISCV64}"
+            ${UMICOM_QEMU_RISCV64_ARGUMENTS}
+    )
+
+    # The readiness marker is printed only after a translated load returns the
+    # physical seed value, a translated store changes the underlying physical
+    # frame, address translation is disabled again, and all temporary page-table
+    # and data-frame ownership returns to the physical-memory baseline.
+    set_tests_properties(
+        kernel.riscv64.hardware_translation
+        PROPERTIES
+            TIMEOUT 10
+            PASS_REGULAR_EXPRESSION "UMICOM_KERNEL_HARDWARE_TRANSLATION_READY"
+            FAIL_REGULAR_EXPRESSION
+                "UMICOM_KERNEL_FAIL;unexpected-trap;corrupt-page-table;invariant-failure;panic;PANIC;failed;FAILED"
     )
 else()
 

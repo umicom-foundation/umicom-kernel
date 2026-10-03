@@ -216,6 +216,22 @@ UmicomRiscvTrapEntry:
     /* Save mstatus so MRET can restore the intended privilege/interrupt state. */
     sd t0, UMICOM_TRAP_MSTATUS(sp)
 
+    /* Clear MPRV only in the live machine-status CSR before calling C.
+     *
+     * Most traps arrive while MPRV is already clear.  Hardware-translation
+     * validation is different: one deliberate load/store temporarily sets
+     * MPRV so it is checked as supervisor-mode memory access.  If that access
+     * faults, leaving live MPRV set while the trap handler prints diagnostics
+     * could make the handler's own RAM/MMIO accesses use the failing page
+     * tables and recursively trap.
+     *
+     * The original mstatus value remains intact in the software frame above.
+     * A returning trap can therefore restore the interrupted state exactly.
+     * Fatal translation faults do not return; they can still report safely
+     * because the live handler executes with ordinary machine-mode accesses. */
+    li t0, 0x20000
+    csrc mstatus, t0
+
     /* Read mcause to distinguish exception versus interrupt and identify code. */
     csrr t0, mcause
 

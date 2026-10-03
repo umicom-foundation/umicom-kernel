@@ -17,7 +17,10 @@
  *     discover fixed-profile RAM, protect Kernel/DTB pages, allocate/free
  *     physical 4 KiB frames, and prove safety/error cases;
  *     construct, inspect and tear down an Sv39 page-table hierarchy without
- *     enabling CPU address translation yet.
+ *     enabling CPU address translation yet;
+ *     then let the processor perform one supervisor-effective translated load
+ *     and store through that validated hierarchy while machine-mode instruction
+ *     fetch remains deliberately untranslated.
  *
  *   Earlier capability evidence remains in the output so later code cannot
  *   silently break bootstrap, trap or physical-memory behaviour.
@@ -57,14 +60,14 @@
 /* Import the physical page-frame ownership allocator. */
 #include "umicom/kernel/physical_memory.h"
 
-/* Import Sv39 page-table construction and software translation contracts. */
-#include "umicom/kernel/virtual_memory.h"
-
 /* Import platform timer, RAM description and QEMU finish/halt operations. */
 #include "umicom/kernel/platform.h"
 
 /* Import RV64 trap installation, controlled triggers and snapshots. */
 #include "umicom/kernel/riscv64/trap.h"
+
+/* Import the privileged RISC-V helpers used to exercise real Sv39 translation. */
+#include "umicom/kernel/riscv64/mmu.h"
 
 /* Import Sv39 page-table construction, translation and reclamation contracts. */
 #include "umicom/kernel/virtual_memory.h"
@@ -1067,6 +1070,284 @@ static void RunVirtualMemoryTest(void)
     UmicomKernelConsoleWriteLine("virtual-memory-test=pass");
 }
 
+/* Prove that the processor's real Sv39 hardware translation agrees with the
+ * page-table structures already validated by the software walker.
+ *
+ * This deliberately tests DATA translation before supervisor-mode instruction
+ * execution.  The Kernel itself remains in machine mode, while MPRV causes one
+ * load and one store to be checked as supervisor-mode accesses.  That gives us
+ * genuine MMU evidence without moving the current instruction stream, stack,
+ * trap handler or UART behind virtual addresses prematurely. */
+static void RunHardwareAddressTranslationTest(void)
+{
+    /* Announce the hardware-assisted translation section clearly in the serial
+     * transcript so a failure can be distinguished from software table walking. */
+    UmicomKernelConsoleWriteLine("hardware-translation-test=begin");
+
+    /* Capture physical-memory accounting before allocating either the data page
+     * or the page-table frames used by this independent validation hierarchy. */
+    UmicomKernelPhysicalMemorySnapshot baselinePhysical;
+    UmicomKernelMemoryStatus memoryStatus =
+        UmicomKernelPhysicalMemorySnapshotRead(&baselinePhysical);
+
+    /* The physical allocator is the ownership authority beneath every page
+     * table.  If its accounting is unavailable, translation testing must stop. */
+    if (memoryStatus != UMICOM_KERNEL_MEMORY_OK) {
+        FailKernel(
+            (UmicomU32)100U,
+            "hardware-translation-baseline-snapshot"
+        );
+    }
+
+    /* The preceding page-table validation is required to return all of its
+     * temporary frames.  Starting with live allocations would make leak
+     * detection at the end of this test ambiguous. */
+    if (baselinePhysical.allocatedFrames != (UmicomSize)0U) {
+        FailKernel(
+            (UmicomU32)101U,
+            "hardware-translation-baseline-allocation"
+        );
+    }
+
+    /* Start with a visibly empty owner structure.  The address-space creation
+     * routine refuses to overwrite a structure that already owns page tables. */
+    UmicomKernelVirtualAddressSpace space = {
+        (UmicomAddress)0U,
+        (UmicomSize)0U,
+        (UmicomSize)0U,
+        UMICOM_FALSE
+    };
+
+    /* Allocate and clear the root page table through the same ownership path
+     * used by every other virtual address space. */
+    UmicomKernelVirtualMemoryStatus virtualStatus =
+        UmicomKernelVirtualAddressSpaceCreate(&space);
+
+    WriteVirtualMemoryStatusRecord(
+        "hardware-translation.create",
+        virtualStatus
+    );
+
+    if (virtualStatus != UMICOM_KERNEL_VIRTUAL_MEMORY_OK) {
+        FailKernel((UmicomU32)102U, "hardware-translation-create");
+    }
+
+    /* Allocate one ordinary physical page that will hold the value observed
+     * through both its direct physical address and a translated virtual address. */
+    UmicomAddress dataFrame = (UmicomAddress)0U;
+    memoryStatus = UmicomKernelPhysicalMemoryAllocateFrame(&dataFrame);
+
+    WriteMemoryStatusRecord(
+        "hardware-translation.data-frame.allocate",
+        memoryStatus
+    );
+
+    if (memoryStatus != UMICOM_KERNEL_MEMORY_OK) {
+        FailKernel((UmicomU32)103U, "hardware-translation-data-frame");
+    }
+
+    /* Use a lower canonical Sv39 address far away from the current physical
+     * Kernel image.  The address is page aligned and bit 38 is zero, so bits
+     * 63:39 are correctly zero for the lower canonical region. */
+    const UmicomAddress virtualPage =
+        (UmicomAddress)0x0000002000000000ULL;
+
+    /* Seed the physical page while ordinary machine-mode physical addressing
+     * is still in use.  This gives the later translated load a value whose
+     * origin is unambiguous. */
+    volatile UmicomU64 *const physicalWord =
+        (volatile UmicomU64 *)dataFrame;
+
+    const UmicomU64 initialValue =
+        (UmicomU64)0x1122334455667788ULL;
+
+    const UmicomU64 translatedStoreValue =
+        (UmicomU64)0xa5a55a5af0f00f0fULL;
+
+    *physicalWord = initialValue;
+
+    /* Map the page read/write.  Setting both permissions is important because
+     * RISC-V reserves a writable leaf whose read bit is clear. */
+    virtualStatus = UmicomKernelVirtualMemoryMapPage(
+        &space,
+        virtualPage,
+        dataFrame,
+        UMICOM_KERNEL_VIRTUAL_MEMORY_READ |
+        UMICOM_KERNEL_VIRTUAL_MEMORY_WRITE
+    );
+
+    WriteVirtualMemoryStatusRecord(
+        "hardware-translation.map",
+        virtualStatus
+    );
+
+    if (virtualStatus != UMICOM_KERNEL_VIRTUAL_MEMORY_OK) {
+        FailKernel((UmicomU32)104U, "hardware-translation-map");
+    }
+
+    /* Validate the complete hierarchy before giving its root to satp.  This
+     * keeps malformed page-table state away from the hardware walker. */
+    virtualStatus = UmicomKernelVirtualMemoryValidate(&space);
+
+    WriteVirtualMemoryStatusRecord(
+        "hardware-translation.validate",
+        virtualStatus
+    );
+
+    if (virtualStatus != UMICOM_KERNEL_VIRTUAL_MEMORY_OK) {
+        FailKernel((UmicomU32)105U, "hardware-translation-validate");
+    }
+
+    /* MPRV makes the controlled accesses behave as supervisor mode.  On a CPU
+     * implementing PMP, supervisor accesses are also checked by PMP.  Install a
+     * temporary broad, unlocked validation region so this test measures page
+     * translation rather than an unrelated empty PMP policy.
+     *
+     * The helper's documentation is intentionally explicit that this is not a
+     * future production security policy. */
+    UmicomRiscvTranslationValidationPmpEnable();
+
+    /* Select the address space in satp and flush stale translation state.
+     * Machine-mode instruction fetch remains physical; only the controlled
+     * MPRV accesses below use supervisor translation. */
+    UmicomRiscvSv39Activate(space.rootTablePhysicalAddress);
+
+    /* Publish satp so the serial record proves the hardware was not left in
+     * Bare mode during the translated accesses. */
+    const UmicomU64 activeSatp = UmicomRiscvSatpRead();
+
+    WriteHexRecord("hardware-translation.satp", activeSatp);
+
+    /* Confirm the architectural MODE field actually contains Sv39. */
+    const UmicomU64 satpMode =
+        activeSatp >> UMICOM_RISCV_SATP_MODE_SHIFT;
+
+    if (satpMode != UMICOM_RISCV_SATP_MODE_SV39) {
+        /* Disable translation before reporting the failure so ordinary
+         * diagnostics continue from the simplest machine-mode state. */
+        UmicomRiscvAddressTranslationDisable();
+        UmicomRiscvTranslationValidationPmpDisable();
+
+        FailKernel((UmicomU32)106U, "hardware-translation-satp-mode");
+    }
+
+    /* Perform the first real hardware page walk.  The Assembly helper sets
+     * MPRV and MPP=S only around this one load, then restores mstatus exactly. */
+    const UmicomU64 translatedValue =
+        UmicomRiscvLoad64AsSupervisor(virtualPage);
+
+    WriteHexRecord(
+        "hardware-translation.load",
+        translatedValue
+    );
+
+    /* The hardware-translated load must observe the word written directly
+     * through the physical address before satp was activated. */
+    if (translatedValue != initialValue) {
+        UmicomRiscvAddressTranslationDisable();
+        UmicomRiscvTranslationValidationPmpDisable();
+
+        FailKernel((UmicomU32)107U, "hardware-translation-load-value");
+    }
+
+    /* Write a different value through the same virtual mapping.  This tests
+     * write permission and translation rather than only read-only page walks. */
+    UmicomRiscvStore64AsSupervisor(
+        virtualPage,
+        translatedStoreValue
+    );
+
+    /* Return satp to Bare before inspecting the physical address directly.
+     * Machine-mode accesses are normally untranslated already, but explicitly
+     * disabling satp leaves the machine in a simple, auditable state and makes
+     * the test's lifetime boundaries obvious to a reader. */
+    UmicomRiscvAddressTranslationDisable();
+
+    /* Remove the temporary PMP region now that no supervisor-effective
+     * validation access remains. */
+    UmicomRiscvTranslationValidationPmpDisable();
+
+    /* The physical page must now contain the value written through the virtual
+     * address.  This is the strongest simple proof that the store reached the
+     * intended frame rather than merely returning from an instruction. */
+    const UmicomU64 physicalValueAfterStore = *physicalWord;
+
+    WriteHexRecord(
+        "hardware-translation.physical-after-store",
+        physicalValueAfterStore
+    );
+
+    if (physicalValueAfterStore != translatedStoreValue) {
+        FailKernel((UmicomU32)108U, "hardware-translation-store-value");
+    }
+
+    /* Remove the leaf mapping and allow the virtual-memory subsystem to reclaim
+     * any intermediate tables that became empty. */
+    virtualStatus = UmicomKernelVirtualMemoryUnmapPage(
+        &space,
+        virtualPage
+    );
+
+    WriteVirtualMemoryStatusRecord(
+        "hardware-translation.unmap",
+        virtualStatus
+    );
+
+    if (virtualStatus != UMICOM_KERNEL_VIRTUAL_MEMORY_OK) {
+        FailKernel((UmicomU32)109U, "hardware-translation-unmap");
+    }
+
+    /* Destroy the now-empty hierarchy.  This returns its root table to the
+     * physical allocator but deliberately does not free the mapped data frame. */
+    virtualStatus = UmicomKernelVirtualAddressSpaceDestroy(&space);
+
+    WriteVirtualMemoryStatusRecord(
+        "hardware-translation.destroy",
+        virtualStatus
+    );
+
+    if (virtualStatus != UMICOM_KERNEL_VIRTUAL_MEMORY_OK) {
+        FailKernel((UmicomU32)110U, "hardware-translation-destroy");
+    }
+
+    /* The data page remained caller-owned throughout the mapping lifetime, so
+     * free it explicitly after the address space is gone. */
+    memoryStatus = UmicomKernelPhysicalMemoryFreeFrame(dataFrame);
+
+    WriteMemoryStatusRecord(
+        "hardware-translation.data-frame.free",
+        memoryStatus
+    );
+
+    if (memoryStatus != UMICOM_KERNEL_MEMORY_OK) {
+        FailKernel((UmicomU32)111U, "hardware-translation-data-frame-free");
+    }
+
+    /* Re-read physical accounting and prove the MMU validation leaked neither
+     * page-table frames nor its caller-owned test page. */
+    UmicomKernelPhysicalMemorySnapshot finalPhysical;
+    memoryStatus = UmicomKernelPhysicalMemorySnapshotRead(&finalPhysical);
+
+    if (memoryStatus != UMICOM_KERNEL_MEMORY_OK) {
+        FailKernel(
+            (UmicomU32)112U,
+            "hardware-translation-final-snapshot"
+        );
+    }
+
+    if (
+        finalPhysical.allocatedFrames != baselinePhysical.allocatedFrames ||
+        finalPhysical.reservedFrames != baselinePhysical.reservedFrames ||
+        finalPhysical.freeFrames != baselinePhysical.freeFrames
+    ) {
+        FailKernel((UmicomU32)113U, "hardware-translation-frame-leak");
+    }
+
+    /* The CPU's real Sv39 hardware successfully read and wrote the mapped page,
+     * and every temporary ownership relationship returned to its baseline. */
+    UmicomKernelConsoleWriteLine("hardware-translation-test=pass");
+}
+
 void UmicomKernelMain(UmicomU64 hartId, UmicomAddress deviceTreeAddress)
 {
 
@@ -1129,6 +1410,17 @@ void UmicomKernelMain(UmicomU64 hartId, UmicomAddress deviceTreeAddress)
      * table reclamation complete successfully. */
     UmicomKernelConsoleWriteLine("state=virtual-memory-foundation-ready");
     UmicomKernelConsoleWriteLine("UMICOM_KERNEL_VIRTUAL_MEMORY_READY");
+
+    /* Use the validated page-table structures in the processor's real Sv39
+     * translation hardware before attempting any future supervisor-mode
+     * instruction execution. */
+    RunHardwareAddressTranslationTest();
+
+    /* Publish readiness only after both a supervisor-effective translated load
+     * and store reached the intended physical frame and all temporary ownership
+     * returned to the physical-memory baseline. */
+    UmicomKernelConsoleWriteLine("state=hardware-translation-ready");
+    UmicomKernelConsoleWriteLine("UMICOM_KERNEL_HARDWARE_TRANSLATION_READY");
 
     /* Mark the end of deterministic Kernel capability evidence. */
     UmicomKernelConsoleWriteLine("UMICOM_KERNEL_END");
