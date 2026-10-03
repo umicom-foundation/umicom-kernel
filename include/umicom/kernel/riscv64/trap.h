@@ -198,4 +198,37 @@ void UmiRiscvTrapDispatch(UmiRiscvTrapFrame *frame);
 /* Copy the currently recorded K2 trap counters/details to caller-owned memory. */
 void UmiRiscvTrapSnapshotRead(UmiRiscvTrapSnapshot *outSnapshot);
 
+
+/*-------------------------------------------------------------------------
+ * K3 FULL-NAME SOURCE ALIASES
+ *
+ * Preserve the already committed K2 type/function symbols while all new
+ * Umicom Kernel source uses the full project name.
+ *-------------------------------------------------------------------------*/
+
+/* Full-name type alias for the complete machine trap frame. */
+typedef UmiRiscvTrapFrame UmicomRiscvTrapFrame;
+
+/* Full-name type alias for copied trap evidence. */
+typedef UmiRiscvTrapSnapshot UmicomRiscvTrapSnapshot;
+
+/* Full-name constant aliases for architectural trap fields. */
+#define UMICOM_RISCV_MCAUSE_INTERRUPT_BIT UMI_RISCV_MCAUSE_INTERRUPT_BIT
+#define UMICOM_RISCV_EXCEPTION_ECALL_M_MODE UMI_RISCV_EXCEPTION_ECALL_M_MODE
+#define UMICOM_RISCV_INTERRUPT_MACHINE_TIMER UMI_RISCV_INTERRUPT_MACHINE_TIMER
+#define UMICOM_RISCV_MIE_MTIE UMI_RISCV_MIE_MTIE
+#define UMICOM_RISCV_MSTATUS_MIE UMI_RISCV_MSTATUS_MIE
+#define UMICOM_RISCV_MSTATUS_MPIE UMI_RISCV_MSTATUS_MPIE
+
+/* Full-name source aliases for the K2 trap primitives. */
+#define UmicomRiscvTrapInstall UmiRiscvTrapInstall
+#define UmicomRiscvTrapVectorAddress UmiRiscvTrapVectorAddress
+#define UmicomRiscvTriggerMachineEcall UmiRiscvTriggerMachineEcall
+#define UmicomRiscvMachineTimerInterruptEnable UmiRiscvMachineTimerInterruptEnable
+#define UmicomRiscvMachineTimerInterruptDisable UmiRiscvMachineTimerInterruptDisable
+#define UmicomRiscvWaitForInterrupt UmiRiscvWaitForInterrupt
+#define UmicomRiscvReadHartId UmiRiscvReadHartId
+#define UmicomRiscvTrapDispatch UmiRiscvTrapDispatch
+#define UmicomRiscvTrapSnapshotRead UmiRiscvTrapSnapshotRead
+
 #endif /* UMICOM_KERNEL_RISCV64_TRAP_H */

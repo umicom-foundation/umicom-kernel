@@ -31,7 +31,7 @@ Qualified on QEMU RISC-V `virt`:
 
 K1 remains a regression test in later milestones.
 
-## K2 — HAL traps and machine timer — CURRENT BATCH
+## K2 — HAL traps and machine timer — COMPLETE
 
 Deliver:
 
@@ -51,20 +51,39 @@ Exit:
 - one-shot timer cannot remain pending;
 - K1 and K2 CTests both pass.
 
-## K3 — Physical memory foundation
+## K3 — Physical memory foundation — CURRENT BATCH
 
-Planned:
+Deliver:
 
-- physical RAM/kernel/DTB range catalogue;
-- page/frame size decision;
-- frame allocator;
-- reserve/release operations;
-- checked address/range arithmetic;
-- overlap/double-free refusal;
-- allocation accounting;
-- stress/failure cases.
+- full `Umicom...` naming convention for new Kernel APIs with K1/K2 aliases retained;
+- checked physical-address addition/alignment;
+- fixed QEMU 128 MiB RAM profile behind the platform boundary;
+- minimal FDT header validation so DTB pages can be protected;
+- linker Kernel-range protection;
+- 4 KiB physical page/frame decision;
+- bounded dual-bitmap frame allocator;
+- explicit reserve/release operations;
+- reserved-frame and overlap protection;
+- misaligned/out-of-RAM refusal;
+- deterministic frame reuse;
+- double-free and double-release refusal;
+- independent bitmap/accounting invariant validation;
+- K1 + K2 + K3 real-QEMU regression tests.
 
-Do not call this virtual memory.  Page tables are a later milestone.
+Exit:
+
+- Kernel and DTB pages are unavailable to ordinary allocation;
+- 128 MiB / 4 KiB geometry reports 32,768 physical frames;
+- two simultaneous allocations are distinct and page aligned;
+- a released page can be reserved/released and reused deterministically;
+- reserved-frame free, overlapping reserve, double free, double release,
+  misaligned free, address overflow and out-of-RAM reserve are refused;
+- final allocation/reservation accounting returns to the post-bootstrap baseline;
+- allocator invariant recount passes;
+- K1, K2 and K3 CTests all pass.
+
+This remains physical memory only.  K3 does not create page tables or virtual
+address spaces.
 
 ## K4 — Threads and scheduler
 

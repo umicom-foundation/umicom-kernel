@@ -1,4 +1,4 @@
-# K2 CMake preset — field-by-field explanation
+# CMake preset — field-by-field explanation
 
 `CMakePresets.json` must remain valid JSON. JSON does not support ordinary
 comments, so this document explains every field rather than placing invalid
@@ -36,13 +36,14 @@ This is the machine-readable name typed after:
 cmake --preset riscv64-clang-debug
 ```
 
-K2 deliberately preserves the K1 preset name so existing developer muscle
-memory and build paths do not change merely because the kernel milestone grew.
+K3 deliberately preserves the K1/K2 preset name so existing developer muscle
+memory and the incremental build directory do not change merely because the
+Kernel milestone grows.
 
 ## Display name
 
 ```json
-"displayName": "Umicom Kernel K2 - RISC-V 64 Clang Debug"
+"displayName": "Umicom Kernel K3 - RISC-V 64 Clang Debug"
 ```
 
 This is the human-readable description shown by tools that list presets.
@@ -53,8 +54,8 @@ This is the human-readable description shown by tools that list presets.
 "generator": "Ninja"
 ```
 
-CMake generates Ninja build rules. Ninja is a small native build executor and
-does not become part of the kernel image.
+CMake generates Ninja build rules. Ninja is a native host build executor and
+does not become part of the Umicom Kernel image.
 
 ## Binary directory
 
@@ -64,6 +65,10 @@ does not become part of the kernel image.
 
 Generated object files, CMake state, the ELF image and the linker map stay
 under `build/` rather than mixing with source files.
+
+The same build directory is intentionally reused between normal milestones.
+You do not delete it unless there is a specific toolchain/cache/clean-room
+qualification reason.
 
 ## Toolchain file
 
@@ -84,7 +89,7 @@ Loads the cross-compilation description that tells CMake:
 "CMAKE_BUILD_TYPE": "Debug"
 ```
 
-K2 favours teachability and debugger/symbol visibility over release
+K3 favours teachability and debugger/symbol visibility over release
 optimisation.
 
 ## Testing
@@ -93,23 +98,28 @@ optimisation.
 "BUILD_TESTING": "ON"
 ```
 
-Allows CMake to register the real QEMU acceptance tests when
+Allows CMake to register real QEMU acceptance tests when
 `qemu-system-riscv64` is present.
 
-K2 registers:
+K3 registers:
 
 ```text
 kernel.k1.riscv64.qemu_boot
 kernel.k2.riscv64.trap_timer
+kernel.k3.riscv64.physical_memory
 ```
 
 The first protects the original K1 boot path.
 
-The second requires the exception and timer-interrupt milestone to complete.
+The second protects the K2 exception/timer path.
+
+The third requires K3 RAM/Kernel/DTB reservation, allocation/release refusal
+cases, accounting and invariant checks to reach `K3_PHYSICAL_MEMORY_PASS`.
 
 ## Build preset
 
-The build preset points back to the same configure preset, allowing:
+The build preset points back to the same configure preset, allowing incremental
+Ninja builds:
 
 ```powershell
 cmake --build --preset riscv64-clang-debug --parallel 2

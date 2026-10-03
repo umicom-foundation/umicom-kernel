@@ -3,8 +3,8 @@
 # File: CMakeLists.txt
 #
 # PURPOSE:
-#   Build K2 of the original freestanding Umicom Kernel for QEMU's RISC-V
-#   "virt" machine while preserving the complete K1 boot path.
+#   Build K3 of the original freestanding Umicom Kernel for QEMU's RISC-V
+#   "virt" machine while preserving the complete K1/K2 execution paths.
 #
 # EDUCATIONAL NOTE:
 #   CMake describes the host-side build and test graph only.  The kernel image
@@ -39,11 +39,11 @@ set(CMAKE_C_EXTENSIONS OFF)
 # Enable CTest so real QEMU boots can be registered as executable tests.
 include(CTest)
 
-# K2 intentionally supports one execution architecture.  A clear configuration
+# K3 intentionally supports one execution architecture.  A clear configuration
 # failure is safer than accidentally building a host executable.
 if(NOT CMAKE_SYSTEM_PROCESSOR STREQUAL "riscv64")
     message(FATAL_ERROR
-        "K2 currently supports only the riscv64 cross-build preset. "
+        "K3 currently supports only the riscv64 cross-build preset. "
         "Configure with: cmake --preset riscv64-clang-debug")
 endif()
 
@@ -65,21 +65,29 @@ set(
 #       and MRET cannot be expressed safely as ordinary portable C.
 #
 #   trap.c
-#       Decodes trap causes and owns K2's trap policy/state.
+#       Preserves K2 trap cause policy/state as a regression foundation.
 #
-#   kernel/*.c
-#       Architecture-neutral teaching/kernel logic.
+#   kernel/address.c + kernel/device_tree.c + kernel/physical_memory.c
+#       K3 checked-address, DTB-range inspection and physical-frame ownership.
+#
+#   kernel/console.c + kernel/main.c
+#       Architecture-neutral teaching/output/orchestration logic.
 #
 #   platform/qemu-riscv64/*.c
-#       QEMU "virt" MMIO details that generic kernel code must not know.
+#       QEMU "virt" MMIO and fixed K3 RAM-profile details that generic Kernel
+#       allocator code must not know.
 add_executable(
     umicom-kernel
     arch/riscv64/boot.S
     arch/riscv64/trap.S
     arch/riscv64/trap.c
+    kernel/address.c
     kernel/console.c
+    kernel/device_tree.c
     kernel/main.c
+    kernel/physical_memory.c
     platform/qemu-riscv64/finish.c
+    platform/qemu-riscv64/memory.c
     platform/qemu-riscv64/serial.c
     platform/qemu-riscv64/timer.c
 )
@@ -116,10 +124,10 @@ target_include_directories(
 #   Hosted stack-protector runtime support does not exist yet.
 #
 # -fno-pic / -fno-pie
-#   K2 deliberately links at a fixed physical address.
+#   K3 deliberately links at a fixed physical address.
 #
 # -fno-unwind-tables / -fno-asynchronous-unwind-tables
-#   K2 has no unwinder and does not need hosted unwind metadata.
+#   K3 has no unwinder and does not need hosted unwind metadata.
 #
 # Warning flags remain strict because low-level mistakes should be visible.
 target_compile_options(
@@ -192,7 +200,7 @@ find_program(
 # Register real emulator tests only when QEMU actually exists.
 if(BUILD_TESTING AND UMICOM_QEMU_RISCV64)
 
-    # Store the common machine arguments once so K1-regression and K2 tests boot
+    # Store the common machine arguments once so K1, K2 and K3 tests boot
     # exactly the same virtual hardware.
     #
     # aclint=off is explicit even though it is QEMU's current default.  K2's
@@ -213,8 +221,8 @@ if(BUILD_TESTING AND UMICOM_QEMU_RISCV64)
 
     # Preserve the K1 acceptance identity as a regression test.
     #
-    # K2 still has to prove that the original firmware hand-off, Assembly
-    # bootstrap, C23 entry and serial path work.
+    # Every later milestone still has to prove the original firmware hand-off,
+    # Assembly bootstrap, C23 entry and serial path work.
     add_test(
         NAME kernel.k1.riscv64.qemu_boot
         COMMAND
@@ -232,7 +240,7 @@ if(BUILD_TESTING AND UMICOM_QEMU_RISCV64)
                 "UMICOM_KERNEL_FAIL;panic;PANIC;failed;FAILED"
     )
 
-    # Register the new K2 acceptance test.
+    # Preserve the K2 acceptance test as a regression gate.
     #
     # It boots the same image but requires the final marker that can only be
     # reached after both the deliberate M-mode ECALL exception and the real
@@ -254,12 +262,35 @@ if(BUILD_TESTING AND UMICOM_QEMU_RISCV64)
             FAIL_REGULAR_EXPRESSION
                 "UMICOM_KERNEL_FAIL;unexpected-trap;panic;PANIC;failed;FAILED"
     )
+
+    # Register the cumulative K3 physical-memory acceptance test.
+    #
+    # The same real QEMU image must still satisfy K1/K2 and then reach the K3
+    # marker only after RAM/Kernel/DTB reservations, allocator ownership tests,
+    # refusal paths and final invariant/accounting checks all complete.
+    add_test(
+        NAME kernel.k3.riscv64.physical_memory
+        COMMAND
+            "${UMICOM_QEMU_RISCV64}"
+            ${UMICOM_QEMU_RISCV64_ARGUMENTS}
+    )
+
+    # A K3 pass is intentionally stronger than merely allocating one page.
+    # Explicit failure markers and allocator invariant failures must fail CTest.
+    set_tests_properties(
+        kernel.k3.riscv64.physical_memory
+        PROPERTIES
+            TIMEOUT 10
+            PASS_REGULAR_EXPRESSION "K3_PHYSICAL_MEMORY_PASS"
+            FAIL_REGULAR_EXPRESSION
+                "UMICOM_KERNEL_FAIL;invariant-failure;panic;PANIC;failed;FAILED"
+    )
 else()
 
     # Do not invent a passing emulator result when QEMU is absent.
     message(
         STATUS
-        "qemu-system-riscv64 not found: K2 will build, but real QEMU CTests "
+        "qemu-system-riscv64 not found: K3 will build, but real QEMU CTests "
         "are not registered. Install QEMU and re-run the configure step."
     )
 endif()

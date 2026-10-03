@@ -3,11 +3,16 @@
  * File: include/umicom/kernel/console.h
  *
  * PURPOSE:
- *   Publish a tiny machine-independent early diagnostic console.
+ *   Publish the tiny machine-independent early diagnostic console used by the
+ *   first Umicom Kernel milestones.
  *
  * EDUCATIONAL NOTE:
- *   Generic kernel code calls these functions and therefore does not need to
- *   know the QEMU UART address or register layout.
+ *   Generic Kernel code calls these helpers and therefore does not know the
+ *   QEMU UART address or register layout.
+ *
+ *   K1/K2 committed `UmiKernel...` symbols.  K3 preserves those symbols and
+ *   introduces full `UmicomKernel...` source aliases so new code follows the
+ *   agreed full-name convention without silently breaking earlier milestones.
  *
  * AUTHOR AND ORGANISATION:
  *   Sammy Hegab
@@ -20,8 +25,12 @@
 #ifndef UMICOM_KERNEL_CONSOLE_H
 #define UMICOM_KERNEL_CONSOLE_H
 
-/* Import K1 fixed-width integer types used by formatting helpers. */
+/* Import the fixed-width integer types used by formatting helpers. */
 #include "umicom/kernel/types.h"
+
+/*-------------------------------------------------------------------------
+ * K1/K2 HISTORICAL SYMBOL DECLARATIONS
+ *-------------------------------------------------------------------------*/
 
 /* Prepare the platform's earliest available text output device. */
 void UmiKernelConsoleInitialize(void);
@@ -37,5 +46,24 @@ void UmiKernelConsoleWriteHex64(UmiU64 value);
 
 /* Render one unsigned 64-bit value in base-10 without printf/libc. */
 void UmiKernelConsoleWriteUnsigned(UmiU64 value);
+
+/*-------------------------------------------------------------------------
+ * CANONICAL FULL UMICOM SOURCE NAMES
+ *-------------------------------------------------------------------------*/
+
+/* Full-name source alias for early console initialization. */
+#define UmicomKernelConsoleInitialize UmiKernelConsoleInitialize
+
+/* Full-name source alias for raw text output. */
+#define UmicomKernelConsoleWrite UmiKernelConsoleWrite
+
+/* Full-name source alias for one line of output. */
+#define UmicomKernelConsoleWriteLine UmiKernelConsoleWriteLine
+
+/* Full-name source alias for hexadecimal rendering. */
+#define UmicomKernelConsoleWriteHex64 UmiKernelConsoleWriteHex64
+
+/* Full-name source alias for unsigned decimal rendering. */
+#define UmicomKernelConsoleWriteUnsigned UmiKernelConsoleWriteUnsigned
 
 #endif /* UMICOM_KERNEL_CONSOLE_H */

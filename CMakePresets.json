@@ -8,7 +8,7 @@
   "configurePresets": [
     {
       "name": "riscv64-clang-debug",
-      "displayName": "Umicom Kernel K2 - RISC-V 64 Clang Debug",
+      "displayName": "Umicom Kernel - RISC-V64",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/riscv64-clang-debug",
       "toolchainFile": "${sourceDir}/cmake/toolchains/riscv64-clang.cmake",
