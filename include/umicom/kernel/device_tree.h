@@ -3,11 +3,11 @@
  * File: include/umicom/kernel/device_tree.h
  *
  * PURPOSE:
- *   Publish the deliberately small K3 device-tree header inspection contract.
+ *   Publish the deliberately small the physical-memory foundation device-tree header inspection contract.
  *
  * EDUCATIONAL OVERVIEW:
  *   QEMU passes the address of a Flattened Device Tree (FDT/DTB) to the first
- *   RISC-V hart.  K1/K2 only printed that pointer.  K3 needs to protect the
+ *   RISC-V hart.  earlier boot and trap/timer only printed that pointer.  the physical-memory foundation needs to protect the
  *   DTB pages from the physical frame allocator, so it now reads only the
  *   standard header fields required to establish the DTB's byte range.
  *
@@ -33,11 +33,11 @@
 
 /* The v17 FDT header occupies ten 32-bit fields = 40 bytes.
  *
- * K3 only reads the first two fields, but requiring the complete minimum header
+ * the physical-memory foundation only reads the first two fields, but requiring the complete minimum header
  * avoids accepting a truncated blob as a legitimate tree. */
 #define UMICOM_KERNEL_FDT_MINIMUM_HEADER_BYTES ((UmicomSize)40U)
 
-/* Describe only the physical range K3 needs to protect. */
+/* Describe only the physical range the physical-memory foundation needs to protect. */
 typedef struct UmicomKernelDeviceTreeInfo {
     /* Physical address passed by QEMU in the RISC-V a1 register. */
     UmicomAddress address;

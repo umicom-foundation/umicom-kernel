@@ -1,4 +1,4 @@
-# CMake preset — field-by-field explanation
+# the physical-memory foundation CMake preset — field-by-field explanation
 
 `CMakePresets.json` must remain valid JSON. JSON does not support ordinary
 comments, so this document explains every field rather than placing invalid
@@ -36,14 +36,14 @@ This is the machine-readable name typed after:
 cmake --preset riscv64-clang-debug
 ```
 
-K3 deliberately preserves the K1/K2 preset name so existing developer muscle
+the physical-memory foundation deliberately preserves the the first-boot and trap/timer preset name so existing developer muscle
 memory and the incremental build directory do not change merely because the
 Kernel milestone grows.
 
 ## Display name
 
 ```json
-"displayName": "Umicom Kernel K3 - RISC-V 64 Clang Debug"
+"displayName": "Umicom Kernel the physical-memory foundation - RISC-V 64 Clang Debug"
 ```
 
 This is the human-readable description shown by tools that list presets.
@@ -89,7 +89,7 @@ Loads the cross-compilation description that tells CMake:
 "CMAKE_BUILD_TYPE": "Debug"
 ```
 
-K3 favours teachability and debugger/symbol visibility over release
+The Debug configuration favours teachability and debugger/symbol visibility over release
 optimisation.
 
 ## Testing
@@ -101,20 +101,20 @@ optimisation.
 Allows CMake to register real QEMU acceptance tests when
 `qemu-system-riscv64` is present.
 
-K3 registers:
+the physical-memory foundation registers:
 
 ```text
-kernel.k1.riscv64.qemu_boot
-kernel.k2.riscv64.trap_timer
-kernel.k3.riscv64.physical_memory
+kernel.riscv64.boot
+kernel.riscv64.trap_timer
+kernel.riscv64.physical_memory
 ```
 
-The first protects the original K1 boot path.
+The first protects the original the first-boot foundation boot path.
 
-The second protects the K2 exception/timer path.
+The second protects the the trap/timer foundation exception/timer path.
 
-The third requires K3 RAM/Kernel/DTB reservation, allocation/release refusal
-cases, accounting and invariant checks to reach `K3_PHYSICAL_MEMORY_PASS`.
+The third requires the physical-memory foundation RAM/Kernel/DTB reservation, allocation/release refusal
+cases, accounting and invariant checks to reach `the physical-memory foundation_PHYSICAL_MEMORY_PASS`.
 
 ## Build preset
 

@@ -4,7 +4,7 @@
  *
  * PURPOSE:
  *   Inspect enough of the standard Flattened Device Tree header to protect the
- *   QEMU-provided DTB from K3's physical frame allocator.
+ *   QEMU-provided DTB from the physical-memory foundation's physical frame allocator.
  *
  * EDUCATIONAL OVERVIEW:
  *   Device-tree integers are stored in big-endian byte order regardless of the
@@ -12,7 +12,7 @@
  *   each 32-bit field are assembled explicitly rather than dereferenced as a
  *   native `UmicomU32`.
  *
- *   K3 intentionally validates address ranges before dereferencing the DTB.
+ *   the physical-memory foundation intentionally validates address ranges before dereferencing the DTB.
  *   The future trap/page-fault subsystem must not be used as a substitute for
  *   ordinary input validation.
  *
@@ -112,7 +112,7 @@ UmicomBoolean UmicomKernelDeviceTreeInspect(
 
     /* Convert the validated physical address to a byte pointer.
      *
-     * K3 executes with physical addressing and no page tables, so this direct
+     * the physical-memory foundation executes with physical addressing and no page tables, so this direct
      * pointer denotes the same RAM byte. */
     const UmicomU8 *const header =
         (const UmicomU8 *)(UmicomUIntPtr)deviceTreeAddress;
@@ -122,7 +122,7 @@ UmicomBoolean UmicomKernelDeviceTreeInspect(
 
     /* Reject any blob that is not a standard flattened device tree. */
     if (magic != UMICOM_KERNEL_FDT_MAGIC) {
-        /* K3 must not reserve a guessed size from an unrecognised structure. */
+        /* the physical-memory foundation must not reserve a guessed size from an unrecognised structure. */
         return UMICOM_FALSE;
     }
 
@@ -154,7 +154,7 @@ UmicomBoolean UmicomKernelDeviceTreeInspect(
     }
 
     /* The complete DTB must remain within the physical RAM declared by the
-     * selected K3 platform profile. */
+     * selected the physical-memory foundation platform profile. */
     if (deviceTreeEnd > ramEnd) {
         /* Do not let a corrupt totalsize reserve or read outside RAM. */
         return UMICOM_FALSE;

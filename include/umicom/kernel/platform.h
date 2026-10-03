@@ -4,16 +4,17 @@
  *
  * PURPOSE:
  *   Define the small boundary between generic Kernel/architecture code and the
- *   QEMU RISC-V `virt` machine adapter used by K3.
+ *   QEMU RISC-V `virt` machine adapter used by the current freestanding Kernel configuration.
  *
  * EDUCATIONAL OVERVIEW:
  *   Platform adapters own machine addresses and device register layouts.
  *   Generic Kernel code therefore does not need to know where QEMU placed the
  *   UART, timer, test-finisher or physical RAM.
  *
- *   K1/K2 introduced `UmiPlatform...` function symbols.  K3 preserves those
- *   already-committed symbols and publishes full `UmicomPlatform...` source
- *   aliases for new Kernel code.  New K3 APIs use full Umicom names directly.
+ *   Canonical platform interfaces use the full `UmicomPlatform...` spelling.
+ *   Earlier short-name mappings are retained at the end of this file as
+ *   disabled historical material.  Current implementation and callers use
+ *   only the full project name.
  *
  * AUTHOR AND ORGANISATION:
  *   Sammy Hegab
@@ -31,51 +32,57 @@
 
 /* Describe one contiguous physical RAM range for the selected platform profile. */
 typedef struct UmicomPlatformPhysicalMemoryInfo {
-    /* First physical byte of usable RAM in the K3 machine profile. */
+    /* First physical byte of usable RAM in the selected machine profile. */
     UmicomAddress base;
 
-    /* Total physical RAM byte count configured for the K3 machine profile. */
+    /* Total physical RAM byte count configured for the selected machine profile. */
     UmicomSize bytes;
 } UmicomPlatformPhysicalMemoryInfo;
 
-/*-------------------------------------------------------------------------
- * K1/K2 HISTORICAL SYMBOLS
- *
- * These declarations remain because the symbols were already committed and
- * tested.  Canonical full-name aliases follow immediately afterwards.
- *-------------------------------------------------------------------------*/
-
 /* Configure the earliest polling text-output device. */
-void UmiPlatformConsoleInitialize(void);
+void UmicomPlatformConsoleInitialize(void);
 
 /* Send one byte to the earliest machine text-output device. */
-void UmiPlatformConsoleWriteByte(UmiU8 value);
+void UmicomPlatformConsoleWriteByte(UmicomU8 value);
 
 /* Read the machine timer's current 64-bit time value. */
-UmiU64 UmiPlatformTimerRead(void);
+UmicomU64 UmicomPlatformTimerRead(void);
 
 /* Program one hart's machine-timer compare register with an absolute deadline. */
-void UmiPlatformTimerSetCompare(UmiU64 hartId, UmiU64 deadline);
+void UmicomPlatformTimerSetCompare(UmicomU64 hartId, UmicomU64 deadline);
 
 /* Move one hart's compare value to the maximum so no near-term timer remains. */
-void UmiPlatformTimerDisable(UmiU64 hartId);
+void UmicomPlatformTimerDisable(UmicomU64 hartId);
 
 /* Terminate the QEMU teaching machine with a successful test result. */
-void UmiPlatformFinishSuccess(void);
+void UmicomPlatformFinishSuccess(void);
 
 /* Terminate the QEMU teaching machine with a bounded nonzero failure code. */
-void UmiPlatformFinishFailure(UmiU32 code);
+void UmicomPlatformFinishFailure(UmicomU32 code);
 
 /* Stop useful execution permanently if there is nowhere safe to continue. */
-void UmiPlatformHalt(void);
+void UmicomPlatformHalt(void);
 
-/*-------------------------------------------------------------------------
- * CANONICAL FULL UMICOM NAMES FOR NEW KERNEL SOURCE
+/* Publish the RAM geometry matched by the selected platform profile. */
+void UmicomPlatformPhysicalMemoryDescribe(
+    UmicomPlatformPhysicalMemoryInfo *outInfo
+);
+
+/*-----------------------------------------------------------------------------
+ * HISTORICAL SHORT PLATFORM NAMES — RETAINED FOR REVIEW, NOT COMPILED
  *
- * These preprocessor aliases preserve the original K1/K2 binary symbols while
- * allowing all new K3 source to use the full project name.  A future stable
- * native ABI can introduce full-name exported symbols with compatibility
- * wrappers after the ABI itself has been designed deliberately.
+ * Earlier machine adapters used `UmiPlatform...` spellings.  The real active
+ * interface is the full `UmicomPlatform...` API declared above.  The old alias
+ * statements are preserved below inside `#if 0` so they remain part of the
+ * educational source record without changing how current code is compiled.
+ *---------------------------------------------------------------------------*/
+#if 0
+/*-------------------------------------------------------------------------
+ * LEGACY SOURCE-COMPATIBILITY ALIASES
+ *
+ * The aliases point from earlier short spellings to the canonical full Umicom
+ * names.  They preserve old source without allowing new code to regress to the
+ * abbreviated naming convention.
  *-------------------------------------------------------------------------*/
 
 /* Full-name source alias for early console setup. */

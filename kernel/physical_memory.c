@@ -3,7 +3,7 @@
  * File: kernel/physical_memory.c
  *
  * PURPOSE:
- *   Implement K3's first bounded physical page-frame allocator.
+ *   Implement the physical-memory foundation's first bounded physical page-frame allocator.
  *
  * EDUCATIONAL OVERVIEW:
  *   This allocator is intentionally simple enough to inspect completely:
@@ -419,7 +419,7 @@ UmicomKernelMemoryStatus UmicomKernelPhysicalMemoryInitialize(
     if (
         (ramBytes % UMICOM_KERNEL_PAGE_SIZE) != (UmicomSize)0U
     ) {
-        /* K3 refuses an incomplete tail page rather than silently dropping it. */
+        /* the physical-memory foundation refuses an incomplete tail page rather than silently dropping it. */
         return UMICOM_KERNEL_MEMORY_INVALID_ALIGNMENT;
     }
 
@@ -574,7 +574,7 @@ UmicomKernelMemoryStatus UmicomKernelPhysicalMemoryReleaseReservedRange(
             return UMICOM_KERNEL_MEMORY_NOT_RESERVED;
         }
 
-        /* Reserved and allocated simultaneously would violate K3's core model. */
+        /* Reserved and allocated simultaneously would violate the physical-memory foundation's core model. */
         if (BitmapRead(gAllocatedBitmap, frameIndex) != UMICOM_FALSE) {
             /* Expose corruption instead of trying to guess which owner wins. */
             return UMICOM_KERNEL_MEMORY_INVARIANT_FAILURE;
@@ -777,7 +777,7 @@ UmicomKernelMemoryStatus UmicomKernelPhysicalMemoryValidate(void)
         const UmicomBoolean isAllocated =
             BitmapRead(gAllocatedBitmap, frameIndex);
 
-        /* A page may never have two owners in K3's model. */
+        /* A page may never have two owners in the physical-memory foundation's model. */
         if (isReserved != UMICOM_FALSE && isAllocated != UMICOM_FALSE) {
             /* This is direct allocator metadata corruption. */
             return UMICOM_KERNEL_MEMORY_INVARIANT_FAILURE;
@@ -814,7 +814,7 @@ UmicomKernelMemoryStatus UmicomKernelPhysicalMemoryValidate(void)
         return UMICOM_KERNEL_MEMORY_INVARIANT_FAILURE;
     }
 
-    /* Every K3 ownership/accounting invariant currently holds. */
+    /* Every the physical-memory foundation ownership/accounting invariant currently holds. */
     return UMICOM_KERNEL_MEMORY_OK;
 }
 

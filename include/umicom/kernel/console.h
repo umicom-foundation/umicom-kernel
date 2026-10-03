@@ -4,15 +4,16 @@
  *
  * PURPOSE:
  *   Publish the tiny machine-independent early diagnostic console used by the
- *   first Umicom Kernel milestones.
+ *   early Umicom Kernel startup and diagnostic paths.
  *
  * EDUCATIONAL NOTE:
  *   Generic Kernel code calls these helpers and therefore does not know the
  *   QEMU UART address or register layout.
  *
- *   K1/K2 committed `UmiKernel...` symbols.  K3 preserves those symbols and
- *   introduces full `UmicomKernel...` source aliases so new code follows the
- *   agreed full-name convention without silently breaking earlier milestones.
+ *   Canonical Kernel interfaces use the full `UmicomKernel...` project name.
+ *   The older short-name mappings are retained at the end of this header in a
+ *   disabled historical block.  They remain readable, but they no longer take
+ *   part in compilation.
  *
  * AUTHOR AND ORGANISATION:
  *   Sammy Hegab
@@ -28,27 +29,36 @@
 /* Import the fixed-width integer types used by formatting helpers. */
 #include "umicom/kernel/types.h"
 
-/*-------------------------------------------------------------------------
- * K1/K2 HISTORICAL SYMBOL DECLARATIONS
- *-------------------------------------------------------------------------*/
-
 /* Prepare the platform's earliest available text output device. */
-void UmiKernelConsoleInitialize(void);
+void UmicomKernelConsoleInitialize(void);
 
 /* Write a NUL-terminated string without automatically adding a new line. */
-void UmiKernelConsoleWrite(const char *text);
+void UmicomKernelConsoleWrite(const char *text);
 
 /* Write a NUL-terminated string followed by CR+LF. */
-void UmiKernelConsoleWriteLine(const char *text);
+void UmicomKernelConsoleWriteLine(const char *text);
 
 /* Render one 64-bit value as exactly sixteen hexadecimal digits with 0x. */
-void UmiKernelConsoleWriteHex64(UmiU64 value);
+void UmicomKernelConsoleWriteHex64(UmicomU64 value);
 
 /* Render one unsigned 64-bit value in base-10 without printf/libc. */
-void UmiKernelConsoleWriteUnsigned(UmiU64 value);
+void UmicomKernelConsoleWriteUnsigned(UmicomU64 value);
 
+/*-----------------------------------------------------------------------------
+ * HISTORICAL SHORT CONSOLE NAMES — RETAINED FOR REVIEW, NOT COMPILED
+ *
+ * The earlier console interface used the abbreviated `UmiKernel...` spelling.
+ * The active declarations above are the real `UmicomKernel...` functions.
+ * The old preprocessor aliases are kept exactly as historical reference, but
+ * they are disabled so the compiler can never make the short spelling the
+ * working interface by accident.
+ *---------------------------------------------------------------------------*/
+#if 0
 /*-------------------------------------------------------------------------
- * CANONICAL FULL UMICOM SOURCE NAMES
+ * LEGACY SOURCE-COMPATIBILITY ALIASES
+ *
+ * These aliases intentionally point from the earlier short spelling to the
+ * canonical full Umicom names.  New Kernel source must use the full names.
  *-------------------------------------------------------------------------*/
 
 /* Full-name source alias for early console initialization. */
@@ -65,5 +75,7 @@ void UmiKernelConsoleWriteUnsigned(UmiU64 value);
 
 /* Full-name source alias for unsigned decimal rendering. */
 #define UmicomKernelConsoleWriteUnsigned UmiKernelConsoleWriteUnsigned
+
+#endif
 
 #endif /* UMICOM_KERNEL_CONSOLE_H */

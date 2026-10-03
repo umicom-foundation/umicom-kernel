@@ -3,14 +3,14 @@
  * File: platform/qemu-riscv64/timer.c
  *
  * PURPOSE:
- *   Provide the K2 machine-timer MMIO adapter for QEMU's RISC-V "virt" machine
+ *   Provide the the trap/timer foundation machine-timer MMIO adapter for QEMU's RISC-V "virt" machine
  *   while keeping QEMU/CLINT addresses outside generic kernel code.
  *
  * EDUCATIONAL OVERVIEW:
  *   QEMU's `virt` machine exposes a SiFive-compatible CLINT when
  *   `-machine virt,aclint=off` is selected.
  *
- *   The relevant memory map for K2 is:
+ *   The relevant memory map for the trap/timer foundation is:
  *
  *     CLINT base        = 0x02000000
  *     MSWI area size    = 0x00004000
@@ -43,63 +43,63 @@
 #include "umicom/kernel/platform.h"
 
 /* QEMU `virt` places its CLINT-compatible region at this physical address. */
-#define UMI_QEMU_CLINT_BASE ((UmiAddress)0x02000000ULL)
+#define UMICOM_QEMU_CLINT_BASE ((UmicomAddress)0x02000000ULL)
 
 /* QEMU reserves the first 0x4000 CLINT bytes for machine software interrupt
  * registers before the machine-timer block begins. */
-#define UMI_QEMU_CLINT_MSWI_SIZE ((UmiAddress)0x00004000ULL)
+#define UMICOM_QEMU_CLINT_MSWI_SIZE ((UmicomAddress)0x00004000ULL)
 
 /* The machine-timer block therefore begins immediately after the MSWI region. */
-#define UMI_QEMU_MTIMER_BASE \
-    (UMI_QEMU_CLINT_BASE + UMI_QEMU_CLINT_MSWI_SIZE)
+#define UMICOM_QEMU_MTIMER_BASE \
+    (UMICOM_QEMU_CLINT_BASE + UMICOM_QEMU_CLINT_MSWI_SIZE)
 
 /* Inside QEMU's MTIMER block, the first compare register begins at offset 0. */
-#define UMI_QEMU_MTIMECMP_OFFSET ((UmiAddress)0x00000000ULL)
+#define UMICOM_QEMU_MTIMECMP_OFFSET ((UmicomAddress)0x00000000ULL)
 
 /* Each hart owns one 64-bit mtimecmp register, so compare slots are 8 bytes. */
-#define UMI_QEMU_MTIMECMP_STRIDE ((UmiAddress)8ULL)
+#define UMICOM_QEMU_MTIMECMP_STRIDE ((UmicomAddress)8ULL)
 
 /* QEMU's ACLINT/CLINT-compatible timer model places mtime at offset 0x7ff8
  * from the MTIMER block base. */
-#define UMI_QEMU_MTIME_OFFSET ((UmiAddress)0x00007ff8ULL)
+#define UMICOM_QEMU_MTIME_OFFSET ((UmicomAddress)0x00007ff8ULL)
 
 /* Return a volatile pointer to the single shared 64-bit mtime counter. */
-static volatile UmiU64 *MachineTimeRegister(void)
+static volatile UmicomU64 *MachineTimeRegister(void)
 {
     /* Add the platform-defined timer offset to the MTIMER base, then convert
      * the integer address to a volatile 64-bit MMIO pointer. */
-    return (volatile UmiU64 *)(UMI_QEMU_MTIMER_BASE + UMI_QEMU_MTIME_OFFSET);
+    return (volatile UmicomU64 *)(UMICOM_QEMU_MTIMER_BASE + UMICOM_QEMU_MTIME_OFFSET);
 }
 
 /* Return a volatile pointer to one hart's 64-bit mtimecmp register. */
-static volatile UmiU64 *MachineTimeCompareRegister(UmiU64 hartId)
+static volatile UmicomU64 *MachineTimeCompareRegister(UmicomU64 hartId)
 {
     /* Convert the logical hart index into its byte offset.
      *
-     * K2 starts only hart 0, but keeping the stride formula explicit teaches
+     * the trap/timer foundation starts only hart 0, but keeping the stride formula explicit teaches
      * how the per-hart timer register bank is organised for later SMP work. */
-    const UmiAddress hartOffset =
-        (UmiAddress)hartId * UMI_QEMU_MTIMECMP_STRIDE;
+    const UmicomAddress hartOffset =
+        (UmicomAddress)hartId * UMICOM_QEMU_MTIMECMP_STRIDE;
 
     /* Add the MTIMER base, compare-register offset and hart-specific stride. */
-    const UmiAddress registerAddress =
-        UMI_QEMU_MTIMER_BASE +
-        UMI_QEMU_MTIMECMP_OFFSET +
+    const UmicomAddress registerAddress =
+        UMICOM_QEMU_MTIMER_BASE +
+        UMICOM_QEMU_MTIMECMP_OFFSET +
         hartOffset;
 
     /* Return a volatile pointer because reading/writing the location affects
      * emulated hardware rather than ordinary RAM. */
-    return (volatile UmiU64 *)registerAddress;
+    return (volatile UmicomU64 *)registerAddress;
 }
 
-UmiU64 UmiPlatformTimerRead(void)
+UmicomU64 UmicomPlatformTimerRead(void)
 {
     /* Dereference the MMIO mtime register exactly once and return its current
      * 64-bit wall-clock tick value to the caller. */
     return *MachineTimeRegister();
 }
 
-void UmiPlatformTimerSetCompare(UmiU64 hartId, UmiU64 deadline)
+void UmicomPlatformTimerSetCompare(UmicomU64 hartId, UmicomU64 deadline)
 {
     /* Program the selected hart's absolute timer deadline.
      *
@@ -108,13 +108,13 @@ void UmiPlatformTimerSetCompare(UmiU64 hartId, UmiU64 deadline)
     *MachineTimeCompareRegister(hartId) = deadline;
 }
 
-void UmiPlatformTimerDisable(UmiU64 hartId)
+void UmicomPlatformTimerDisable(UmicomU64 hartId)
 {
     /* Use the largest representable 64-bit value as a practical "far future"
      * deadline for this early one-shot teaching timer. */
-    const UmiU64 farFuture = ~(UmiU64)0U;
+    const UmicomU64 farFuture = ~(UmicomU64)0U;
 
     /* Move the compare threshold away so the current timer interrupt condition
      * clears once the MMIO write is observed. */
-    UmiPlatformTimerSetCompare(hartId, farFuture);
+    UmicomPlatformTimerSetCompare(hartId, farFuture);
 }

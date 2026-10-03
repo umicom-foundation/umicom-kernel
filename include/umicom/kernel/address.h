@@ -3,14 +3,14 @@
  * File: include/umicom/kernel/address.h
  *
  * PURPOSE:
- *   Publish the checked physical-address arithmetic helpers introduced by K3.
+ *   Publish the checked physical-address arithmetic helpers introduced by the physical-memory foundation.
  *
  * EDUCATIONAL OVERVIEW:
  *   Kernel address calculations must never rely on unsigned wrap-around being
  *   harmless.  A wrapped range could make a huge or out-of-range region look
  *   small and valid, which is particularly dangerous in a memory allocator.
  *
- *   K3 therefore performs additions and alignment through explicit checked
+ *   the physical-memory foundation therefore performs additions and alignment through explicit checked
  *   helpers before the physical-memory manager trusts a range.
  *
  * AUTHOR AND ORGANISATION:

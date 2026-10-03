@@ -95,6 +95,35 @@ The project studies operating-system concepts and public documentation from GNU/
 
 Do not copy source simply to reproduce a feature.
 
+## Current implemented foundations
+
+The active RISC-V research profile currently demonstrates:
+
+- freestanding machine-mode boot into C23;
+- early serial diagnostics;
+- synchronous exception handling and machine-timer interrupts;
+- physical page-frame ownership and reservation;
+- construction, validation and software translation of Sv39 4 KiB page tables.
+
+Address translation is not enabled in hardware yet; the page-table subsystem is
+being validated before supervisor/user execution activates virtual addressing.
+
+Educational guides are organised by capability rather than development batch:
+
+- `docs/FIRST_BOOT.md`;
+- `docs/TRAPS_AND_TIMER.md`;
+- `docs/PHYSICAL_MEMORY.md`;
+- `docs/VIRTUAL_MEMORY.md`;
+- `docs/BUILD_AND_TEST.md`.
+
+## Source naming and comments
+
+New Kernel APIs use the full `Umicom...` name.  Temporary batch numbers, build
+labels and chronology do not belong in API names or implementation comments.
+Git history records when work was introduced; source comments explain behaviour,
+ownership, architecture and failure rules so the code remains useful to future
+developers.
+
 ## Current production relationship
 
 Umicom Kernel is not silently selected by an Umicom OS release profile.

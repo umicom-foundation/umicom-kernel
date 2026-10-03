@@ -21,7 +21,7 @@ umicom-kernel
 
 Never add `umicom-kernel` as a submodule of Framework or Applications.
 
-After the first native-kernel integration milestone, `umicom-os` may pin it under a clearly experimental path, for example:
+After the first native-kernel integration stage, `umicom-os` may pin it under a clearly experimental path, for example:
 
 ```text
 umicom-os/

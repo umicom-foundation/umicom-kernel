@@ -3,10 +3,10 @@
  * File: include/umicom/kernel/physical_memory.h
  *
  * PURPOSE:
- *   Publish K3's first physical page-frame allocator and accounting contract.
+ *   Publish the physical-memory foundation's first physical page-frame allocator and accounting contract.
  *
  * EDUCATIONAL OVERVIEW:
- *   Physical memory is the RAM hardware actually provides.  K3 does NOT create
+ *   Physical memory is the RAM hardware actually provides.  the physical-memory foundation does NOT create
  *   virtual address spaces or page tables.  It divides one RAM range into
  *   fixed 4 KiB frames and records whether each frame is:
  *
@@ -15,7 +15,7 @@
  *     - currently free.
  *
  *   Two separate bitmaps are used so "reserved" and "allocated" never become
- *   ambiguous.  This allows K3 to refuse attempts to free Kernel/DTB memory and
+ *   ambiguous.  This allows the physical-memory foundation to refuse attempts to free Kernel/DTB memory and
  *   to detect a caller freeing the same allocated frame twice.
  *
  * AUTHOR AND ORGANISATION:
@@ -32,15 +32,15 @@
 /* Import the full Umicom low-level types. */
 #include "umicom/kernel/types.h"
 
-/* K3 selects the conventional 4 KiB physical frame size.
+/* the physical-memory foundation selects the conventional 4 KiB physical frame size.
  *
  * The later virtual-memory milestone may map these frames in different ways,
- * but it will not silently redefine what K3 calls one physical frame. */
+ * but it will not silently redefine what the physical-memory foundation calls one physical frame. */
 #define UMICOM_KERNEL_PAGE_SIZE ((UmicomSize)4096U)
 
 /* Keep the first allocator deliberately bounded and statically allocated.
  *
- * 65,536 frames * 4 KiB = 256 MiB of representable RAM.  The K3 QEMU profile
+ * 65,536 frames * 4 KiB = 256 MiB of representable RAM.  The the physical-memory foundation QEMU profile
  * uses 128 MiB, so this provides headroom without dynamic metadata allocation. */
 #define UMICOM_KERNEL_PHYSICAL_MAX_FRAMES ((UmicomSize)65536U)
 
@@ -61,7 +61,7 @@ typedef enum UmicomKernelMemoryStatus {
     /* A requested byte/frame range lies outside the configured RAM range. */
     UMICOM_KERNEL_MEMORY_OUTSIDE_RAM = 4,
 
-    /* The statically bounded K3 bitmap cannot describe that many frames. */
+    /* The statically bounded the physical-memory foundation bitmap cannot describe that many frames. */
     UMICOM_KERNEL_MEMORY_CAPACITY_EXCEEDED = 5,
 
     /* Reservation overlaps a frame that is already reserved or allocated. */
@@ -94,7 +94,7 @@ typedef struct UmicomKernelPhysicalMemorySnapshot {
     /* Total byte count represented by the configured RAM range. */
     UmicomSize ramBytes;
 
-    /* Fixed K3 page/frame size, currently 4096 bytes. */
+    /* Fixed the physical-memory foundation page/frame size, currently 4096 bytes. */
     UmicomSize pageBytes;
 
     /* Number of frames represented by the configured RAM range. */
@@ -122,7 +122,7 @@ UmicomKernelMemoryStatus UmicomKernelPhysicalMemoryInitialize(
 
 /* Reserve every page touched by the supplied byte range.
  *
- * The operation is transactional: K3 first proves that the complete range is
+ * The operation is transactional: the physical-memory foundation first proves that the complete range is
  * free of existing reservations/allocations, then changes the bitmap. */
 UmicomKernelMemoryStatus UmicomKernelPhysicalMemoryReserveRange(
     UmicomAddress base,
@@ -131,7 +131,7 @@ UmicomKernelMemoryStatus UmicomKernelPhysicalMemoryReserveRange(
 
 /* Release every page touched by a previously reserved byte range.
  *
- * The complete range must currently be reserved.  K3 refuses partial release
+ * The complete range must currently be reserved.  the physical-memory foundation refuses partial release
  * if any page in the range is not reserved. */
 UmicomKernelMemoryStatus UmicomKernelPhysicalMemoryReleaseReservedRange(
     UmicomAddress base,

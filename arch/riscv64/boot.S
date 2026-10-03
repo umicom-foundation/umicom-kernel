@@ -43,7 +43,7 @@
 _start:
     /* Read the hardware-thread ("hart") identifier from the mhartid CSR.
      *
-     * QEMU can emulate more than one RISC-V hart.  K1 deliberately boots only
+     * QEMU can emulate more than one RISC-V hart.  the first-boot foundation deliberately boots only
      * hart 0 so two processors cannot race through global early initialisation.
      * Store the ID in s1 so it survives the remaining bootstrap work. */
     csrr s1, mhartid
@@ -53,14 +53,14 @@ _start:
 
     /* Clear the machine interrupt-enable CSR.
      *
-     * K1 has not installed a trap vector, so accepting interrupts now would
+     * the first-boot foundation has not installed a trap vector, so accepting interrupts now would
      * transfer control to an undefined handler address. */
     csrw mie, zero
 
     /* QEMU's RISC-V direct boot provides a device-tree blob address in a1.
      *
      * The future kernel will parse this structure instead of hard-coding every
-     * device address.  K1 only reports the pointer, so preserve it in s2 while
+     * device address.  the first-boot foundation only reports the pointer, so preserve it in s2 while
      * we reuse argument registers during startup. */
     mv s2, a1
 
@@ -98,7 +98,7 @@ _start:
 
 .Lbss_ready:
     /* The RISC-V C calling convention passes the first argument in a0.
-     * Give UmiKernelMain() the boot hart ID. */
+     * Give UmicomKernelMain() the boot hart ID. */
     mv a0, s1
 
     /* The second C argument uses a1.
@@ -109,12 +109,12 @@ _start:
      *
      * "call" records a return address even though a successful kernel should
      * never return to this bootstrap code. */
-    call UmiKernelMain
+    call UmicomKernelMain
 
 .Lpark:
     /* WFI means "Wait For Interrupt".
      *
-     * Interrupts are disabled in K1, so this acts as a low-activity halt point
+     * Interrupts are disabled in the first-boot foundation, so this acts as a low-activity halt point
      * for secondary harts or the impossible case where KernelMain returns. */
     wfi
 

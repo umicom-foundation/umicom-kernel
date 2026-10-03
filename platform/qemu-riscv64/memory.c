@@ -3,10 +3,10 @@
  * File: platform/qemu-riscv64/memory.c
  *
  * PURPOSE:
- *   Describe the physical RAM profile used by the K3 QEMU RISC-V `virt` test.
+ *   Describe the physical RAM profile used by the the physical-memory foundation QEMU RISC-V `virt` test.
  *
  * EDUCATIONAL OVERVIEW:
- *   still runs one deliberately fixed machine profile:
+ *   the physical-memory foundation still runs one deliberately fixed machine profile:
  *
  *     QEMU machine:  virt
  *     command:       -m 128M
@@ -14,7 +14,7 @@
  *     RAM bytes:     128 MiB
  *
  *   Later hardware-discovery work will derive memory regions from validated
- *   firmware/device-tree information.  K3 keeps this platform fact inside the
+ *   firmware/device-tree information.  the physical-memory foundation keeps this platform fact inside the
  *   QEMU adapter instead of leaking it into the generic allocator.
  *
  * AUTHOR AND ORGANISATION:
@@ -31,7 +31,7 @@
 /* QEMU RISC-V `virt` begins DRAM at physical address 0x80000000. */
 #define UMICOM_QEMU_RISCV64_RAM_BASE ((UmicomAddress)0x80000000ULL)
 
-/* test command configures exactly 128 MiB of guest RAM. */
+/* the physical-memory foundation's test command configures exactly 128 MiB of guest RAM. */
 #define UMICOM_QEMU_RISCV64_RAM_BYTES \
     ((UmicomSize)128U * (UmicomSize)1024U * (UmicomSize)1024U)
 
@@ -48,6 +48,6 @@ void UmicomPlatformPhysicalMemoryDescribe(
     /* Publish QEMU `virt`'s documented first DRAM byte. */
     outInfo->base = UMICOM_QEMU_RISCV64_RAM_BASE;
 
-    /* Publish the exact RAM byte count matched by the K3 `-m 128M` command. */
+    /* Publish the exact RAM byte count matched by the the physical-memory foundation `-m 128M` command. */
     outInfo->bytes = UMICOM_QEMU_RISCV64_RAM_BYTES;
 }

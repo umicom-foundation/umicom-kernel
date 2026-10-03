@@ -11,10 +11,10 @@
  *   A kernel cannot assume that Windows or Linux headers describe the target
  *   machine correctly.  The types below make the intended widths explicit.
  *
- *   K1 and K2 originally used short "Umi..." type names.  K3 establishes the
- *   full "Umicom..." naming convention requested for new Kernel development.
- *   The original aliases remain at the bottom of this file so already
- *   committed K1/K2 source and any early experiments continue to compile.
+ *   Early experimental source used short "Umi..." type names.  The canonical
+ *   Kernel vocabulary now uses the full "Umicom..." project name.  The legacy
+ *   aliases remain at the bottom of this file so previously written source and
+ *   educational experiments continue to compile without losing history.
  *
  * AUTHOR AND ORGANISATION:
  *   Sammy Hegab
@@ -29,7 +29,7 @@
 
 /* Unsigned 8-bit integer.
  *
- * K3 uses this for raw bytes and byte-wide device/bitmap fields. */
+ * The Kernel uses this for raw bytes and byte-wide device/bitmap fields. */
 typedef unsigned char UmicomU8;
 
 /* Unsigned 16-bit integer for fixed-width protocol or hardware values. */
@@ -64,7 +64,7 @@ typedef UmicomU64 UmicomSize;
 
 /* Integer representation of a physical or virtual address.
  *
- * K3 manages only physical addresses, but using one explicit address type keeps
+ * The current memory manager starts with physical addresses, but using one explicit address type keeps
  * later API reviews clear about when virtual-address support is introduced. */
 typedef UmicomUIntPtr UmicomAddress;
 
@@ -110,42 +110,58 @@ _Static_assert(
     "UmicomUIntPtr must occupy exactly 8 bytes on RV64"
 );
 
+/*-----------------------------------------------------------------------------
+ * HISTORICAL SHORT-NAME DEFINITIONS — RETAINED FOR REVIEW, NOT COMPILED
+ *
+ * Earlier experimental source used the shorter `Umi...` type names shown
+ * below.  The active Kernel now uses the full `Umicom...` names declared
+ * above.  The historical definitions are deliberately kept in this file so a
+ * new developer can see how the naming evolved and so Beyond Compare/Git
+ * history remains easy to follow.
+ *
+ * They are disabled instead of being deleted.  Re-enabling them would require
+ * an explicit compatibility decision; new Kernel code must use the full
+ * `Umicom...` names.
+ *---------------------------------------------------------------------------*/
+#if 0
 /*-------------------------------------------------------------------------
- * K1/K2 SOURCE-COMPATIBILITY ALIASES
+ * LEGACY SOURCE-COMPATIBILITY ALIASES
  *
  * Do not remove these aliases merely to make the source look newer.  They
  * preserve the already committed educational milestones while new code adopts
  * the full Umicom names.
  *-------------------------------------------------------------------------*/
 
-/* Historical K1/K2 unsigned byte alias. */
+/* Legacy unsigned byte alias. */
 typedef UmicomU8 UmiU8;
 
-/* Historical K1/K2 unsigned 16-bit alias. */
+/* Legacy unsigned 16-bit alias. */
 typedef UmicomU16 UmiU16;
 
-/* Historical K1/K2 unsigned 32-bit alias. */
+/* Legacy unsigned 32-bit alias. */
 typedef UmicomU32 UmiU32;
 
-/* Historical K1/K2 unsigned 64-bit alias. */
+/* Legacy unsigned 64-bit alias. */
 typedef UmicomU64 UmiU64;
 
-/* Historical K1/K2 signed 8-bit alias. */
+/* Legacy signed 8-bit alias. */
 typedef UmicomI8 UmiI8;
 
-/* Historical K1/K2 signed 16-bit alias. */
+/* Legacy signed 16-bit alias. */
 typedef UmicomI16 UmiI16;
 
-/* Historical K1/K2 signed 32-bit alias. */
+/* Legacy signed 32-bit alias. */
 typedef UmicomI32 UmiI32;
 
-/* Historical K1/K2 signed 64-bit alias. */
+/* Legacy signed 64-bit alias. */
 typedef UmicomI64 UmiI64;
 
-/* Historical K1/K2 size alias. */
+/* Legacy size alias. */
 typedef UmicomSize UmiUsize;
 
-/* Historical K1/K2 address alias. */
+/* Legacy address alias. */
 typedef UmicomAddress UmiAddress;
+
+#endif
 
 #endif /* UMICOM_KERNEL_TYPES_H */

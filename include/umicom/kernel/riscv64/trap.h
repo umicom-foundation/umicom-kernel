@@ -3,8 +3,8 @@
  * File: include/umicom/kernel/riscv64/trap.h
  *
  * PURPOSE:
- *   Define the RV64 machine-mode trap frame and the small K2 trap API shared
- *   between Assembly entry code, C23 trap policy and the K2 teaching sequence.
+ *   Define the RV64 machine-mode trap frame and the machine-mode trap API shared
+ *   between Assembly entry code, C23 trap policy and the controlled trap and timer teaching sequence.
  *
  * EDUCATIONAL OVERVIEW:
  *   A RISC-V "trap" is the common architectural mechanism used for:
@@ -17,7 +17,7 @@
  *
  *   Hardware does NOT automatically save all general-purpose registers for our
  *   C code.  arch/riscv64/trap.S therefore builds the frame below before it
- *   calls UmiRiscvTrapDispatch().
+ *   calls UmicomRiscvTrapDispatch().
  *
  * AUTHOR AND ORGANISATION:
  *   Sammy Hegab
@@ -34,23 +34,23 @@
 #include "umicom/kernel/types.h"
 
 /* The high bit of RV64 mcause distinguishes an interrupt from an exception. */
-#define UMI_RISCV_MCAUSE_INTERRUPT_BIT ((UmiU64)1ULL << 63U)
+#define UMICOM_RISCV_MCAUSE_INTERRUPT_BIT ((UmicomU64)1ULL << 63U)
 
 /* mcause exception code 11 means "environment call from M-mode". */
-#define UMI_RISCV_EXCEPTION_ECALL_M_MODE ((UmiU64)11U)
+#define UMICOM_RISCV_EXCEPTION_ECALL_M_MODE ((UmicomU64)11U)
 
 /* mcause interrupt code 7 means "machine timer interrupt". */
-#define UMI_RISCV_INTERRUPT_MACHINE_TIMER ((UmiU64)7U)
+#define UMICOM_RISCV_INTERRUPT_MACHINE_TIMER ((UmicomU64)7U)
 
 /* mie bit 7 enables delivery of machine-timer interrupts. */
-#define UMI_RISCV_MIE_MTIE ((UmiU64)1ULL << 7U)
+#define UMICOM_RISCV_MIE_MTIE ((UmicomU64)1ULL << 7U)
 
 /* mstatus bit 3 globally enables interrupts while currently in M-mode. */
-#define UMI_RISCV_MSTATUS_MIE ((UmiU64)1ULL << 3U)
+#define UMICOM_RISCV_MSTATUS_MIE ((UmicomU64)1ULL << 3U)
 
 /* mstatus bit 7 is MPIE: the previous M-mode interrupt-enable state that MRET
  * uses to restore MIE after a trap handler returns. */
-#define UMI_RISCV_MSTATUS_MPIE ((UmiU64)1ULL << 7U)
+#define UMICOM_RISCV_MSTATUS_MPIE ((UmicomU64)1ULL << 7U)
 
 /* Save every integer register that may contain interrupted program state.
  *
@@ -62,58 +62,58 @@
  * extended so a C/Assembly disagreement fails the build instead of corrupting
  * register state at runtime.
  */
-typedef struct UmiRiscvTrapFrame {
-    UmiU64 x1_ra;
-    UmiU64 x2_sp;
-    UmiU64 x3_gp;
-    UmiU64 x4_tp;
-    UmiU64 x5_t0;
-    UmiU64 x6_t1;
-    UmiU64 x7_t2;
-    UmiU64 x8_s0;
-    UmiU64 x9_s1;
-    UmiU64 x10_a0;
-    UmiU64 x11_a1;
-    UmiU64 x12_a2;
-    UmiU64 x13_a3;
-    UmiU64 x14_a4;
-    UmiU64 x15_a5;
-    UmiU64 x16_a6;
-    UmiU64 x17_a7;
-    UmiU64 x18_s2;
-    UmiU64 x19_s3;
-    UmiU64 x20_s4;
-    UmiU64 x21_s5;
-    UmiU64 x22_s6;
-    UmiU64 x23_s7;
-    UmiU64 x24_s8;
-    UmiU64 x25_s9;
-    UmiU64 x26_s10;
-    UmiU64 x27_s11;
-    UmiU64 x28_t3;
-    UmiU64 x29_t4;
-    UmiU64 x30_t5;
-    UmiU64 x31_t6;
+typedef struct UmicomRiscvTrapFrame {
+    UmicomU64 x1_ra;
+    UmicomU64 x2_sp;
+    UmicomU64 x3_gp;
+    UmicomU64 x4_tp;
+    UmicomU64 x5_t0;
+    UmicomU64 x6_t1;
+    UmicomU64 x7_t2;
+    UmicomU64 x8_s0;
+    UmicomU64 x9_s1;
+    UmicomU64 x10_a0;
+    UmicomU64 x11_a1;
+    UmicomU64 x12_a2;
+    UmicomU64 x13_a3;
+    UmicomU64 x14_a4;
+    UmicomU64 x15_a5;
+    UmicomU64 x16_a6;
+    UmicomU64 x17_a7;
+    UmicomU64 x18_s2;
+    UmicomU64 x19_s3;
+    UmicomU64 x20_s4;
+    UmicomU64 x21_s5;
+    UmicomU64 x22_s6;
+    UmicomU64 x23_s7;
+    UmicomU64 x24_s8;
+    UmicomU64 x25_s9;
+    UmicomU64 x26_s10;
+    UmicomU64 x27_s11;
+    UmicomU64 x28_t3;
+    UmicomU64 x29_t4;
+    UmicomU64 x30_t5;
+    UmicomU64 x31_t6;
 
     /* Program counter to which MRET will return. */
-    UmiU64 mepc;
+    UmicomU64 mepc;
 
     /* Machine status captured immediately after hardware entered the trap. */
-    UmiU64 mstatus;
+    UmicomU64 mstatus;
 
     /* Encodes whether this was an interrupt and its exception/interrupt code. */
-    UmiU64 mcause;
+    UmicomU64 mcause;
 
     /* Trap-specific value, for example a faulting address/instruction detail. */
-    UmiU64 mtval;
+    UmicomU64 mtval;
 
     /* Explicit padding keeps the whole frame 16-byte aligned for the RV64 ABI. */
-    UmiU64 reserved;
-} UmiRiscvTrapFrame;
+    UmicomU64 reserved;
+} UmicomRiscvTrapFrame;
 
 /* Verify the C structure's total size matches trap.S FRAME_SIZE exactly. */
 _Static_assert(
-    sizeof(UmiRiscvTrapFrame) == 288U,
+    sizeof(UmicomRiscvTrapFrame) == 288U,
     "RV64 trap frame must remain exactly 288 bytes"
 );
 
@@ -123,112 +123,127 @@ _Static_assert(
  * header, which keeps this freestanding milestone self-contained.
  */
 _Static_assert(
-    __builtin_offsetof(UmiRiscvTrapFrame, x1_ra) == 0U,
+    __builtin_offsetof(UmicomRiscvTrapFrame, x1_ra) == 0U,
     "RV64 trap frame ra offset changed"
 );
 
 _Static_assert(
-    __builtin_offsetof(UmiRiscvTrapFrame, x2_sp) == 8U,
+    __builtin_offsetof(UmicomRiscvTrapFrame, x2_sp) == 8U,
     "RV64 trap frame sp offset changed"
 );
 
 _Static_assert(
-    __builtin_offsetof(UmiRiscvTrapFrame, x31_t6) == 240U,
+    __builtin_offsetof(UmicomRiscvTrapFrame, x31_t6) == 240U,
     "RV64 trap frame t6 offset changed"
 );
 
 _Static_assert(
-    __builtin_offsetof(UmiRiscvTrapFrame, mepc) == 248U,
+    __builtin_offsetof(UmicomRiscvTrapFrame, mepc) == 248U,
     "RV64 trap frame mepc offset changed"
 );
 
 _Static_assert(
-    __builtin_offsetof(UmiRiscvTrapFrame, mstatus) == 256U,
+    __builtin_offsetof(UmicomRiscvTrapFrame, mstatus) == 256U,
     "RV64 trap frame mstatus offset changed"
 );
 
 _Static_assert(
-    __builtin_offsetof(UmiRiscvTrapFrame, mcause) == 264U,
+    __builtin_offsetof(UmicomRiscvTrapFrame, mcause) == 264U,
     "RV64 trap frame mcause offset changed"
 );
 
 _Static_assert(
-    __builtin_offsetof(UmiRiscvTrapFrame, mtval) == 272U,
+    __builtin_offsetof(UmicomRiscvTrapFrame, mtval) == 272U,
     "RV64 trap frame mtval offset changed"
 );
 
-/* Copy of the small trap state K2 exposes back to its teaching main routine.
+/* Copy of the small trap state exposed back to its teaching main routine.
  *
  * The interrupt handler owns the live volatile state.  Callers receive a normal
  * value snapshot after each controlled test has completed.
  */
-typedef struct UmiRiscvTrapSnapshot {
-    UmiU64 exceptionCount;
-    UmiU64 timerInterruptCount;
-    UmiU64 lastCauseCode;
-    UmiU64 lastMepc;
-    UmiU64 lastMtval;
-    UmiU64 lastWasInterrupt;
-} UmiRiscvTrapSnapshot;
+typedef struct UmicomRiscvTrapSnapshot {
+    UmicomU64 exceptionCount;
+    UmicomU64 timerInterruptCount;
+    UmicomU64 lastCauseCode;
+    UmicomU64 lastMepc;
+    UmicomU64 lastMtval;
+    UmicomU64 lastWasInterrupt;
+} UmicomRiscvTrapSnapshot;
 
 /* Install the direct-mode machine trap vector and leave interrupts disabled. */
-void UmiRiscvTrapInstall(void);
+void UmicomRiscvTrapInstall(void);
 
-/* Return the address written to mtvec so K2 can expose it in serial evidence. */
-UmiAddress UmiRiscvTrapVectorAddress(void);
+/* Return the address written to mtvec so diagnostics can expose it in serial evidence. */
+UmicomAddress UmicomRiscvTrapVectorAddress(void);
 
 /* Deliberately execute one M-mode ECALL instruction for the exception test. */
-void UmiRiscvTriggerMachineEcall(void);
+void UmicomRiscvTriggerMachineEcall(void);
 
 /* Enable only the machine-timer interrupt plus M-mode global interrupt bit. */
-void UmiRiscvMachineTimerInterruptEnable(void);
+void UmicomRiscvMachineTimerInterruptEnable(void);
 
 /* Disable the machine-timer source and M-mode global interrupt bit. */
-void UmiRiscvMachineTimerInterruptDisable(void);
+void UmicomRiscvMachineTimerInterruptDisable(void);
 
 /* Pause until the architecture observes an enabled interrupt/event. */
-void UmiRiscvWaitForInterrupt(void);
+void UmicomRiscvWaitForInterrupt(void);
 
 /* Read the current hardware-thread identifier from mhartid. */
-UmiU64 UmiRiscvReadHartId(void);
+UmicomU64 UmicomRiscvReadHartId(void);
 
 /* C23 policy function called by the Assembly trap entry after register save. */
-void UmiRiscvTrapDispatch(UmiRiscvTrapFrame *frame);
+void UmicomRiscvTrapDispatch(UmicomRiscvTrapFrame *frame);
 
-/* Copy the currently recorded K2 trap counters/details to caller-owned memory. */
-void UmiRiscvTrapSnapshotRead(UmiRiscvTrapSnapshot *outSnapshot);
+/* Copy the currently recorded trap counters/details to caller-owned memory. */
+void UmicomRiscvTrapSnapshotRead(UmicomRiscvTrapSnapshot *outSnapshot);
 
 
-/*-------------------------------------------------------------------------
- * K3 FULL-NAME SOURCE ALIASES
+/*-----------------------------------------------------------------------------
+ * HISTORICAL SHORT RISC-V NAMES — RETAINED FOR REVIEW, NOT COMPILED
  *
- * Preserve the already committed K2 type/function symbols while all new
+ * The trap subsystem originally used `UmiRiscv...` names.  The actual types,
+ * constants and functions above now use `UmicomRiscv...` and
+ * `UMICOM_RISCV_...` directly.
+ *
+ * The old aliases below are intentionally preserved verbatim, but disabled.
+ * This keeps the naming history visible and makes comparison with earlier
+ * commits straightforward without allowing the abbreviated names to influence
+ * the current program.
+ *---------------------------------------------------------------------------*/
+#if 0
+/*-------------------------------------------------------------------------
+ * LEGACY SOURCE-COMPATIBILITY ALIASES
+ *
+ * Preserve the earlier short type/function spellings while the canonical
  * Umicom Kernel source uses the full project name.
  *-------------------------------------------------------------------------*/
 
-/* Full-name type alias for the complete machine trap frame. */
-typedef UmiRiscvTrapFrame UmicomRiscvTrapFrame;
+/* Legacy short type alias for the complete machine trap frame. */
+typedef UmicomRiscvTrapFrame UmiRiscvTrapFrame;
 
-/* Full-name type alias for copied trap evidence. */
-typedef UmiRiscvTrapSnapshot UmicomRiscvTrapSnapshot;
+/* Legacy short type alias for copied trap evidence. */
+typedef UmicomRiscvTrapSnapshot UmiRiscvTrapSnapshot;
 
-/* Full-name constant aliases for architectural trap fields. */
-#define UMICOM_RISCV_MCAUSE_INTERRUPT_BIT UMI_RISCV_MCAUSE_INTERRUPT_BIT
-#define UMICOM_RISCV_EXCEPTION_ECALL_M_MODE UMI_RISCV_EXCEPTION_ECALL_M_MODE
-#define UMICOM_RISCV_INTERRUPT_MACHINE_TIMER UMI_RISCV_INTERRUPT_MACHINE_TIMER
-#define UMICOM_RISCV_MIE_MTIE UMI_RISCV_MIE_MTIE
-#define UMICOM_RISCV_MSTATUS_MIE UMI_RISCV_MSTATUS_MIE
-#define UMICOM_RISCV_MSTATUS_MPIE UMI_RISCV_MSTATUS_MPIE
+/* Legacy short constant aliases for architectural trap fields. */
+#define UMI_RISCV_MCAUSE_INTERRUPT_BIT UMICOM_RISCV_MCAUSE_INTERRUPT_BIT
+#define UMI_RISCV_EXCEPTION_ECALL_M_MODE UMICOM_RISCV_EXCEPTION_ECALL_M_MODE
+#define UMI_RISCV_INTERRUPT_MACHINE_TIMER UMICOM_RISCV_INTERRUPT_MACHINE_TIMER
+#define UMI_RISCV_MIE_MTIE UMICOM_RISCV_MIE_MTIE
+#define UMI_RISCV_MSTATUS_MIE UMICOM_RISCV_MSTATUS_MIE
+#define UMI_RISCV_MSTATUS_MPIE UMICOM_RISCV_MSTATUS_MPIE
 
-/* Full-name source aliases for the K2 trap primitives. */
-#define UmicomRiscvTrapInstall UmiRiscvTrapInstall
-#define UmicomRiscvTrapVectorAddress UmiRiscvTrapVectorAddress
-#define UmicomRiscvTriggerMachineEcall UmiRiscvTriggerMachineEcall
-#define UmicomRiscvMachineTimerInterruptEnable UmiRiscvMachineTimerInterruptEnable
-#define UmicomRiscvMachineTimerInterruptDisable UmiRiscvMachineTimerInterruptDisable
-#define UmicomRiscvWaitForInterrupt UmiRiscvWaitForInterrupt
-#define UmicomRiscvReadHartId UmiRiscvReadHartId
-#define UmicomRiscvTrapDispatch UmiRiscvTrapDispatch
-#define UmicomRiscvTrapSnapshotRead UmiRiscvTrapSnapshotRead
+/* Legacy short source aliases for the trap primitives. */
+#define UmiRiscvTrapInstall UmicomRiscvTrapInstall
+#define UmiRiscvTrapVectorAddress UmicomRiscvTrapVectorAddress
+#define UmiRiscvTriggerMachineEcall UmicomRiscvTriggerMachineEcall
+#define UmiRiscvMachineTimerInterruptEnable UmicomRiscvMachineTimerInterruptEnable
+#define UmiRiscvMachineTimerInterruptDisable UmicomRiscvMachineTimerInterruptDisable
+#define UmiRiscvWaitForInterrupt UmicomRiscvWaitForInterrupt
+#define UmiRiscvReadHartId UmicomRiscvReadHartId
+#define UmiRiscvTrapDispatch UmicomRiscvTrapDispatch
+#define UmiRiscvTrapSnapshotRead UmicomRiscvTrapSnapshotRead
+
+#endif
 
 #endif /* UMICOM_KERNEL_RISCV64_TRAP_H */

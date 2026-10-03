@@ -3,13 +3,13 @@
 This is the short workflow used after a developer has completed the one-time
 Windows setup in `WINDOWS_BEGINNER_SETUP.md`.
 
-Do not reinstall the toolchain for each batch.
+Do not reinstall the toolchain for each update.
 
 Do not delete the build directory for ordinary development.
 
 CMake and Ninja are intentionally used incrementally.
 
-## Configure after receiving a batch
+## Configure after receiving an update
 
 From the repository root:
 
@@ -17,7 +17,7 @@ From the repository root:
 Set-Location "C:\umicom\umicom-kernel"
 ```
 
-When a batch changes `CMakeLists.txt`, adds source files, changes a preset or you
+When an update changes `CMakeLists.txt`, adds source files, changes a preset or you
 are unsure whether CMake's generated graph is current, run:
 
 ```powershell
@@ -35,7 +35,7 @@ cmake --build `
     --parallel 2
 ```
 
-Ninja rebuilds only sources affected by the new batch and then relinks when
+Ninja rebuilds only sources affected by the new source and then relinks when
 needed.
 
 ## Run all registered acceptance tests
@@ -46,11 +46,11 @@ ctest `
     --output-on-failure
 ```
 
-Later milestones keep earlier K1/K2/etc. tests so regressions remain visible.
+Later capabilities keep earlier regression tests so regressions remain visible.
 
 ## Run the current QEMU image manually
 
-Use the exact command in the current milestone guide.  K3 uses:
+Use the QEMU command below for the current RISC-V `virt` configuration:
 
 ```powershell
 & "C:\msys64\ucrt64\bin\qemu-system-riscv64.exe" `
@@ -83,7 +83,7 @@ git diff --stat
 git add -A
 ```
 
-Use the batch-specific commit message supplied with each delivery, then:
+Use the descriptive commit message supplied with each delivery, then:
 
 ```powershell
 git push
@@ -109,5 +109,5 @@ when, for example:
 - the cache is proven stale/corrupt;
 - a formal clean-room/release qualification explicitly requires it.
 
-When a future batch genuinely needs a clean build, its instructions will state
+When a future update genuinely needs a clean build, its instructions will state
 that reason explicitly.

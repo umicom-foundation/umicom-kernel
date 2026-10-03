@@ -3,13 +3,14 @@
  * File: include/umicom/kernel/build.h
  *
  * PURPOSE:
- *   Keep the experimental Kernel identity in ordinary source so early serial
- *   evidence can identify the exact milestone without a generated script.
+ *   Keep stable human-readable identity for the running freestanding Kernel
+ *   without embedding development-batch numbers or temporary release versions.
  *
  * EDUCATIONAL NOTE:
- *   A mature release pipeline may generate stronger source/build provenance.
- *   K3 deliberately keeps identity simple and inspectable while introducing
- *   physical page-frame management.
+ *   Git history and release metadata record chronology.  Runtime source should
+ *   describe what the software is and which architecture/machine it targets,
+ *   rather than carrying a development-batch label that becomes meaningless
+ *   after the next capability is added.
  *
  * AUTHOR AND ORGANISATION:
  *   Sammy Hegab
@@ -22,22 +23,13 @@
 #ifndef UMICOM_KERNEL_BUILD_H
 #define UMICOM_KERNEL_BUILD_H
 
-/* Human-readable product name printed during every educational boot. */
+/* Human-readable product name printed during early diagnostic startup. */
 #define UMICOM_KERNEL_NAME "Umicom Kernel"
 
-/* Experimental native-kernel source version for the K3 milestone. */
-#define UMICOM_KERNEL_VERSION "0.3.0"
-
-/* Roadmap milestone this image is expected to prove. */
-#define UMICOM_KERNEL_MILESTONE "K3"
-
-/* CPU architecture selected by this build. */
+/* CPU architecture selected by this build configuration. */
 #define UMICOM_KERNEL_ARCHITECTURE "riscv64"
 
-/* Machine adapter selected by the current source list. */
+/* Machine adapter selected by the current source and QEMU test configuration. */
 #define UMICOM_KERNEL_MACHINE "qemu-virt"
-
-/* Stable teaching/debugging identity for this milestone design. */
-#define UMICOM_KERNEL_BUILD_ID "k3-riscv64-physical-memory"
 
 #endif /* UMICOM_KERNEL_BUILD_H */

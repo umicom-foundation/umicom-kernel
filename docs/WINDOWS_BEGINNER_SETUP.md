@@ -1,9 +1,9 @@
-# Windows beginner setup for Umicom Kernel K1
+# Windows beginner setup for Umicom Kernel
 
 This guide starts from a Windows 11 computer with no assumption that the kernel
 development tools are installed.
 
-K1 needs:
+The Windows development environment needs:
 
 1. Git — source-control commands.
 2. GitHub CLI (`gh`) — repository authentication/management.
@@ -18,11 +18,6 @@ K1 needs:
 The kernel itself does **not** link to MSYS2 or any of those host libraries.
 They are developer tools running on Windows.
 
-## PATH versus Java CLASSPATH
-
-Umicom Kernel K1 does not use Java.
-
-`CLASSPATH` is therefore irrelevant.
 
 Windows `PATH` is the list of directories PowerShell searches when you type an
 executable name such as `cmake`, `clang` or `qemu-system-riscv64`.
@@ -155,7 +150,7 @@ pacman -Suy
 
 Repeat until it reports that there is nothing left to update.
 
-## Install all K1 compiler/build/emulator packages
+## Install all compiler, build and emulator packages
 
 Still inside **MSYS2 UCRT64**, enter:
 
@@ -166,7 +161,7 @@ pacman -S --needed mingw-w64-ucrt-x86_64-clang mingw-w64-ucrt-x86_64-lld mingw-w
 Press Enter when pacman asks you to confirm the package transaction.
 
 The QEMU package is large because it includes many machine emulators and runtime
-dependencies. K1 specifically uses `qemu-system-riscv64.exe`.
+dependencies. The current RISC-V configuration uses `qemu-system-riscv64.exe`.
 
 Close the MSYS2 terminal after installation.
 
@@ -251,10 +246,10 @@ Get-Item "C:\msys64\ucrt64\bin\qemu-system-riscv64.exe"
 
 CMake searches for QEMU while configuring the build.
 
-If you configured K1 before QEMU existed, installing QEMU alone does not
+If you configured the Kernel before QEMU existed, installing QEMU alone does not
 retroactively add the CTest to the old build tree.
 
-After installation either remove the generated K1 build directory or re-run
+After installation either remove the generated build directory or re-run
 configuration. For the clearest beginner workflow:
 
 ```powershell
@@ -284,7 +279,7 @@ that QEMU is missing.
 
 ## Why no additional target libraries are installed
 
-K1 is a freestanding kernel.
+Umicom Kernel is freestanding.
 
 It deliberately uses:
 
@@ -294,7 +289,7 @@ It deliberately uses:
 ```
 
 Therefore we do not install or link a RISC-V libc, Windows SDK runtime, GTK,
-SQLite or Umicom Framework for the K1 image.
+SQLite or Umicom Framework for the Kernel image.
 
 The host tools build the ELF; they do not become part of the kernel.
 
@@ -309,14 +304,14 @@ emulator with:
 Ctrl+C
 ```
 
-A previous K1 command used:
+An earlier boot command used:
 
 ```text
 -bios none
 -kernel .\build\riscv64-clang-debug\bin\umicom-kernel.elf
 ```
 
-That command is wrong for this machine-mode K1 design.
+That command is wrong for the current machine-mode boot design.
 
 Use this corrected command:
 
@@ -332,12 +327,11 @@ qemu-system-riscv64.exe `
     -no-reboot
 ```
 
-K1 is loaded as firmware because its earliest Assembly runs in RISC-V machine
+The Kernel is loaded as firmware because its earliest Assembly runs in RISC-V machine
 mode.  No OpenSBI or Linux kernel is required for this milestone.
 
-After updating the K1 files, delete the generated build directory and configure
-again so CTest records the corrected QEMU command:
-
+After correcting the boot configuration, refresh the generated build configuration
+so CTest records the corrected QEMU command:
 ```powershell
 Remove-Item -Recurse -Force ".\build\riscv64-clang-debug"
 ```

@@ -3,7 +3,7 @@
  * File: kernel/address.c
  *
  * PURPOSE:
- *   Implement K3's small checked-address arithmetic layer.
+ *   Implement the physical-memory foundation's small checked-address arithmetic layer.
  *
  * EDUCATIONAL OVERVIEW:
  *   The functions in this file deliberately avoid compiler builtins or hosted

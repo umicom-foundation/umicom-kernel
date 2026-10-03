@@ -26,19 +26,19 @@ OUTPUT_ARCH(riscv)
 /* Tell ELF/QEMU that execution begins at the Assembly symbol named _start. */
 ENTRY(_start)
 
-/* Define the memory region K1 is allowed to occupy.
+/* Define the memory region the first-boot foundation is allowed to occupy.
  *
- * QEMU's RISC-V virt RAM starts at 0x80000000.  K1 deliberately uses
+ * QEMU's RISC-V virt RAM starts at 0x80000000.  the first-boot foundation deliberately uses
  * 0x80200000 as its linked start so the simple direct-kernel experiment has a
  * clear fixed location with room below it reserved for future boot concerns.
  *
  * QEMU's "-m 128M" RAM spans 0x80000000 through 0x87ffffff.
  *
- * K1 deliberately starts at 0x80200000, leaving the first 2 MiB below the
+ * the first-boot foundation deliberately starts at 0x80200000, leaving the first 2 MiB below the
  * kernel image outside this linker's ownership.  Therefore only 126 MiB remain
  * between our link origin and the end of the emulated RAM.  Describing 128 MiB
  * here would incorrectly claim ownership of two MiB beyond the real machine's
- * configured RAM even though the tiny K1 image would not immediately reach it.
+ * configured RAM even though the tiny the first-boot foundation image would not immediately reach it.
  */
 MEMORY
 {
@@ -102,7 +102,7 @@ SECTIONS
 
     /* Reserve a fixed early stack.
      *
-     * K1 has no dynamic allocator, virtual memory or per-thread stacks yet.
+     * the first-boot foundation has no dynamic allocator, virtual memory or per-thread stacks yet.
      * A single 64 KiB bootstrap stack is intentionally simple and visible.
      */
     .bootstrap_stack (NOLOAD) : ALIGN(16)
@@ -121,10 +121,10 @@ SECTIONS
     /* Round the image end to a page boundary for later memory-management work. */
     . = ALIGN(4096);
 
-    /* Export the first byte after all K1 kernel-owned memory. */
+    /* Export the first byte after all the first-boot foundation kernel-owned memory. */
     __kernel_end = .;
 
-    /* Discard hosted/compiler metadata that K1 cannot consume and does not need
+    /* Discard hosted/compiler metadata that the first-boot foundation cannot consume and does not need
      * in its tiny freestanding image. */
     /DISCARD/ :
     {
@@ -134,7 +134,7 @@ SECTIONS
         /* Remove ELF note sections, including optional build-note metadata. */
         *(.note*)
 
-        /* K1 has no C++/exception stack unwinder. */
+        /* the first-boot foundation has no C++/exception stack unwinder. */
         *(.eh_frame*)
     }
 }
@@ -143,5 +143,5 @@ SECTIONS
  * region promised by this milestone's QEMU configuration. */
 ASSERT(
     __kernel_end <= ORIGIN(RAM) + LENGTH(RAM),
-    "Umicom Kernel K1 image exceeds the configured QEMU RAM region"
+    "Umicom Kernel the first-boot foundation image exceeds the configured QEMU RAM region"
 )

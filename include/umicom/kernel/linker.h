@@ -3,7 +3,7 @@
  * File: include/umicom/kernel/linker.h
  *
  * PURPOSE:
- *   Publish the small set of linker-defined image-boundary symbols that K3
+ *   Publish the small set of linker-defined image-boundary symbols that the physical-memory foundation
  *   needs to protect Kernel-owned physical memory.
  *
  * EDUCATIONAL OVERVIEW:

@@ -3,13 +3,13 @@
  * File: arch/riscv64/trap.c
  *
  * PURPOSE:
- *   Decode K2 machine-mode traps after trap.S has saved the interrupted
- *   integer-register/CSR state into UmiRiscvTrapFrame.
+ *   Decode machine-mode traps after trap.S has saved the interrupted
+ *   integer-register/CSR state into UmicomRiscvTrapFrame.
  *
  * EDUCATIONAL OVERVIEW:
  *   Assembly owns the mechanism of entering/leaving a trap safely.
  *
- *   This C23 file owns K2's policy:
+ *   This C23 file owns the policy:
  *
  *     - a deliberate M-mode ECALL is recognised as the synchronous exception
  *       teaching case and is allowed to continue after ECALL;
@@ -47,56 +47,56 @@
  * ordinary instruction flow of the code that later reads it.
  *
  * This does NOT make volatile a general inter-thread synchronization primitive.
- * K2 has one active hart and reads the counter only after the controlled trap
+ * The current configuration has one active hart and reads the counter only after the controlled trap
  * has returned, so stronger atomics are not required for this milestone. */
-static volatile UmiU64 gExceptionCount;
+static volatile UmicomU64 gExceptionCount;
 
 /* Count completed machine-timer interrupt handlers using the same single-hart
  * communication rule described above. */
-static volatile UmiU64 gTimerInterruptCount;
+static volatile UmicomU64 gTimerInterruptCount;
 
 /* Record only the low mcause code (without the interrupt flag) of the most
  * recently handled trap. */
-static volatile UmiU64 gLastCauseCode;
+static volatile UmicomU64 gLastCauseCode;
 
 /* Record the mepc captured for the most recently handled trap. */
-static volatile UmiU64 gLastMepc;
+static volatile UmicomU64 gLastMepc;
 
 /* Record the mtval captured for the most recently handled trap. */
-static volatile UmiU64 gLastMtval;
+static volatile UmicomU64 gLastMtval;
 
 /* Record 1 for interrupt, 0 for synchronous exception. */
-static volatile UmiU64 gLastWasInterrupt;
+static volatile UmicomU64 gLastWasInterrupt;
 
 /* Emit one diagnostic "name=0x..." line during an unexpected trap.
  *
- * Keeping the helper local avoids publishing a K2-only reporting API. */
-static void WriteUnexpectedHex(const char *name, UmiU64 value)
+ * Keeping the helper local avoids publishing a trap-test-only reporting API. */
+static void WriteUnexpectedHex(const char *name, UmicomU64 value)
 {
     /* Emit the field name first. */
-    UmiKernelConsoleWrite(name);
+    UmicomKernelConsoleWrite(name);
 
     /* Use '=' so the serial record remains easy for humans/tools to parse. */
-    UmiKernelConsoleWrite("=");
+    UmicomKernelConsoleWrite("=");
 
     /* Render the complete RV64 value in hexadecimal. */
-    UmiKernelConsoleWriteHex64(value);
+    UmicomKernelConsoleWriteHex64(value);
 
     /* Terminate this diagnostic record. */
-    UmiKernelConsoleWriteLine("");
+    UmicomKernelConsoleWriteLine("");
 }
 
 /* Terminate the controlled QEMU experiment after an unexpected trap.
  *
  * This function does not return because continuing from an unknown exception
  * could repeatedly fault, corrupt state, or hide a real kernel defect. */
-static void UnexpectedTrap(const UmiRiscvTrapFrame *frame)
+static void UnexpectedTrap(const UmicomRiscvTrapFrame *frame)
 {
     /* Mark the failure clearly so CTest's FAIL_REGULAR_EXPRESSION sees it. */
-    UmiKernelConsoleWriteLine("UMICOM_KERNEL_FAIL");
+    UmicomKernelConsoleWriteLine("UMICOM_KERNEL_FAIL");
 
     /* Explain the category without pretending we handled it. */
-    UmiKernelConsoleWriteLine("reason=unexpected-trap");
+    UmicomKernelConsoleWriteLine("reason=unexpected-trap");
 
     /* Preserve the raw architectural values needed to understand the failure. */
     WriteUnexpectedHex("mcause", frame->mcause);
@@ -105,43 +105,43 @@ static void UnexpectedTrap(const UmiRiscvTrapFrame *frame)
 
     /* Ask QEMU's test finisher for a nonzero guest result.
      *
-     * Failure code 2 is a small K2-local code meaning unexpected trap. */
-    UmiPlatformFinishFailure((UmiU32)2U);
+     * Failure code 2 is a small local diagnostic code meaning unexpected trap. */
+    UmicomPlatformFinishFailure((UmicomU32)2U);
 
     /* The QEMU finisher should stop the machine.  Keep an explicit halt if a
      * future/non-QEMU platform ignores that test device. */
-    UmiPlatformHalt();
+    UmicomPlatformHalt();
 }
 
-void UmiRiscvTrapDispatch(UmiRiscvTrapFrame *frame)
+void UmicomRiscvTrapDispatch(UmicomRiscvTrapFrame *frame)
 {
     /* Reject an impossible null frame before dereferencing it.
      *
      * trap.S always passes sp, but this guard documents the C contract and
      * prevents a future direct caller from silently reading address zero. */
-    if (frame == (UmiRiscvTrapFrame *)0) {
+    if (frame == (UmicomRiscvTrapFrame *)0) {
 
         /* State the failure before stopping the virtual machine. */
-        UmiKernelConsoleWriteLine("UMICOM_KERNEL_FAIL");
-        UmiKernelConsoleWriteLine("reason=null-trap-frame");
+        UmicomKernelConsoleWriteLine("UMICOM_KERNEL_FAIL");
+        UmicomKernelConsoleWriteLine("reason=null-trap-frame");
 
         /* Use a different bounded code so a debugger can distinguish this path. */
-        UmiPlatformFinishFailure((UmiU32)3U);
+        UmicomPlatformFinishFailure((UmicomU32)3U);
 
         /* Never return into an unknown trap context. */
-        UmiPlatformHalt();
+        UmicomPlatformHalt();
     }
 
     /* The top bit of RV64 mcause is 1 for interrupt and 0 for exception. */
-    const UmiU64 isInterrupt =
-        (frame->mcause & UMI_RISCV_MCAUSE_INTERRUPT_BIT) != 0U
-            ? (UmiU64)1U
-            : (UmiU64)0U;
+    const UmicomU64 isInterrupt =
+        (frame->mcause & UMICOM_RISCV_MCAUSE_INTERRUPT_BIT) != 0U
+            ? (UmicomU64)1U
+            : (UmicomU64)0U;
 
     /* Remove the interrupt flag so the remaining integer is the architectural
      * exception/interrupt cause code. */
-    const UmiU64 causeCode =
-        frame->mcause & ~UMI_RISCV_MCAUSE_INTERRUPT_BIT;
+    const UmicomU64 causeCode =
+        frame->mcause & ~UMICOM_RISCV_MCAUSE_INTERRUPT_BIT;
 
     /* Publish a minimal "last trap" snapshot before cause-specific handling.
      *
@@ -152,10 +152,10 @@ void UmiRiscvTrapDispatch(UmiRiscvTrapFrame *frame)
     gLastMtval = frame->mtval;
     gLastWasInterrupt = isInterrupt;
 
-    /* Handle K2's one expected synchronous exception. */
+    /* Handle the controlled synchronous exception. */
     if (
         isInterrupt == 0U &&
-        causeCode == UMI_RISCV_EXCEPTION_ECALL_M_MODE
+        causeCode == UMICOM_RISCV_EXCEPTION_ECALL_M_MODE
     ) {
         /* Count the successfully recognised exception. */
         ++gExceptionCount;
@@ -164,39 +164,39 @@ void UmiRiscvTrapDispatch(UmiRiscvTrapFrame *frame)
          *
          * Machine-mode ECALL is a fixed 32-bit SYSTEM instruction.  Returning
          * to the same mepc would execute ECALL again and trap forever. */
-        frame->mepc += (UmiU64)4U;
+        frame->mepc += (UmicomU64)4U;
 
         /* Return to trap.S, which restores registers/CSRs and executes MRET. */
         return;
     }
 
-    /* Handle K2's one expected asynchronous interrupt. */
+    /* Handle the controlled asynchronous interrupt. */
     if (
         isInterrupt != 0U &&
-        causeCode == UMI_RISCV_INTERRUPT_MACHINE_TIMER
+        causeCode == UMICOM_RISCV_INTERRUPT_MACHINE_TIMER
     ) {
         /* Read the executing hardware-thread ID so the matching compare
          * register can be acknowledged/disabled. */
-        const UmiU64 hartId = UmiRiscvReadHartId();
+        const UmicomU64 hartId = UmicomRiscvReadHartId();
 
         /* Move mtimecmp to the maximum 64-bit value.
          *
          * A machine timer remains pending while mtime >= mtimecmp.  Moving the
          * deadline far into the future removes the current pending condition. */
-        UmiPlatformTimerDisable(hartId);
+        UmicomPlatformTimerDisable(hartId);
 
-        /* Disable MTIE immediately so this one-shot K2 test cannot retrigger
+        /* Disable MTIE immediately so this one-shot controlled trap test cannot retrigger
          * before ordinary code regains control. */
-        UmiRiscvMachineTimerInterruptDisable();
+        UmicomRiscvMachineTimerInterruptDisable();
 
         /* Prevent MRET from re-enabling global M-mode interrupts.
          *
          * Hardware copied the pre-trap MIE=1 state into mstatus.MPIE when the
          * interrupt arrived.  trap.S later restores frame->mstatus before MRET.
          * Clearing MPIE in the saved frame makes MRET restore MIE=0, returning
-         * K2 to its deliberately interrupts-disabled baseline after this one
+         * to its deliberately interrupts-disabled baseline after this one
          * controlled asynchronous event. */
-        frame->mstatus &= ~UMI_RISCV_MSTATUS_MPIE;
+        frame->mstatus &= ~UMICOM_RISCV_MSTATUS_MPIE;
 
         /* Count the completed timer-interrupt handling path. */
         ++gTimerInterruptCount;
@@ -206,16 +206,16 @@ void UmiRiscvTrapDispatch(UmiRiscvTrapFrame *frame)
         return;
     }
 
-    /* Anything outside the two deliberately supported K2 cases is a real
+    /* Anything outside the two deliberately supported cases is a real
      * unexpected kernel trap and must not be hidden. */
     UnexpectedTrap(frame);
 }
 
-void UmiRiscvTrapSnapshotRead(UmiRiscvTrapSnapshot *outSnapshot)
+void UmicomRiscvTrapSnapshotRead(UmicomRiscvTrapSnapshot *outSnapshot)
 {
     /* A caller must provide storage because the kernel has no allocator and we
      * avoid returning a large structure through ABI-specific hidden mechanics. */
-    if (outSnapshot == (UmiRiscvTrapSnapshot *)0) {
+    if (outSnapshot == (UmicomRiscvTrapSnapshot *)0) {
 
         /* A null request simply has nowhere to publish a snapshot. */
         return;
@@ -223,7 +223,7 @@ void UmiRiscvTrapSnapshotRead(UmiRiscvTrapSnapshot *outSnapshot)
 
     /* Copy each volatile live field into ordinary caller-owned memory.
      *
-     * K2 calls this only after its controlled event has completed and the
+     * The current diagnostic path calls this only after its controlled event has completed and the
      * relevant interrupt source is disabled, so the copy is stable on the one
      * active hart. */
     outSnapshot->exceptionCount = gExceptionCount;
