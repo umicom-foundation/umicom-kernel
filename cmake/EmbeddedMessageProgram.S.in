@@ -1,0 +1,10 @@
+/* Umicom Kernel message-program carrier. The ELF is data, not Kernel text.
+ * A future filesystem can supply the same immutable byte span to the loader.
+ * Sammy Hegab, Umicom Foundation. MIT licence. */
+    .section .rodata.umicom_message_executable, "a", @progbits
+    .balign 16
+    .global UmicomMessageExecutableStart
+    .global UmicomMessageExecutableEnd
+UmicomMessageExecutableStart:
+    .incbin "@UMICOM_MESSAGE_EXECUTABLE_FILE@"
+UmicomMessageExecutableEnd:

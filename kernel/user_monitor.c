@@ -25,6 +25,12 @@
 #include "umicom/kernel/address.h"
 #include "umicom/kernel/riscv64/user_execution.h"
 
+/* Keep the original minimal monitor usable by its independent native tests.
+ * The Kernel build enables this branch only when the message service is linked. */
+#ifdef UMICOM_KERNEL_MESSAGE_CHANNELS
+#include "umicom/kernel/message_service.h"
+#endif
+
 /* COPY is deliberately small. An immutable page-table view is required while
  * validating and copying, otherwise a second hart could change the mapping
  * between these operations. This monitor does not permit that concurrency. */
@@ -139,6 +145,15 @@ UmicomU64 UmicomKernelUserTrapDispatch(
         } else {
             ++session->rejectedCalls;
         }
+#ifdef UMICOM_KERNEL_MESSAGE_CHANNELS
+    } else if (UmicomKernelMessageServiceRecognizes(frame->x17_a7) != UMICOM_FALSE) {
+        /* Owner identity comes from this trusted session. All PC, privilege and
+         * call-budget checks above still precede any message side effect. */
+        result = (UmicomU64)UmicomKernelMessageServiceDispatch(session, frame);
+        if (result != (UmicomU64)UMICOM_MESSAGE_OK) {
+            ++session->rejectedCalls;
+        }
+#endif
     } else {
         ++session->rejectedCalls;
     }

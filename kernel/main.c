@@ -42,6 +42,9 @@
 /* Import overflow/alignment-safe address helpers used by memory validation. */
 #include "umicom/kernel/address.h"
 
+/* Add owned message exchange after the established process lifetime checks. */
+#include "umicom/kernel/message_channel.h"
+
 /* Import stable product, architecture and machine identity strings. */
 #include "umicom/kernel/build.h"
 
@@ -1452,6 +1455,10 @@ void UmicomKernelMain(UmicomU64 hartId, UmicomAddress deviceTreeAddress)
     /* Check handle ownership, reduced rights and shared process lifetimes only
      * after independently loaded programs have returned safely to the Kernel. */
     UmicomKernelProcessRegistryValidateExecution();
+
+    /* Exercise copied channels through two separately loaded user programs.
+     * The channel service does not replace the original process monitor. */
+    UmicomKernelMessageChannelsValidateExecution();
 
     /* Mark the end of deterministic Kernel capability evidence. */
     UmicomKernelConsoleWriteLine("UMICOM_KERNEL_END");

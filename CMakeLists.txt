@@ -452,3 +452,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/ExecutablePrograms.cmake")
 # Own loaded processes through bounded, rights-checked handles without changing
 # the executable loader or the established user execution path.
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/ProcessRegistry.cmake")
+
+# Add copied message channels and a separately linked native exchange program.
+# Established loaders, process owners and architecture entry paths stay intact.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/MessageChannels.cmake")
