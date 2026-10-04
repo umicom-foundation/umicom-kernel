@@ -48,6 +48,9 @@
 /* Cooperative Kernel stacks build on, rather than replace, these services. */
 #include "umicom/kernel/threads.h"
 
+/* Remember signals across cooperative waits without changing the scheduler. */
+#include "umicom/kernel/events.h"
+
 /* Import stable product, architecture and machine identity strings. */
 #include "umicom/kernel/build.h"
 
@@ -1466,6 +1469,10 @@ void UmicomKernelMain(UmicomU64 hartId, UmicomAddress deviceTreeAddress)
     /* Resume separate Kernel call stacks and exercise channel peers that wait
      * for one another, after the established user IPC path has returned. */
     UmicomKernelThreadsValidateExecution();
+
+    /* Build bounded event waits on the existing cooperative stacks, then use
+     * those notifications to coordinate the unchanged message queues. */
+    UmicomKernelEventsValidateExecution();
 
     /* Mark the end of deterministic Kernel capability evidence. */
     UmicomKernelConsoleWriteLine("UMICOM_KERNEL_END");

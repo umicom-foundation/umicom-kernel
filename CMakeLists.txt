@@ -460,3 +460,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/MessageChannels.cmake")
 # Add cooperative Kernel stacks and scheduling without changing the existing
 # trap, user-process or message-channel execution paths.
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/KernelThreads.cmake")
+
+# Add remembered events and bounded wait-any coordination above the existing
+# cooperative scheduler; no established thread or message API is replaced.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/KernelEvents.cmake")

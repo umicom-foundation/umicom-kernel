@@ -1,0 +1,617 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Evidence-gated roadmap from Umicom Kernel to a functioning, maintainable free Umicom OS.">
+<title>Umicom Kernel and Umicom OS — Release Roadmap</title>
+<style>
+:root { --ink:#172c39; --muted:#506573; --accent:#076f70; --line:#d5e2e5; --paper:#ffffff; --ground:#f0f5f6; }
+* { box-sizing:border-box; }
+html { scroll-behavior:smooth; }
+body { margin:0; background:var(--ground); color:var(--ink); font:17px/1.65 "Segoe UI", system-ui, sans-serif; }
+.hero { background:#112d3e; color:white; padding:54px max(6vw,24px) 44px; }
+.hero .eyebrow { color:#96d7cc; letter-spacing:.13em; font-size:12px; font-weight:700; text-transform:uppercase; }
+.hero h1 { margin:14px 0; max-width:970px; font-size:clamp(32px,4.6vw,54px); line-height:1.13; font-weight:650; }
+.hero p { margin:16px 0 0; max-width:900px; font-size:20px; color:#d8e8ed; }
+.tags { display:flex; flex-wrap:wrap; gap:9px; margin-top:24px; }
+.tags span { font-size:13px; border:1px solid #527782; border-radius:3px; padding:5px 11px; }
+.layout { max-width:1440px; margin:0 auto; display:grid; grid-template-columns:265px minmax(0,1fr); gap:34px; padding:36px 26px 60px; }
+nav { position:sticky; top:20px; max-height:calc(100vh - 40px); overflow:auto; align-self:start; padding-right:10px; }
+nav .label { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.13em; font-weight:700; padding:0 10px 12px; }
+nav a { display:block; font-size:14px; line-height:1.45; padding:7px 10px; border-radius:4px; text-decoration:none; color:var(--ink); }
+nav a:hover { color:var(--accent); background:#e1edef; }
+nav .depth-3 { padding-left:24px; color:var(--muted); font-size:13px; }
+main { min-width:0; background:var(--paper); border:1px solid var(--line); border-radius:8px; padding:36px 44px 48px; }
+.notice { border-left:4px solid var(--accent); padding:16px 20px; background:#edf7f5; margin:0 0 30px; }
+.notice p { margin:0; }
+h2 { margin-top:46px; border-top:1px solid var(--line); padding-top:28px; font-size:28px; line-height:1.3; scroll-margin-top:28px; }
+h3 { font-size:21px; margin-top:30px; scroll-margin-top:28px; }
+p { margin:14px 0; }
+a { color:var(--accent); overflow-wrap:anywhere; }
+code { font-family:Consolas,"Liberation Mono",monospace; font-size:.87em; background:#edf2f4; border-radius:3px; padding:.12em .32em; overflow-wrap:anywhere; }
+pre { padding:21px; overflow:auto; background:#eef4f5; border:1px solid var(--line); border-radius:5px; line-height:1.5; font-size:14px; }
+pre code { background:none; padding:0; font-size:inherit; }
+.table-wrap { overflow:auto; border:1px solid var(--line); border-radius:5px; margin:22px 0; }
+table { border-collapse:collapse; width:100%; font-size:14px; line-height:1.55; }
+th { text-align:left; background:#eaf2f3; padding:12px 14px; font-weight:650; }
+td { padding:12px 14px; vertical-align:top; border-top:1px solid var(--line); }
+td:first-child { width:25%; font-weight:600; }
+tbody tr:nth-child(even) { background:#fafcfc; }
+ul,ol { padding-left:25px; }
+footer { border-top:1px solid var(--line); margin-top:36px; padding-top:20px; font-size:13px; color:var(--muted); }
+@media(max-width:1050px) { .layout { grid-template-columns:215px minmax(0,1fr); gap:20px; } main { padding:28px; } }
+@media(max-width:780px) { .layout { display:block; padding:20px 12px; } nav { position:static; max-height:none; margin:0 0 20px; } nav .depth-3 { display:none; } main { padding:24px 20px; } .hero { padding:32px 22px; } .hero p { font-size:18px; } }
+@media print { body { background:white; font-size:11pt; } .hero { background:white; color:#172c39; padding:0 0 20px; } .hero .eyebrow,.hero p { color:#506573; } .hero h1 { font-size:30pt; } .tags,nav { display:none; } .layout { display:block; padding:0; } main { border:none; padding:0; } h2 { break-after:avoid; } table { font-size:9pt; } tr { break-inside:avoid; } .table-wrap { overflow:visible; } a { color:inherit; text-decoration:none; } pre { white-space:pre-wrap; } }
+</style>
+</head>
+<body>
+<header class="hero">
+<div class="eyebrow">Umicom Foundation · Engineering programme</div>
+<h1>From Umicom Kernel<br>to a functioning Umicom OS</h1>
+<p>An implementation roadmap with separate Kernel, distribution, application and release gates.</p>
+<div class="tags"><span>4 October 2026 planning baseline</span><span>Proposed sequence</span><span>Evidence-gated releases</span></div>
+</header>
+<div class="layout">
+<nav aria-label="Roadmap contents"><div class="label">Contents</div>
+<a class="depth-2" href="#the-destination">The destination</a>
+<a class="depth-2" href="#what-was-checked">What was checked</a>
+<a class="depth-3" href="#evidence-ledger">Evidence ledger</a>
+<a class="depth-2" href="#architecture-that-stays-fixed">Architecture that stays fixed</a>
+<a class="depth-2" href="#release-gates">Release gates</a>
+<a class="depth-2" href="#native-work-sequence">Native work sequence</a>
+<a class="depth-3" href="#execution-and-coordination">Execution and coordination</a>
+<a class="depth-3" href="#interactive-console-system">Interactive console system</a>
+<a class="depth-3" href="#storage-hardware-and-networking">Storage, hardware and networking</a>
+<a class="depth-3" href="#runtime-portability-and-usable-applications">Runtime, portability and usable applications</a>
+<a class="depth-3" href="#desktop-release-and-expansion">Desktop, release and expansion</a>
+<a class="depth-2" href="#parallel-umicom-os-distribution-track">Parallel Umicom OS distribution track</a>
+<a class="depth-2" href="#free-system-policy-as-a-release-gate">Free-system policy as a release gate</a>
+<a class="depth-2" href="#release-evidence-and-responsibilities">Release evidence and responsibilities</a>
+<a class="depth-2" href="#the-next-practical-checkpoint">The next practical checkpoint</a>
+</nav>
+<main>
+<aside class="notice"><p><strong>Two products, two sets of evidence.</strong> A native Kernel test pass is not an installed OS release. A Linux-based OS image does not qualify the native Kernel. Each achievement is recorded separately.</p></aside>
+<p><strong>Planning baseline:</strong> 4 October 2026<br />
+<strong>Status:</strong> proposed implementation sequence, with evidence-gated releases<br />
+<strong>Project lead:</strong> Sammy Hegab, Umicom Foundation</p>
+<h2 id="the-destination">The destination</h2>
+<p>There are two related products, and they must not be confused.</p>
+<p><strong>Umicom Kernel</strong> is the original native kernel: boot, memory, execution,
+scheduling, protection, IPC and device mechanisms. <strong>Umicom OS</strong> is the system
+people install and use: the kernel choice, runtime, filesystems, accounts,
+services, applications, desktop, installer, updates and recovery.</p>
+<p>A kernel that completes its tests and exits QEMU is valuable progress, but is
+not yet an interactive operating system. Conversely, an installable Umicom OS
+using Linux-libre would not prove that the native Umicom Kernel is ready to
+replace it. We should publish these achievements separately.</p>
+<p>The near-term native objective is a usable console system on a precisely named
+QEMU machine. The next objectives are a persistent developer/server system and
+then a desktop/workstation. Broader hardware, ARM64, mobile and small embedded
+profiles remain in the programme; they are not implied by a RISC-V VM boot.</p>
+<p>This is a sequence of deliverables, not a calendar promise. A named work package
+can require more than one source delivery. Fixes, review and qualification belong
+to its completion cost. We do not have measurements that justify a release date
+or a percentage-complete claim yet.</p>
+<h2 id="what-was-checked">What was checked</h2>
+<p>The Kernel baseline is
+<a href="https://github.com/umicom-foundation/umicom-kernel/tree/299a273353cf545e3af70cb8fc4346033bcdffee"><code>299a273353cf545e3af70cb8fc4346033bcdffee</code></a>.
+It includes the cooperative-thread implementation, following executable loading,
+process handles and copied message channels. Its
+<a href="https://github.com/umicom-foundation/umicom-kernel/blob/299a273353cf545e3af70cb8fc4346033bcdffee/include/umicom/kernel/threads.h">thread contract</a>
+explicitly describes cooperative Kernel callbacks, not pre-emptive user scheduling.
+The previous run-once process API and user monitor are still separate components.</p>
+<p>The OS baseline checked is
+<a href="https://github.com/umicom-foundation/umicom-os/tree/21f72f4d7e1901c36fb6d0bc61b35fa4a34e3b8c"><code>21f72f4d7e1901c36fb6d0bc61b35fa4a34e3b8c</code></a>.
+Its <a href="https://github.com/umicom-foundation/umicom-os/blob/21f72f4d7e1901c36fb6d0bc61b35fa4a34e3b8c/README.md">README</a>
+and <a href="https://github.com/umicom-foundation/umicom-os/blob/21f72f4d7e1901c36fb6d0bc61b35fa4a34e3b8c/docs/foundation/architecture.md">foundation architecture</a>
+describe an independent C23 init/recovery controller, a RAM-only root filesystem,
+one-shot service checks, a Framework Data Server probe and a native image tool.
+Those documents explicitly exclude a persistent installer, authenticated login,
+network service and desktop from that foundation profile. Native component
+tests and archive checks are not its real-image boot qualification.</p>
+<p>This review did not rebuild the entire Umicom Framework/application catalogue or
+the Linux-based OS images. Their release readiness is therefore not credited as
+complete here.</p>
+<h3 id="evidence-ledger">Evidence ledger</h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+  <th>Area</th>
+  <th>What the reviewed source contains</th>
+  <th>What that does not establish</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>Native boot and machine traps</td>
+  <td>RV64 bootstrap, serial output, ECALL and timer paths</td>
+  <td>Physical board support, nested-trap robustness or all device interrupts</td>
+</tr>
+<tr>
+  <td>Memory</td>
+  <td>Physical frame ownership, Sv39 mapping and controlled hardware checks</td>
+  <td>A hardened general VM subsystem, demand paging, swap or multi-hart TLB handling</td>
+</tr>
+<tr>
+  <td>Privilege boundary</td>
+  <td>Controlled S-mode and U-mode execution, checked copies and bounded user runs</td>
+  <td>A permanent supervisor-resident Kernel or a full adversarial process sandbox</td>
+</tr>
+<tr>
+  <td>Executables and processes</td>
+  <td>Separate static ELF loading, private frames, explicit destruction, owner-scoped handles</td>
+  <td>Dynamic linking, file-backed exec, fork or runnable process scheduling</td>
+</tr>
+<tr>
+  <td>Messages</td>
+  <td>Copied bounded queues and nonblocking user services</td>
+  <td>Blocking user IPC, shared memory or concurrent/SMP queues</td>
+</tr>
+<tr>
+  <td>Kernel threads</td>
+  <td>Separate resumable stacks, cooperative round-robin, sleep/wake and reaping</td>
+  <td>Pre-emption, user-process suspension or a guarantee against a non-yielding callback</td>
+</tr>
+<tr>
+  <td>This delivery</td>
+  <td>Remembered events, wait-any, deadlines and cancellation-aware registrations</td>
+  <td>User event syscalls, IRQ-safe waits or SMP synchronisation</td>
+</tr>
+<tr>
+  <td>OS composition</td>
+  <td>Source recipes and independent recovery foundation</td>
+  <td>A qualified complete free distribution or a shipping native-Kernel OS</td>
+</tr>
+</tbody>
+</table></div>
+<p>Existing repository documents remain historical project assets. Some older
+roadmap headings still describe past work as current. This new roadmap is a
+proposed current planning view; it does not rewrite those earlier documents.</p>
+<h2 id="architecture-that-stays-fixed">Architecture that stays fixed</h2>
+<p>The <a href="https://github.com/umicom-foundation/umicom-kernel/blob/299a273353cf545e3af70cb8fc4346033bcdffee/docs/DECISION_REGISTER.md">committed decision register</a>
+records a kernel-independent product, Linux-libre as the production-track
+direction, FreeBSD as the principal non-Linux portability proof and an independent
+original hybrid-microkernel project.</p>
+<p>That does <strong>not</strong> mean the Linux-libre conversion is already demonstrated in
+every OS recipe. The OS foundation document still names a pinned upstream Linux
+recipe. Reconciling that implementation with the freedom policy is an explicit
+release task, not an assumption hidden by the name of the project.</p>
+<p>The dependency direction stays:</p>
+<pre><code class="language-text">Umicom applications and Desk
+              |
+              v
+Umicom Framework user-space contracts
+              |
+              v
+Portable system-service providers
+              |
+       +------+---------+
+       |                |
+Linux-libre/FreeBSD   Umicom native ABI and services
+                        |
+                        v
+                  Umicom Kernel
+</code></pre>
+<p>Kernel and recovery must work without full Framework, GTK or the Data Server.
+Framework owns reusable normal-user-space behaviour; product modules remain
+thin. The System Manager's Master Controller / Slave Controllers organise
+bounded services above the kernel mechanism layer.</p>
+<p>Do not add the native Kernel as a Framework or Applications submodule. The OS
+integration repository may eventually pin a qualified native commit for an
+explicit experimental profile. That is composition, not ownership inversion.</p>
+<p>C23 remains the default for original implementation, with Assembly where exact
+machine operations require it. Mature free components can be integrated when
+they avoid unnecessary risk. Cryptography and protocol interoperability are not
+places to invent incompatible replacements simply to maximise original code.</p>
+<h2 id="release-gates">Release gates</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+  <th>Gate</th>
+  <th>Deliverable a person can use</th>
+  <th>Required evidence before naming the release</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>Kernel developer preview</td>
+  <td>Reproducible native source build and bounded VM diagnostics</td>
+  <td>Clean and incremental builds, current-image tests, fault paths, limitations and exact machine configuration</td>
+</tr>
+<tr>
+  <td>Native console alpha</td>
+  <td>Boot remains running; a user can open a console session, navigate RAM-backed files and launch native programs</td>
+  <td>Interactive console, real scheduled process contexts, file-backed loading, IPC, service lifecycle and fault recovery</td>
+</tr>
+<tr>
+  <td>Native persistent-system alpha</td>
+  <td>Install on a disposable virtual disk, save data and reboot into the installation</td>
+  <td>Safe disk selection, filesystem integrity, persistent accounts/configuration, networking and recoverable boot</td>
+</tr>
+<tr>
+  <td>Native developer/server beta</td>
+  <td>Useful headless environment and a documented development workflow</td>
+  <td>Runtime/compatibility subset, stable service boundary, remote administration, tested updates and supported machine matrix</td>
+</tr>
+<tr>
+  <td>Native desktop beta</td>
+  <td>Usable graphical session on a declared supported target</td>
+  <td>Display/input, compositor/windowing, Desk, accessibility baseline, application workflows and session recovery</td>
+</tr>
+<tr>
+  <td>Native OS release candidate</td>
+  <td>A candidate system suitable for independent installation and testing</td>
+  <td>Upgrade/rollback, power-cut tests, security review, long-running stress, complete source/licence inventory and no unresolved release blockers</td>
+</tr>
+<tr>
+  <td>Supported native OS release</td>
+  <td>A maintained OS for the explicitly supported profiles and hardware</td>
+  <td>Candidate criteria remain satisfied; update, vulnerability response, recovery and support ownership are operational</td>
+</tr>
+</tbody>
+</table></div>
+<p>A preview can ship before self-hosting as an honestly labelled developer
+experiment. It must not be represented as a complete FSDG-endorsed distribution.
+A fully functioning native desktop release requires both the native Kernel gates
+and the OS integration gates below.</p>
+<h2 id="native-work-sequence">Native work sequence</h2>
+<p>The following are future source-delivery scopes, not names to embed into
+functions, constants, comments or binary identity. Each row has an observable
+exit criterion. Dependencies can be refined after review, but a missing gate
+cannot be replaced by a passing compile.</p>
+<h3 id="execution-and-coordination">Execution and coordination</h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+  <th>Planned work package</th>
+  <th>Deliverable</th>
+  <th>Exit evidence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>Remembered events and wait-any — this delivery</td>
+  <td>Manual/auto reset, durable signal state, bounded waits, deadlines and cancellation pruning above cooperative threads</td>
+  <td>Signal-before-wait, broadcast, FIFO auto-reset, spurious wakes, close/reuse, timeout ordering and message coordination</td>
+</tr>
+<tr>
+  <td>Trap and privilege hardening</td>
+  <td>Audited entry/return state, machine-stack safety, exception classification and protected control transitions</td>
+  <td>Inject faults at boundary points; no recursive failure or corrupted return state; old paths still pass</td>
+</tr>
+<tr>
+  <td>Interrupt ownership and critical sections</td>
+  <td>Explicit masking, nesting and shared-state ownership rules; no ad-hoc volatile synchronisation</td>
+  <td>Ordered acquisition/release tests and interrupt injection; unsafe contexts rejected</td>
+</tr>
+<tr>
+  <td>Timer-driven runnable contexts</td>
+  <td>Save complete interrupted user context, maintain runnable queues and resume at the interrupted PC</td>
+  <td>Two CPU-bound programs both progress; register and address-space isolation survive repeated switches</td>
+</tr>
+<tr>
+  <td>Blocking IPC and scheduler waits</td>
+  <td>Connect user message waiting to resumable processes, with deadlines and cancellation</td>
+  <td>Receiver blocks without spinning, sender wakes it, peer exit and timeout finish once, no lost wakeups</td>
+</tr>
+<tr>
+  <td>Process supervision and cleanup</td>
+  <td>Parent/service relationships, terminal collection, cancellation and handle/IPC cleanup coordinated with execution</td>
+  <td>Crash or kill one process; siblings remain live; no stale references, runnable freed contexts or leaked frames</td>
+</tr>
+</tbody>
+</table></div>
+<p>The existing cooperative scheduler remains useful for its documented Kernel
+callbacks. It is not silently converted into an interrupt scheduler. The current
+run-once process API remains an explicit path until the replacement is reviewed;
+superseded code is retained with an explanation if it is ever disabled.</p>
+<h3 id="interactive-console-system">Interactive console system</h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+  <th>Planned work package</th>
+  <th>Deliverable</th>
+  <th>Exit evidence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>Kernel allocation and stronger VM ownership</td>
+  <td>Checked dynamic allocations, page-table frame ownership validation and protected stack mappings</td>
+  <td>Exhaustion, corruption, stale ownership, rollback and unmapped guard tests; memory accounting returns to baseline</td>
+</tr>
+<tr>
+  <td>VFS and RAM-backed files</td>
+  <td>Typed file/directory objects, per-process descriptors, bounded path resolution and RAMFS</td>
+  <td>Create, enumerate, read, write and remove files; rights and partial I/O results are explicit</td>
+</tr>
+<tr>
+  <td>Console input and shell</td>
+  <td>UART input, bounded editing, shell commands, process output/error channels</td>
+  <td>A user can inspect files, launch a program and regain the prompt after failure</td>
+</tr>
+<tr>
+  <td>Programs loaded from files</td>
+  <td>Loader accepts a VFS source; defined argument/environment layout; process start and exit reporting</td>
+  <td>Replace a program in RAMFS and execute its new bytes; invalid images cannot alter another process</td>
+</tr>
+<tr>
+  <td>Normal boot and System Manager</td>
+  <td>A persistent boot path distinct from self-test mode; service startup, dependencies, health and controlled restart</td>
+  <td>Boot stays alive; one failed service enters recovery or restarts according to policy; the diagnostic test path remains available</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>Console-alpha gate:</strong> the result is interactive, rather than a transcript
+which automatically powers off. RAM-only file state is acceptable at this gate
+only because that limitation is explicit. This is a development console, not
+yet authenticated administration or a persistent OS release.</p>
+<h3 id="storage-hardware-and-networking">Storage, hardware and networking</h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+  <th>Planned work package</th>
+  <th>Deliverable</th>
+  <th>Exit evidence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>Device discovery and driver contracts</td>
+  <td>Validated firmware/device-tree data, IRQ routing, MMIO/DMA ownership and device lifetime</td>
+  <td>Malformed descriptions are refused; attach/failure/remove paths release resources</td>
+</tr>
+<tr>
+  <td>VirtIO block transport</td>
+  <td>Bounded descriptor/queue handling and actual virtual-disk reads/writes</td>
+  <td>Read known blocks, write scratch blocks, flush, handle I/O failure and reject invalid ranges</td>
+</tr>
+<tr>
+  <td>Persistent filesystem</td>
+  <td>Selected free filesystem implementation/provider, cache/flush policy and recovery rules</td>
+  <td>Save/reboot/read verification; truncated writes, injected I/O errors and simulated power cuts</td>
+</tr>
+<tr>
+  <td>x86-64 architecture port</td>
+  <td>Second architecture using shared Kernel mechanisms, explicit boot/firmware boundary and device support</td>
+  <td>Independent x86-64 boot, traps, memory, user execution, storage and recovery tests; not inferred from RV64</td>
+</tr>
+<tr>
+  <td>Network foundation</td>
+  <td>VirtIO network, packet ownership, supported IP/transport subset and socket/service interface</td>
+  <td>Packet exchange, disconnect/reconnect, malformed packet handling and controlled service communication</td>
+</tr>
+<tr>
+  <td>Network services and secure transport</td>
+  <td>DNS/DHCP where needed, remote administration, TLS through reviewed free components, time and trust policy</td>
+  <td>Real client/server workflows; rejected bad peers/keys, explicit timeout and resource limits</td>
+</tr>
+<tr>
+  <td>Accounts and local security</td>
+  <td>Principal database, local registration/login, password/key handling, permissions and audit boundaries</td>
+  <td>Unprivileged accounts cannot read/modify protected data; failed authentication and recovery are tested</td>
+</tr>
+</tbody>
+</table></div>
+<p>A RAM disk is not persistence. A packet echo is not a complete network stack.
+A compiled x86 target is not a supported architecture. Those distinctions should
+appear in the public feature matrix rather than being hidden in release notes.</p>
+<h3 id="runtime-portability-and-usable-applications">Runtime, portability and usable applications</h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+  <th>Planned work package</th>
+  <th>Deliverable</th>
+  <th>Exit evidence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>Native runtime and C library</td>
+  <td>Defined startup, allocation, file/process/time/thread interfaces and a documented compatibility subset</td>
+  <td>Port ordinary free command-line programs without Kernel-private shortcuts</td>
+</tr>
+<tr>
+  <td>POSIX compatibility environment</td>
+  <td>Deliberately scoped semantics above the native ABI; process, file, socket and threading support expanded as required</td>
+  <td>Conformance/behaviour tests and successful supported tool/library ports</td>
+</tr>
+<tr>
+  <td>Self-hosted developer toolchain</td>
+  <td>Native editor/build tools, compiler, linker and source-package workflows</td>
+  <td>Rebuild selected system components inside the system, then perform the documented complete-system build</td>
+</tr>
+<tr>
+  <td>Framework native system provider</td>
+  <td>Implement the actual portable Framework contracts over native services</td>
+  <td>Real headless Framework examples, Data Server operations, faults, cancellation and restart; no Framework dependency inside Kernel</td>
+</tr>
+<tr>
+  <td>Headless application qualification</td>
+  <td>Required console/server Umicom application profiles, data migration and operational tooling</td>
+  <td>End-to-end workflows using production libraries, not test stubs; restart and backup/restore checks</td>
+</tr>
+<tr>
+  <td>Installer and recoverable updates</td>
+  <td>Image manifest, authenticated package/update chain, generation selection and rollback</td>
+  <td>Clean installation, failed update, interrupted write and rollback on disposable disks, then declared hardware</td>
+</tr>
+</tbody>
+</table></div>
+<p>The native ABI does not automatically make existing Linux binaries runnable.
+We should port/rebuild supported software first, then make any binary-compatibility
+work a separate, justified project. A POSIX subset is not a claim of complete
+POSIX conformance.</p>
+<h3 id="desktop-release-and-expansion">Desktop, release and expansion</h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+  <th>Planned work package</th>
+  <th>Deliverable</th>
+  <th>Exit evidence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>Display and input services</td>
+  <td>Framebuffer/display modes, keyboard/pointer, event routing and device access policy</td>
+  <td>Real rendered frames and input inside the guest; denied cross-session access and device-loss handling</td>
+</tr>
+<tr>
+  <td>Graphical runtime and compositor</td>
+  <td>Window/surface lifecycle and the dependencies needed by the selected GUI backend</td>
+  <td>Multiple application windows, focus, resizing, clipboard boundaries and recovery after a client crash</td>
+</tr>
+<tr>
+  <td>Umicom Desk and Control Centre</td>
+  <td>Familiar desktop/workspace, launcher, settings, local account/session workflows and system information</td>
+  <td>Normal daily workflows from graphical login to shutdown, without a terminal prerequisite</td>
+</tr>
+<tr>
+  <td>Application catalogue and profiles</td>
+  <td>Studio, Desk, Trader, Bank and other qualifying Umicom applications packaged from Framework-based sources</td>
+  <td>Each included product completes its own acceptance journeys; missing ports are labelled unavailable, not claimed compatible</td>
+</tr>
+<tr>
+  <td>Hardware usability and accessibility</td>
+  <td>Required USB/audio/storage/input, power behaviour, keyboard accessibility, text/input localisation and assistive interfaces</td>
+  <td>Per-device/per-profile results; suspend/resume and long-running use where promised</td>
+</tr>
+<tr>
+  <td>Release hardening and maintenance</td>
+  <td>Fuzzing, performance/soak tests, threat review, source provenance, vulnerability response and support docs</td>
+  <td>Independent clean builds/installations, no open release blockers and an operational update/recovery process</td>
+</tr>
+<tr>
+  <td>ARM64 and broader profiles</td>
+  <td>Additional boards, small embedded systems and later mobile adaptation</td>
+  <td>Separate boot, power, input, networking and freedom-policy qualification for each named device</td>
+</tr>
+</tbody>
+</table></div>
+<p>A graphical window is not Desk completion. A Desk session is not evidence that
+Studio, Trader or Bank is production-ready. The distribution's “install all”
+selection must enumerate the actual qualified catalogue and its dependencies.</p>
+<p>Mobile remains a long-term objective. Boot-chain access, power management,
+modem isolation, input and free driver/firmware availability need device-specific
+engineering. “All major devices” is the direction of travel, not an initial
+support claim.</p>
+<h2 id="parallel-umicom-os-distribution-track">Parallel Umicom OS distribution track</h2>
+<p>The native-kernel programme should not discard the independent OS image and
+recovery work. The Linux-libre route can reach users earlier while the native
+kernel matures, provided it passes its own qualification.</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+  <th>OS work package</th>
+  <th>Owner and deliverable</th>
+  <th>Release evidence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>Reconcile freedom policy with image recipes</td>
+  <td>OS: pinned allowed sources, licence/source inventory, Linux-libre selection and reproducible input capture</td>
+  <td>Every distributed component has an approved source/rights record; no assumption based solely on the kernel name</td>
+</tr>
+<tr>
+  <td>Qualify foundation and recovery images</td>
+  <td>OS: real RISC-V/x86-64 image builds and boot/recovery transcripts</td>
+  <td>Successful normal and forced recovery boots from the actual produced artefacts</td>
+</tr>
+<tr>
+  <td>Persistent installation and identities</td>
+  <td>OS: safe virtual-disk installer, accounts, mounts, configuration and bounded administration</td>
+  <td>Fresh install, reboot, login and persistent-data tests</td>
+</tr>
+<tr>
+  <td>Service/platform integration</td>
+  <td>Framework and OS: providers, system manager, Data Server, networking and package staging</td>
+  <td>Real service lifecycle and fault recovery with Framework absent or broken</td>
+</tr>
+<tr>
+  <td>Desktop and product profiles</td>
+  <td>Desk/application modules plus OS packaging</td>
+  <td>Minimal, Desktop, Developer/Workstation and Server profiles each have explicit application/driver requirements</td>
+</tr>
+<tr>
+  <td>Authenticated update and rollback</td>
+  <td>OS release engineering: package sources, signing/key policy and recovery</td>
+  <td>Rejected tampering, expired/untrusted metadata, interrupted upgrade and successful rollback</td>
+</tr>
+<tr>
+  <td>Supported release</td>
+  <td>OS and application maintainers: published support matrix, source availability and maintenance</td>
+  <td>Freedom audit, security/reliability acceptance, installation documentation and operating support channels</td>
+</tr>
+</tbody>
+</table></div>
+<p>The proposed first broad distribution target remains <strong>x86-64</strong>, with Minimal,
+Desktop, Developer/Workstation, Server and Recovery qualification. RISC-V is the
+native-kernel development machine and can have a separately labelled developer
+preview. ARM64 and mobile do not block that narrowly declared first release.</p>
+<p>These release profiles are a planning recommendation carried forward from the
+project discussion, not a claim that the current OS repository already builds
+all of them.</p>
+<h2 id="free-system-policy-as-a-release-gate">Free-system policy as a release gate</h2>
+<p>The <a href="https://www.gnu.org/distros/free-system-distribution-guidelines.en.html">GNU FSDG</a>
+covers source and free licences for practical components, including documentation
+and fonts, and forbids steering users to nonfree repositories/software. Its
+complete-distribution criteria include self-hosting; small-device distributions
+have a specified exception. Nonfree firmware cannot be included. Maintenance
+and prompt correction of reported freedom problems are part of the commitment.</p>
+<p>Our project gate should therefore require an auditable package/source inventory,
+asset review, a free build route, documented supported hardware and a clear
+reporting/remediation owner. Existing Windows-hosted development does not
+establish the complete-system build requirement.</p>
+<p><a href="https://www.gnu.org/distros/free-distros.html.en">FSF listing</a> is a separate
+external decision, not an automatic outcome of a successful audit or choosing a
+free kernel. Do not describe Umicom OS as endorsed before that actually occurs.</p>
+<p>Freedom may limit initial hardware support. We should choose and publish a
+tested compatible-device matrix rather than add an undocumented proprietary
+driver/firmware path to meet a blanket hardware claim.</p>
+<h2 id="release-evidence-and-responsibilities">Release evidence and responsibilities</h2>
+<p>For each work package, record its owner, reviewed commit, dependencies, supported
+configuration, acceptance commands, actual results and remaining limitations.
+The owner columns describe repository responsibility, not staffing commitments.</p>
+<p><strong>Kernel:</strong> mechanisms, native ABI, driver interfaces and architecture tests.<br />
+<strong>Framework:</strong> reusable user-space contracts, portable providers and application infrastructure.<br />
+<strong>OS:</strong> image composition, boot profiles, packages, installation, updates and recovery.<br />
+<strong>Applications:</strong> product behaviour and acceptance journeys using Framework.<br />
+<strong>Release engineering:</strong> integrated source/licence records, artefact publication and maintenance.</p>
+<p>A normal delivery retains existing comments and implementation. Only required
+integration points change. If an old implementation is truly superseded, retain
+it with an explanation in an explicit disabled section unless removal is
+approved. Do not manufacture compatibility code merely to record an old name.</p>
+<p>The following are different pieces of evidence:</p>
+<ol>
+<li>A source review checks the design.</li>
+<li>A native test checks the code it actually executes.</li>
+<li>A cross-build checks target compilation/linking.</li>
+<li>A VM test checks the specific emulated machine.</li>
+<li>Hardware qualification checks the named physical machine.</li>
+<li>Installation/update/recovery tests check a composed OS product.</li>
+</ol>
+<p>A build fixture can prevent a stale executable from being tested. It cannot
+make an untested new capability complete. A readiness marker without its
+supporting checks is not sufficient for a release gate.</p>
+<h2 id="the-next-practical-checkpoint">The next practical checkpoint</h2>
+<p>Merge and qualify the event/wait-any delivery first. The immediate follow-on
+should address <strong>trap/interrupt state and safe pre-emption boundaries</strong>, then
+<strong>resumable user-process scheduling and blocking IPC</strong>. The interactive
+VFS/console lane follows rather than indefinitely adding isolated self-tests.</p>
+<p>At the console-alpha checkpoint we should have a machine that stays running,
+accepts commands and executes separately loaded programs. That is the point at
+which development starts to feel like using an operating system rather than
+only validating kernel mechanisms.</p>
+<p>Do not announce a supported release date before the scheduling, persistent
+storage and first application-provider integration risks have been measured.
+Publish named previews and their exact limitations in the meantime. The goal is
+a functioning, maintainable free system—not a version label ahead of the code.</p>
+
+<footer>Sammy Hegab · Umicom Foundation · Original planning material under the repository's MIT licence. Referenced external documents retain their own licences. This reading copy is generated from KERNEL_AND_OS_RELEASE_ROADMAP.md; no script or external asset is required to read it.</footer>
+</main>
+</div>
+</body>
+</html>
