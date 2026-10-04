@@ -37,6 +37,19 @@ UmicomU64 UmicomMessageProgramMain(UmicomU64 handle)
     if (umicomMessageProgramName[0] != 'U') return 0xea01U;
     const UmicomU64 identity = UmicomMessageProgramCall(UMICOM_USER_CALL_IDENTITY, 0U, 0U, 0U);
     UmicomKernelMessageInfo info;
+    /* QUERY writes this record through the user/Kernel boundary. The address
+     * helper below only converts a pointer; its const-qualified parameter does
+     * not tell the compiler that the later ECALL will fill the object.
+     * Give the complete record a defined starting value before taking that
+     * address. A zeroed record is not a successful query: the status check
+     * below must still pass before returned rights or readiness are used. */
+    info = (UmicomKernelMessageInfo) {
+        .rights = 0U,             /* Assume no authority before QUERY succeeds. */
+        .queued = 0U,             /* Queue depth must come from the Kernel. */
+        .nextBytes = 0U,          /* No pending packet size has been observed. */
+        .flags = 0U,              /* No readiness condition has been confirmed. */
+        .endpointReferences = 0U  /* QUERY supplies the actual reference count. */
+    };
     if (identity == 0U || UmicomMessageProgramCall(UMICOM_USER_CALL_MESSAGE_QUERY, handle,
         UmicomMessageProgramPointer(&info), 0U) != UMICOM_MESSAGE_OK) return 0xea02U;
 
