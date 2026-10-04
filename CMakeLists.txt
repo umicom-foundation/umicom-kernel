@@ -456,3 +456,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/ProcessRegistry.cmake")
 # Add copied message channels and a separately linked native exchange program.
 # Established loaders, process owners and architecture entry paths stay intact.
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/MessageChannels.cmake")
+
+# Add cooperative Kernel stacks and scheduling without changing the existing
+# trap, user-process or message-channel execution paths.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/KernelThreads.cmake")

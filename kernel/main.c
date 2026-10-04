@@ -45,6 +45,9 @@
 /* Add owned message exchange after the established process lifetime checks. */
 #include "umicom/kernel/message_channel.h"
 
+/* Cooperative Kernel stacks build on, rather than replace, these services. */
+#include "umicom/kernel/threads.h"
+
 /* Import stable product, architecture and machine identity strings. */
 #include "umicom/kernel/build.h"
 
@@ -1459,6 +1462,10 @@ void UmicomKernelMain(UmicomU64 hartId, UmicomAddress deviceTreeAddress)
     /* Exercise copied channels through two separately loaded user programs.
      * The channel service does not replace the original process monitor. */
     UmicomKernelMessageChannelsValidateExecution();
+
+    /* Resume separate Kernel call stacks and exercise channel peers that wait
+     * for one another, after the established user IPC path has returned. */
+    UmicomKernelThreadsValidateExecution();
 
     /* Mark the end of deterministic Kernel capability evidence. */
     UmicomKernelConsoleWriteLine("UMICOM_KERNEL_END");
