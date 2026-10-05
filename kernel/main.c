@@ -79,6 +79,9 @@
 /* Checked small-object storage is layered on the established frame owner. */
 #include "umicom/kernel/object_cache.h"
 
+/* Own mapped regions and guard pages without replacing established allocators. */
+#include "umicom/kernel/mapped_regions.h"
+
 #include "umicom/kernel/user_scheduler.h"
 
 /* Import linker-defined Kernel image boundaries. */
@@ -1515,6 +1518,10 @@ void UmicomKernelMain(UmicomU64 hartId, UmicomAddress deviceTreeAddress)
     /* Allocate and reclaim service-sized records only after process cleanup
      * has returned all of its temporary frame ownership. */
     UmicomKernelObjectCachesValidateExecution();
+
+    /* Check region ownership and actual protected supervisor stack accesses
+     * after all existing allocation and execution paths have completed. */
+    UmicomKernelMappedRegionsValidateExecution();
 
     /* Mark the end of deterministic Kernel capability evidence. */
     UmicomKernelConsoleWriteLine("UMICOM_KERNEL_END");

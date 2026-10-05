@@ -79,6 +79,14 @@ SECTIONS
         . = ALIGN(4096);
         __umicom_user_text_end = .;
 
+        /* Keep the guarded-stack probes on private executable pages. Their
+         * copies are mapped RX; no surrounding machine code is made callable. */
+        . = ALIGN(4096);
+        __umicom_region_text_start = .;
+        KEEP(*(.text.umicom_region_payload))
+        . = ALIGN(4096);
+        __umicom_region_text_end = .;
+
         /* Collect all other executable text sections produced by C/Assembly. */
         *(.text .text.*)
     } > RAM

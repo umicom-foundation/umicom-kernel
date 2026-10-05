@@ -545,8 +545,19 @@ UmicomKernelVirtualMemoryStatus UmicomKernelVirtualMemoryMapPage(
      * this mapping attempt so the failed operation does not leak a frame. */
     if (status != UMICOM_KERNEL_VIRTUAL_MEMORY_OK) {
         if (createdLevel1 != UMICOM_FALSE) {
+            /* Release can itself fail during rollback. Keep the linked table
+             * and its count until the allocator confirms release; otherwise
+             * the only ownership record disappears and cleanup cannot retry.
+             * The table is still empty, so the normal hierarchy destructor can
+             * safely finish this work after the caller receives the error. */
+            if (UmicomKernelPhysicalMemoryFreeFrame(level1PhysicalAddress) !=
+                UMICOM_KERNEL_MEMORY_OK) {
+                return UMICOM_KERNEL_VIRTUAL_MEMORY_PHYSICAL_MEMORY_ERROR;
+            }
             rootTable[level2Index] = (UmicomRiscvPageTableEntry)0U;
+#if 0 /* Earlier unchecked release retained for review; the checked call above replaces it. */
             (void)UmicomKernelPhysicalMemoryFreeFrame(level1PhysicalAddress);
+#endif
             --space->pageTableFrames;
         }
         return status;
