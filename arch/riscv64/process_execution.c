@@ -26,6 +26,10 @@
 #include "umicom/kernel/process.h"
 #include "umicom/kernel/platform.h"
 #include "umicom/kernel/riscv64/supervisor.h"
+#ifdef UMICOM_KERNEL_INTERRUPT_OWNERSHIP
+/* User entry must not borrow a timer or abandon an open hart-local section. */
+#include "umicom/kernel/interrupts.h"
+#endif
 
 /* The assembler implements the instruction-cache synchronisation required
  * after data stores created bytes which the same hart will execute. */
@@ -61,6 +65,13 @@ UmicomKernelProcessStatus UmicomKernelProcessRun(
     if (UmicomRiscvReadHartId() != 0U) {
         return UMICOM_PROCESS_ENTRY_REFUSED;
     }
+#ifdef UMICOM_KERNEL_INTERRUPT_OWNERSHIP
+    /* Refuse before programming the deadline, clearing the terminal report or
+     * changing process state. Release the Kernel ownership and retry normally. */
+    if (UmicomKernelInterruptContextSwitchAllowed() == UMICOM_FALSE) {
+        return UMICOM_PROCESS_ENTRY_REFUSED;
+    }
+#endif
     UmicomRiscvSupervisorMachineState before;
     UmicomRiscvSupervisorMachineState after;
     UmicomRiscvSupervisorMachineStateRead(&before);

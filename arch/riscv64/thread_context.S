@@ -25,6 +25,17 @@
     .global UmicomKernelThreadMachineReady
     .type UmicomKernelThreadMachineReady, @function
 UmicomKernelThreadMachineReady:
+#ifdef UMICOM_KERNEL_INTERRUPT_OWNERSHIP
+    /* MIE=0 alone cannot tell whether this stack still owns a critical section
+     * or a timer lease. Ask that owner before applying the original CSR checks.
+     * A refused Yield leaves the current callback and all its locals in place. */
+    addi sp, sp, -16
+    sd ra, 8(sp) /* This helper now makes a C call; preserve its caller's return. */
+    call UmicomKernelInterruptContextSwitchAllowed
+    ld ra, 8(sp)
+    addi sp, sp, 16
+    beqz a0, .Lumicom_thread_not_ready
+#endif
     /* These CSR reads require our documented machine-mode caller. */
     csrr t0, mhartid
     bnez t0, .Lumicom_thread_not_ready /* Only one hart owns this scheduler. */
@@ -61,6 +72,24 @@ UmicomKernelThreadContextPrepare:
     .global UmicomKernelThreadContextSwitch
     .type UmicomKernelThreadContextSwitch, @function
 UmicomKernelThreadContextSwitch:
+#ifdef UMICOM_KERNEL_INTERRUPT_OWNERSHIP
+    /* Most callers were checked by MachineReady. Completion also reaches this
+     * primitive directly, so a callback that returns with ownership still held
+     * must stop BEFORE saving a runnable continuation or changing its stack. */
+    addi sp, sp, -32
+    sd ra, 24(sp)
+    sd a0, 8(sp) /* Preserve outgoing/incoming pointers across the policy call. */
+    sd a1, 16(sp)
+    call UmicomKernelInterruptContextSwitchAllowed
+    mv t0, a0
+    ld a0, 8(sp)
+    ld a1, 16(sp)
+    ld ra, 24(sp)
+    addi sp, sp, 32
+    bnez t0, .Lumicom_thread_switch_owned_clear
+    unimp /* An unbalanced owner cannot safely be suspended or discarded. */
+.Lumicom_thread_switch_owned_clear:
+#endif
     /* a0 names the outgoing owner, a1 the incoming owner. Neither is on a user
      * stack. Save the complete cooperative context before loading any of next. */
     sd ra, 0(a0)   /* Continue just after this call when the thread is resumed. */

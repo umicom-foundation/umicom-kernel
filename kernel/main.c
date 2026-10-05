@@ -42,6 +42,9 @@
 /* Validate owned trap stacks and precise privilege-state restoration. */
 #include "umicom/kernel/riscv64/trap_integrity.h"
 
+/* Coordinate interrupt ownership only after the trap entry has its own stack. */
+#include "umicom/kernel/interrupts.h"
+
 /* Import overflow/alignment-safe address helpers used by memory validation. */
 #include "umicom/kernel/address.h"
 
@@ -1480,6 +1483,10 @@ void UmicomKernelMain(UmicomU64 hartId, UmicomAddress deviceTreeAddress)
     /* Audit machine trap boundaries after the existing execution and event
      * paths return. The original cause policy remains part of these checks. */
     UmicomKernelTrapHardeningValidate();
+
+    /* Preserve existing trap/timer policy while validating nesting, source
+     * ownership and refusal to switch away from an unfinished critical section. */
+    UmicomKernelInterruptOwnershipValidate();
 
     /* Mark the end of deterministic Kernel capability evidence. */
     UmicomKernelConsoleWriteLine("UMICOM_KERNEL_END");
