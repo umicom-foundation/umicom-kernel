@@ -480,3 +480,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/UserScheduling.cmake")
 # Connect checked message waits to retained user contexts. Nonblocking calls
 # and the existing context-saving implementation remain available unchanged.
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/BlockingIpc.cmake")
+
+# Coordinate parent lifetimes and terminal collection above the existing task
+# and IPC owners. Their execution and memory implementations remain unchanged.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/ProcessSupervision.cmake")

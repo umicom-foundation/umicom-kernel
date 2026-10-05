@@ -1073,6 +1073,23 @@ UmicomKernelVirtualMemoryStatus UmicomKernelVirtualAddressSpaceDestroy(
             const UmicomAddress level0PhysicalAddress =
                 EntryToPhysicalAddress(level1Entry);
 
+            /* Count this child's mappings while we still own its memory.
+             * Destruction can stop at any failed frame release. Updating the
+             * public counts after each successful detach keeps the remaining
+             * hierarchy valid for a later retry, rather than describing pages
+             * that an earlier partial attempt already returned to the allocator.
+             * These are mapping counts only; leaf data remains caller-owned. */
+            const UmicomRiscvPageTableEntry *const retiringTable =
+                PageTableFromPhysicalAddress(level0PhysicalAddress);
+            UmicomSize retiringMappings = (UmicomSize)0U;
+            for (UmicomSize entryIndex = (UmicomSize)0U;
+                 entryIndex < UMICOM_KERNEL_SV39_PAGE_TABLE_ENTRIES;
+                 ++entryIndex) {
+                if (EntryIsValid(retiringTable[entryIndex]) != UMICOM_FALSE) {
+                    ++retiringMappings;
+                }
+            }
+
             /* Return the level-0 page-table frame to physical memory. */
             if (
                 UmicomKernelPhysicalMemoryFreeFrame(level0PhysicalAddress) !=
@@ -1083,6 +1100,10 @@ UmicomKernelVirtualMemoryStatus UmicomKernelVirtualAddressSpaceDestroy(
 
             /* Disconnect the released child so no stale table pointer remains. */
             level1Table[level1Index] = (UmicomRiscvPageTableEntry)0U;
+            /* Publish accounting only after the successful free and detach.
+             * A failed free above leaves both the edge and counters untouched. */
+            --space->pageTableFrames;
+            space->mappedPages -= retiringMappings;
         }
 
         /* Return the now-empty level-1 page table. */
@@ -1095,6 +1116,9 @@ UmicomKernelVirtualMemoryStatus UmicomKernelVirtualAddressSpaceDestroy(
 
         /* Disconnect it from the root after successful release. */
         rootTable[level2Index] = (UmicomRiscvPageTableEntry)0U;
+        /* A root-free refusal must leave an empty, one-frame hierarchy whose
+         * counters still match an independent walk on the next attempt. */
+        --space->pageTableFrames;
     }
 
     /* Finally return the root frame itself. */

@@ -73,6 +73,9 @@
 /* Pending user messages retain their own buffers and resumable task state. */
 #include "umicom/kernel/user_ipc.h"
 
+/* Parent authority and terminal collection reuse the scheduled task owners. */
+#include "umicom/kernel/process_supervisor.h"
+
 #include "umicom/kernel/user_scheduler.h"
 
 /* Import linker-defined Kernel image boundaries. */
@@ -1501,6 +1504,10 @@ void UmicomKernelMain(UmicomU64 hartId, UmicomAddress deviceTreeAddress)
     /* Block loaded programs only after timed resumption has been validated.
      * The test releases endpoints and task images before final acceptance. */
     UmicomKernelBlockingIpcValidateExecution();
+
+    /* Check family policy and coordinated cleanup after message waits have
+     * demonstrated that their user continuations return safely. */
+    UmicomKernelProcessSupervisionValidateExecution();
 
     /* Mark the end of deterministic Kernel capability evidence. */
     UmicomKernelConsoleWriteLine("UMICOM_KERNEL_END");
