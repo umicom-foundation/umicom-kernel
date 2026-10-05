@@ -69,6 +69,9 @@
 /* Import the C entry-point declaration shared with boot.S. */
 #include "umicom/kernel/kernel.h"
 
+/* Timer-driven user continuations use the established loader and monitor. */
+#include "umicom/kernel/user_scheduler.h"
+
 /* Import linker-defined Kernel image boundaries. */
 #include "umicom/kernel/linker.h"
 
@@ -1487,6 +1490,10 @@ void UmicomKernelMain(UmicomU64 hartId, UmicomAddress deviceTreeAddress)
     /* Preserve existing trap/timer policy while validating nesting, source
      * ownership and refusal to switch away from an unfinished critical section. */
     UmicomKernelInterruptOwnershipValidate();
+
+    /* Schedule native user continuations only after trap and interrupt ownership
+     * checks pass. Their frames remain owned until terminal collection. */
+    UmicomKernelUserSchedulingValidateExecution();
 
     /* Mark the end of deterministic Kernel capability evidence. */
     UmicomKernelConsoleWriteLine("UMICOM_KERNEL_END");

@@ -472,3 +472,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/TrapHardening.cmake")
 # Add owned interrupt masking and checked critical-section lifetimes before
 # admitting timer-driven scheduling; all established entry paths are retained.
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/InterruptOwnership.cmake")
+
+# Retain timer-interrupted user frames and dispatch independent native images.
+# The existing run-once monitor and cooperative Kernel callbacks remain available.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/UserScheduling.cmake")

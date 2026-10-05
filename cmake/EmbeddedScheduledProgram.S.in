@@ -1,0 +1,10 @@
+/* Umicom Kernel immutable scheduled ELF carrier. The loader treats these as
+ * file bytes, never as directly callable Kernel functions.
+ * Sammy Hegab, Umicom Foundation. MIT licence. */
+    .section .rodata.umicom_scheduled_executable, "a", @progbits
+    .balign 16
+    .global UmicomScheduledExecutableStart
+    .global UmicomScheduledExecutableEnd
+UmicomScheduledExecutableStart:
+    .incbin "@UMICOM_SCHEDULED_EXECUTABLE_FILE@"
+UmicomScheduledExecutableEnd:

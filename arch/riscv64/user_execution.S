@@ -63,9 +63,27 @@
     .equ UMICOM_USER_SAVED_SESSION, 240
     .equ UMICOM_USER_SAVED_RESULT, 248
 
+#ifdef UMICOM_KERNEL_USER_SLICES
+    /* An explicit third argument selects retained integer context. The ordinary
+     * public entry below clears it, so existing run-once callers never depend
+     * on an unspecified argument register or a changed request structure. */
+    .global UmicomRiscvUserExecuteFrame
+    .type UmicomRiscvUserExecuteFrame, @function
+UmicomRiscvUserExecuteFrame:
+    j .Lumicom_user_frame_common
+    .size UmicomRiscvUserExecuteFrame, . - UmicomRiscvUserExecuteFrame
+#endif
+
     .global UmicomRiscvUserExecute
     .type UmicomRiscvUserExecute, @function
 UmicomRiscvUserExecute:
+#ifdef UMICOM_KERNEL_USER_SLICES
+    li a2, 0 /* No saved continuation belongs to the original two-argument API. */
+.Lumicom_user_frame_common:
+    /* Add a separate aligned extension above the original 544-byte layout.
+     * Its offsets, saved comments and existing register operations stay intact. */
+    addi sp, sp, -16
+#endif
     /* Entry is machine-only, with MPRV clear and interrupts already disabled.
      * Reserve both frames together so their offsets stay fixed across calls. */
     addi sp, sp, -UMICOM_USER_CONTEXT_BYTES
@@ -86,6 +104,9 @@ UmicomRiscvUserExecute:
     sd tp, UMICOM_USER_SAVED_TP(sp) /* Preserve the C caller's tp. */
     sd a0, UMICOM_USER_SAVED_REQUEST(sp) /* Trusted Kernel request. */
     sd a1, UMICOM_USER_SAVED_SESSION(sp) /* Trusted Kernel session. */
+#ifdef UMICOM_KERNEL_USER_SLICES
+    sd a2, UMICOM_USER_CONTEXT_BYTES(sp) /* Kernel-owned frame or zero; never a user pointer. */
+#endif
     csrr t0, mstatus /* Read the caller-owned mstatus. */
     sd t0, UMICOM_USER_SAVED_MSTATUS(sp) /* Save for exact restoration. */
     csrr t0, mie /* Read the caller-owned mie. */
@@ -159,6 +180,33 @@ UmicomRiscvUserExecute:
     sfence.vma zero, zero
     csrr t1, satp
     bne t0, t1, .Lumicom_user_restore
+#ifdef UMICOM_KERNEL_USER_SLICES
+    /* Reuse the original register-restoration body for a retained frame. There
+     * is still only one user save/restore implementation to audit. M-mode data
+     * accesses remain physical here, even though satp already names the task. */
+    ld t0, UMICOM_USER_CONTEXT_BYTES(sp)
+    beqz t0, .Lumicom_user_fresh_entry
+    addi t1, sp, UMICOM_USER_FRAME_BASE
+    li t2, UMICOM_USER_FRAME_BYTES
+.Lumicom_user_copy_in:
+    ld t4, 0(t0) /* Copy values; do not borrow the caller's structure as a stack. */
+    sd t4, 0(t1)
+    addi t0, t0, 8
+    addi t1, t1, 8
+    addi t2, t2, -8
+    bnez t2, .Lumicom_user_copy_in
+    /* Rebuild supported status from this hart's real WARL fields. No floating,
+     * vector, supervisor or machine privilege is inherited from a saved word. */
+    csrr t0, mstatus
+    li t1, 0x7e7faa
+    not t1, t1
+    and t0, t0, t1
+    sd t0, UMICOM_USER_FRAME_BASE+UMICOM_USER_FRAME_MSTATUS(sp)
+    li t0, 0x80
+    csrw mie, t0 /* Only the bounded user quantum may interrupt U-mode. */
+    j .Lumicom_user_restore_frame
+.Lumicom_user_fresh_entry:
+#endif
     ld t0, UMICOM_USER_REQUEST_ENTRY(t3)
     csrw mepc, t0
     ld t4, UMICOM_USER_REQUEST_STACK(t3)
@@ -248,6 +296,12 @@ UmicomRiscvUserTrapEntry:
     sd t4, UMICOM_USER_FRAME_BASE+UMICOM_USER_FRAME_X29_T4(sp) /* Capture user t4. */
     sd t5, UMICOM_USER_FRAME_BASE+UMICOM_USER_FRAME_X30_T5(sp) /* Capture user t5. */
     sd t6, UMICOM_USER_FRAME_BASE+UMICOM_USER_FRAME_X31_T6(sp) /* Capture user t6. */
+#ifdef UMICOM_KERNEL_USER_SLICES
+    /* User gp/tp are saved values, not valid bases for Kernel code. Restore the
+     * machine pair before calling C; the shared tail restores the user pair. */
+    ld gp, UMICOM_USER_SAVED_GP(sp)
+    ld tp, UMICOM_USER_SAVED_TP(sp)
+#endif
     csrr t0, mscratch /* Recover the user's untrusted sp as a value only. */
     sd t0, UMICOM_USER_FRAME_BASE+UMICOM_USER_FRAME_X2_SP(sp)
     csrr t0, mepc
@@ -279,6 +333,14 @@ UmicomRiscvUserTrapEntry:
 
     /* C has advanced only a validated ECALL PC and filled its result register.
      * Restore the private vector before letting user execution continue. */
+#ifdef UMICOM_KERNEL_USER_SLICES
+.Lumicom_user_restore_frame:
+    /* MRET need not clear a load-reservation. A dummy SC to our reserved zero
+     * word clears it without exposing another task's LR/SC lifetime. This word
+     * is never executable data or a live integer register. */
+    addi t0, sp, UMICOM_USER_FRAME_BASE+UMICOM_USER_FRAME_RESERVED
+    sc.d zero, zero, (t0)
+#endif
     la t0, UmicomRiscvUserTrapEntry
     csrw mtvec, t0
     csrw mscratch, sp
@@ -323,6 +385,25 @@ UmicomRiscvUserTrapEntry:
     mret
 
 .Lumicom_user_terminal:
+#ifdef UMICOM_KERNEL_USER_SLICES
+    /* The trap frame lives on this invocation's machine stack. Copy it out
+     * before that stack is released, preserving mepc exactly on a timer stop.
+     * The original run-once path has a zero destination and skips this step. */
+    ld t0, UMICOM_USER_CONTEXT_BYTES(sp)
+    beqz t0, .Lumicom_user_copy_complete
+    addi t1, sp, UMICOM_USER_FRAME_BASE
+    li t2, UMICOM_USER_FRAME_BYTES
+.Lumicom_user_copy_out:
+    ld t3, 0(t1)
+    sd t3, 0(t0)
+    addi t0, t0, 8
+    addi t1, t1, 8
+    addi t2, t2, -8
+    bnez t2, .Lumicom_user_copy_out
+.Lumicom_user_copy_complete:
+    addi t0, sp, UMICOM_USER_FRAME_BASE+UMICOM_USER_FRAME_RESERVED
+    sc.d zero, zero, (t0) /* No user LR reservation escapes back to the dispatcher. */
+#endif
     sd zero, UMICOM_USER_SAVED_RESULT(sp) /* Captured exit/fault/deadline, not automatic success. */
 .Lumicom_user_restore:
     /* Restore the borrowed control state before its page tables can be freed. */
@@ -380,6 +461,9 @@ UmicomRiscvUserTrapEntry:
     ld t0, UMICOM_USER_SAVED_MSTATUS(sp)
     csrw mstatus, t0 /* Global interrupt state is restored last. */
     addi sp, sp, UMICOM_USER_CONTEXT_BYTES
+#ifdef UMICOM_KERNEL_USER_SLICES
+    addi sp, sp, 16 /* Release only the new extension; the original frame is unchanged. */
+#endif
     ret /* Back to the suspended machine C call, not to a failed user instruction. */
     .size UmicomRiscvUserTrapEntry, . - UmicomRiscvUserTrapEntry
     .size UmicomRiscvUserExecute, . - UmicomRiscvUserExecute

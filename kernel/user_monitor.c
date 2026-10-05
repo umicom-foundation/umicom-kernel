@@ -24,6 +24,10 @@
  *---------------------------------------------------------------------------*/
 #include "umicom/kernel/address.h"
 #include "umicom/kernel/riscv64/user_execution.h"
+#ifdef UMICOM_KERNEL_USER_SLICES
+/* A bound scheduling invocation can pause at a timer without ending the program. */
+#include "umicom/kernel/riscv64/user_slice.h"
+#endif
 
 /* Keep the original minimal monitor usable by its independent native tests.
  * The Kernel build enables this branch only when the message service is linked. */
@@ -90,6 +94,15 @@ UmicomU64 UmicomKernelUserTrapDispatch(
         session->stopReason = UMICOM_USER_STOP_MONITOR_ERROR;
         return 0U;
     }
+#ifdef UMICOM_KERNEL_USER_SLICES
+    /* Preserve the original deadline semantics for every unbound session.
+     * A due slice returns to Kernel; an early MTIP observation resumes the
+     * same frame. Neither case advances an interrupted instruction. */
+    const UmicomU64 sliceDecision = UmicomKernelUserSliceOnTrap(session, frame);
+    if (sliceDecision != 0U) {
+        return sliceDecision == 2U ? 1U : 0U;
+    }
+#endif
     if (frame->mcause == (UMICOM_RISCV_MCAUSE_INTERRUPT_BIT | 7U)) {
         /* Even a user program that never makes another call can be stopped. */
         session->stopReason = UMICOM_USER_STOP_DEADLINE;
