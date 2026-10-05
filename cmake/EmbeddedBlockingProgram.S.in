@@ -1,0 +1,10 @@
+/* Umicom Kernel immutable blocking-program carrier. The separately linked ELF
+ * is input data for the loader, not code called on a Kernel stack.
+ * Sammy Hegab, Umicom Foundation. MIT licence. */
+    .section .rodata.umicom_blocking_executable, "a", @progbits
+    .balign 16
+    .global UmicomBlockingExecutableStart
+    .global UmicomBlockingExecutableEnd
+UmicomBlockingExecutableStart:
+    .incbin "@UMICOM_BLOCKING_EXECUTABLE_FILE@"
+UmicomBlockingExecutableEnd:

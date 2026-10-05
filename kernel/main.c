@@ -70,6 +70,9 @@
 #include "umicom/kernel/kernel.h"
 
 /* Timer-driven user continuations use the established loader and monitor. */
+/* Pending user messages retain their own buffers and resumable task state. */
+#include "umicom/kernel/user_ipc.h"
+
 #include "umicom/kernel/user_scheduler.h"
 
 /* Import linker-defined Kernel image boundaries. */
@@ -1494,6 +1497,10 @@ void UmicomKernelMain(UmicomU64 hartId, UmicomAddress deviceTreeAddress)
     /* Schedule native user continuations only after trap and interrupt ownership
      * checks pass. Their frames remain owned until terminal collection. */
     UmicomKernelUserSchedulingValidateExecution();
+
+    /* Block loaded programs only after timed resumption has been validated.
+     * The test releases endpoints and task images before final acceptance. */
+    UmicomKernelBlockingIpcValidateExecution();
 
     /* Mark the end of deterministic Kernel capability evidence. */
     UmicomKernelConsoleWriteLine("UMICOM_KERNEL_END");

@@ -22,6 +22,10 @@
  * LICENCE:
  *   MIT
  *---------------------------------------------------------------------------*/
+#ifdef UMICOM_KERNEL_BLOCKING_IPC
+/* A waiting syscall returns to the scheduler, not a busy loop in user code. */
+#include "umicom/kernel/user_ipc.h"
+#endif
 #include "umicom/kernel/address.h"
 #include "umicom/kernel/riscv64/user_execution.h"
 #ifdef UMICOM_KERNEL_USER_SLICES
@@ -144,6 +148,14 @@ UmicomU64 UmicomKernelUserTrapDispatch(
         session->stopReason = UMICOM_USER_STOP_MONITOR_ERROR;
         return 0U;
     }
+
+#ifdef UMICOM_KERNEL_BLOCKING_IPC
+    /* The origin, executable-PC and call-budget checks above still apply.
+     * The service advances the validated ECALL continuation exactly once. */
+    if (UmicomKernelUserIpcRecognizes(frame->x17_a7) != UMICOM_FALSE) {
+        return UmicomKernelUserIpcDispatch(session, frame, nextPc);
+    }
+#endif
 
     UmicomU64 result = UMICOM_USER_RESULT_UNKNOWN_CALL;
     if (frame->x17_a7 == UMICOM_USER_CALL_IDENTITY) {

@@ -46,6 +46,8 @@ typedef enum UmicomKernelUserTaskState {
     UMICOM_USER_TASK_CANCELLED,
     UMICOM_USER_TASK_ERROR,
     UMICOM_USER_TASK_RETAINED
+    /* Appending preserves every established state's numeric value. */
+    , UMICOM_USER_TASK_BLOCKED = 10
 } UmicomKernelUserTaskState;
 typedef enum UmicomKernelUserScheduleStatus {
     UMICOM_USER_SCHEDULE_OK,
@@ -83,6 +85,8 @@ typedef struct UmicomKernelUserScheduler {
     UmicomU64 nextIdentity; /* Never supplied by an executable or recycled on close. */
     UmicomU64 dispatches;
     UmicomKernelUserTask tasks[UMICOM_USER_TASK_LIMIT];
+    /* Optional owner for blocked messages; zero keeps the original path. */
+    struct UmicomKernelUserIpc *ipc;
 } UmicomKernelUserScheduler;
 
 typedef struct UmicomKernelUserTaskInfo {
@@ -124,4 +128,10 @@ UmicomKernelUserScheduleStatus UmicomKernelUserSchedulerReapRetained(UmicomKerne
 UmicomKernelUserScheduleStatus UmicomKernelUserSchedulerValidate(UmicomKernelUserScheduler *scheduler);
 const char *UmicomKernelUserTaskStateName(UmicomKernelUserTaskState state);
 void UmicomKernelUserSchedulingValidateExecution(void);
+/* The attached private IPC domain, when present, participates in terminal
+ * cleanup. External domains still require their separate supervisor/owner. */
+/* Trusted setup before the first instruction only. Admission can pass a newly
+ * issued endpoint after both task identities have been allocated. */
+UmicomKernelUserScheduleStatus UmicomKernelUserTaskSetArgument(UmicomKernelUserScheduler *scheduler,
+    UmicomKernelUserTaskHandle handle, UmicomU64 argument);
 #endif /* UMICOM_KERNEL_USER_SCHEDULER_H */

@@ -19,6 +19,9 @@
  *   Umicom Foundation
  * LICENCE: MIT
  *---------------------------------------------------------------------------*/
+#ifdef UMICOM_KERNEL_BLOCKING_IPC
+#include "umicom/kernel/user_ipc.h"
+#endif
 #include "umicom/kernel/user_scheduler.h"
 #include "umicom/kernel/riscv64/user_slice.h"
 
@@ -134,6 +137,12 @@ UmicomKernelUserScheduleStatus UmicomKernelUserSchedulerRunOne(UmicomKernelUserS
     if (outHandle == (UmicomKernelUserTaskHandle *)0 || quantumTicks < UMICOM_USER_QUANTUM_MIN_TICKS ||
         quantumTicks > UMICOM_USER_QUANTUM_MAX_TICKS) return UMICOM_USER_SCHEDULE_INVALID_ARGUMENT;
     if (scheduler->dispatches == ~(UmicomU64)0U) return UMICOM_USER_SCHEDULE_BAD_STATE;
+#ifdef UMICOM_KERNEL_BLOCKING_IPC
+    /* Recheck durable queue conditions before selecting runnable work. A
+     * pending task spends no dispatches merely because its peer is delayed. */
+    if (UmicomKernelUserIpcPump(scheduler) == UMICOM_FALSE)
+        return UMICOM_USER_SCHEDULE_MACHINE_STATE_ERROR;
+#endif
     UmicomSize selected = UMICOM_USER_TASK_LIMIT;
     for (UmicomSize offset = 0U; offset < UMICOM_USER_TASK_LIMIT; ++offset) {
         const UmicomSize slot = (scheduler->next + offset) % UMICOM_USER_TASK_LIMIT;
@@ -147,12 +156,25 @@ UmicomKernelUserScheduleStatus UmicomKernelUserSchedulerRunOne(UmicomKernelUserS
     UmicomKernelUserTask *const task = &scheduler->tasks[selected];
     if (task->slices >= task->sliceLimit || task->process.state != UMICOM_PROCESS_RUNNING)
         return UMICOM_USER_SCHEDULE_BAD_STATE;
+#ifdef UMICOM_KERNEL_BLOCKING_IPC
+    /* Bind this task's identity, never a preceding invocation's identity. */
+    if (UmicomKernelUserIpcBegin(scheduler, task) == UMICOM_FALSE)
+        return UMICOM_USER_SCHEDULE_ENTRY_REFUSED;
+#endif
     const UmicomKernelUserTaskState previousState = task->state;
     scheduler->active = UMICOM_TRUE;
     task->state = UMICOM_USER_TASK_RUNNING;
     UmicomBoolean expired = UMICOM_FALSE;
     const UmicomKernelUserScheduleStatus result = UmicomKernelUserSliceRun(task, quantumTicks, &expired);
     scheduler->active = UMICOM_FALSE;
+#ifdef UMICOM_KERNEL_BLOCKING_IPC
+    /* No service binding may escape an invocation, including refused entry. */
+    if (UmicomKernelUserIpcEnd(scheduler, task) == UMICOM_FALSE) {
+        scheduler->poisoned = UMICOM_TRUE;
+        task->state = UMICOM_USER_TASK_ERROR;
+        return UMICOM_USER_SCHEDULE_MACHINE_STATE_ERROR;
+    }
+#endif
     if (result != UMICOM_USER_SCHEDULE_OK) {
         task->state = previousState; /* Ordinary refusal spends no execution budget. */
         if (result == UMICOM_USER_SCHEDULE_MACHINE_STATE_ERROR) {
@@ -164,6 +186,11 @@ UmicomKernelUserScheduleStatus UmicomKernelUserSchedulerRunOne(UmicomKernelUserS
             task->state = UMICOM_USER_TASK_ERROR;
             task->process.state = UMICOM_PROCESS_MONITOR_ERROR;
             task->process.quiesced = UMICOM_TRUE; /* No live hardware root remains. */
+#ifdef UMICOM_KERNEL_BLOCKING_IPC
+            /* This refused continuation will never use its endpoints again. */
+            if (UmicomKernelUserIpcStop(scheduler, task) == UMICOM_FALSE)
+                return UMICOM_USER_SCHEDULE_MACHINE_STATE_ERROR;
+#endif
         }
         return result;
     }
@@ -171,6 +198,11 @@ UmicomKernelUserScheduleStatus UmicomKernelUserSchedulerRunOne(UmicomKernelUserS
     ++task->slices;
     scheduler->next = (selected + 1U) % UMICOM_USER_TASK_LIMIT;
     *outHandle = UmicomUserTaskToken(task, selected);
+#ifdef UMICOM_KERNEL_BLOCKING_IPC
+    /* A waiting ECALL is live work, not an unrecognised terminal stop. */
+    if (UmicomKernelUserIpcPending(scheduler, task) != UMICOM_FALSE)
+        return UmicomKernelUserIpcSuspend(scheduler, task, expired);
+#endif
     if (expired != UMICOM_FALSE) {
         ++task->preemptions;
         if (task->slices < task->sliceLimit) {
@@ -202,6 +234,11 @@ UmicomKernelUserScheduleStatus UmicomKernelUserSchedulerRunOne(UmicomKernelUserS
         }
     }
     task->process.quiesced = UMICOM_TRUE; /* Terminal, but not implicitly destroyed. */
+#ifdef UMICOM_KERNEL_BLOCKING_IPC
+    /* Close only this attached domain's references, not a peer's queued data. */
+    if (UmicomKernelUserIpcStop(scheduler, task) == UMICOM_FALSE)
+        return UMICOM_USER_SCHEDULE_MACHINE_STATE_ERROR;
+#endif
     return UMICOM_USER_SCHEDULE_OK;
 }
 
@@ -234,10 +271,24 @@ UmicomKernelUserScheduleStatus UmicomKernelUserTaskCancel(UmicomKernelUserSchedu
     if (ready != UMICOM_USER_SCHEDULE_OK) return ready;
     UmicomKernelUserTask *const task = UmicomUserTaskFind(scheduler, handle);
     if (task == (UmicomKernelUserTask *)0) return UMICOM_USER_SCHEDULE_INVALID_HANDLE;
+#ifdef UMICOM_KERNEL_BLOCKING_IPC
+    if (task->state == UMICOM_USER_TASK_BLOCKED) {
+        /* Discard the pending operation before reusing the original cancel
+         * transition. No instruction can run in this serial Kernel interval. */
+        if (UmicomKernelUserIpcStop(scheduler, task) == UMICOM_FALSE)
+            return UMICOM_USER_SCHEDULE_MACHINE_STATE_ERROR;
+        task->state = UMICOM_USER_TASK_PAUSED;
+    }
+#endif
     if (task->state != UMICOM_USER_TASK_READY && task->state != UMICOM_USER_TASK_PAUSED)
         return UMICOM_USER_SCHEDULE_BAD_STATE;
     task->state = UMICOM_USER_TASK_CANCELLED;
     task->process.state = UMICOM_PROCESS_CLEANUP_REQUIRED; /* No more continuation may run. */
+#ifdef UMICOM_KERNEL_BLOCKING_IPC
+    /* READY and timer-paused cancellation also release scoped endpoints. */
+    if (UmicomKernelUserIpcStop(scheduler, task) == UMICOM_FALSE)
+        return UMICOM_USER_SCHEDULE_MACHINE_STATE_ERROR;
+#endif
     task->process.quiesced = UMICOM_TRUE;
     return UMICOM_USER_SCHEDULE_OK;
 }
@@ -249,6 +300,10 @@ UmicomKernelUserScheduleStatus UmicomKernelUserTaskReap(UmicomKernelUserSchedule
     if (ready != UMICOM_USER_SCHEDULE_OK) return ready;
     UmicomKernelUserTask *const task = UmicomUserTaskFind(scheduler, handle);
     if (task == (UmicomKernelUserTask *)0) return UMICOM_USER_SCHEDULE_INVALID_HANDLE;
+#ifdef UMICOM_KERNEL_BLOCKING_IPC
+    /* A blocked stack is live even though no CPU currently uses it. */
+    if (task->state == UMICOM_USER_TASK_BLOCKED) return UMICOM_USER_SCHEDULE_BAD_STATE;
+#endif
     if (task->state == UMICOM_USER_TASK_READY || task->state == UMICOM_USER_TASK_PAUSED ||
         task->state == UMICOM_USER_TASK_RUNNING) return UMICOM_USER_SCHEDULE_BAD_STATE;
     if (UmicomKernelProcessDestroy(&task->process) != UMICOM_PROCESS_OK)
@@ -308,12 +363,17 @@ UmicomKernelUserScheduleStatus UmicomKernelUserSchedulerValidate(UmicomKernelUse
             return UMICOM_USER_SCHEDULE_BAD_STATE;
         count += task->slices; /* At most four bounded slice counts can contribute. */
     }
+#ifdef UMICOM_KERNEL_BLOCKING_IPC
+    if (UmicomKernelUserIpcValidate(scheduler) == UMICOM_FALSE)
+        return UMICOM_USER_SCHEDULE_BAD_STATE;
+#endif
     return count <= scheduler->dispatches ? UMICOM_USER_SCHEDULE_OK : UMICOM_USER_SCHEDULE_BAD_STATE;
 }
 
 const char *UmicomKernelUserTaskStateName(UmicomKernelUserTaskState state)
 {
     switch (state) {
+        case UMICOM_USER_TASK_BLOCKED: return "blocked";
         case UMICOM_USER_TASK_EMPTY: return "empty";
         case UMICOM_USER_TASK_READY: return "ready";
         case UMICOM_USER_TASK_RUNNING: return "running";
@@ -326,4 +386,18 @@ const char *UmicomKernelUserTaskStateName(UmicomKernelUserTaskState state)
         case UMICOM_USER_TASK_RETAINED: return "retained";
         default: return "invalid-state";
     }
+}
+
+UmicomKernelUserScheduleStatus UmicomKernelUserTaskSetArgument(UmicomKernelUserScheduler *scheduler,
+    UmicomKernelUserTaskHandle handle, UmicomU64 argument)
+{
+    const UmicomKernelUserScheduleStatus ready = UmicomUserSchedulerReady(scheduler);
+    if (ready != UMICOM_USER_SCHEDULE_OK) return ready;
+    UmicomKernelUserTask *const task = UmicomUserTaskFind(scheduler, handle);
+    if (task == (UmicomKernelUserTask *)0) return UMICOM_USER_SCHEDULE_INVALID_HANDLE;
+    /* Admission may not overwrite a retained syscall result or paused register. */
+    if (task->state != UMICOM_USER_TASK_READY || task->slices != 0U)
+        return UMICOM_USER_SCHEDULE_BAD_STATE;
+    task->frame.x10_a0 = argument;
+    return UMICOM_USER_SCHEDULE_OK;
 }

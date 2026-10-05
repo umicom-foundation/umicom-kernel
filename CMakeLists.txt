@@ -476,3 +476,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/InterruptOwnership.cmake")
 # Retain timer-interrupted user frames and dispatch independent native images.
 # The existing run-once monitor and cooperative Kernel callbacks remain available.
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/UserScheduling.cmake")
+
+# Connect checked message waits to retained user contexts. Nonblocking calls
+# and the existing context-saving implementation remain available unchanged.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/BlockingIpc.cmake")
