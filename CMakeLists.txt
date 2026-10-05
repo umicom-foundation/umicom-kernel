@@ -464,3 +464,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/KernelThreads.cmake")
 # Add remembered events and bounded wait-any coordination above the existing
 # cooperative scheduler; no established thread or message API is replaced.
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/KernelEvents.cmake")
+
+# Use owned machine trap storage and checked return state, retaining the earlier
+# trap body for review and the established C cause policy for normal events.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/TrapHardening.cmake")

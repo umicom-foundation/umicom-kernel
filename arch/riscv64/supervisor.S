@@ -203,6 +203,10 @@ UmicomRiscvSupervisorTrapEntry:
      * trap-entry status in t1 so the report can still prove MPP=S. */
     li t0, 0x20000
     csrrc t1, mstatus, t0
+    /* A second fault while collecting the supervisor report must use neither
+     * its old sp nor the first report frame. t0 is scratch at this point. */
+    la t0, UmicomRiscvMachineTrapEmergency
+    csrw mtvec, t0
     ld t2, UMICOM_SUPERVISOR_SAVED_REPORT(sp)
     sd t1, UMICOM_SUPERVISOR_REPORT_STATUS(t2)
     sd a0, UMICOM_SUPERVISOR_REPORT_RETURN(t2) /* Payload return register. */
@@ -239,6 +243,11 @@ UmicomRiscvSupervisorTrapEntry:
     csrw medeleg, t0 /* Restore the caller's medeleg. */
     ld t0, UMICOM_SUPERVISOR_SAVED_MIDELEG(sp)
     csrw mideleg, t0 /* Restore the caller's mideleg. */
+    /* The saved vector and its scratch pointer form one entry contract.
+     * Publish the pointer first, before making that vector active again. The
+     * original scratch restoration below is retained and remains idempotent. */
+    ld t0, UMICOM_SUPERVISOR_SAVED_MSCRATCH(sp)
+    csrw mscratch, t0
     ld t0, UMICOM_SUPERVISOR_SAVED_MTVEC(sp)
     csrw mtvec, t0 /* Restore the caller's mtvec. */
     ld t0, UMICOM_SUPERVISOR_SAVED_MSCRATCH(sp)

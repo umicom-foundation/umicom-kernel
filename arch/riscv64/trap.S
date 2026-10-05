@@ -105,6 +105,15 @@ UmicomRiscvTrapInstall:
      * csrc means "clear CSR bits named by the register operand". */
     csrc mstatus, t0
 
+    /* The ordinary vector now owns a separate landing stack. Prepare its
+     * sentinels and mscratch while interrupts are masked. This is an ordinary
+     * call, so keep the original installer's return address on its valid stack. */
+    addi sp, sp, -16
+    sd ra, 8(sp)
+    call UmicomRiscvMachineTrapPrepare
+    ld ra, 8(sp)
+    addi sp, sp, 16
+
     /* Load the address of the Assembly trap entry into a temporary register. */
     la t0, UmicomRiscvTrapEntry
 
@@ -143,6 +152,13 @@ UmicomRiscvTrapVectorAddress:
     .align 4
 
 UmicomRiscvTrapEntry:
+    /* The implementation below is retained verbatim for comparison. It saved
+     * the frame on the interrupted stack, which cannot report a fault when
+     * that stack is unusable. The new entry swaps onto owned machine storage,
+     * guards return state and uses a separate vector for a second fault.
+     * The exported entry name and the original C cause dispatcher are retained. */
+    j UmicomRiscvMachineTrapEnter
+#if 0 /* Superseded interrupted-stack entry; retained, not compiled. */
     /* Reserve the complete software trap frame below the interrupted stack.
      *
      * RISC-V stacks grow toward lower addresses. */
@@ -312,6 +328,8 @@ UmicomRiscvTrapEntry:
      * MRET resumes at mepc and restores MIE from MPIE according to the RISC-V
      * privileged architecture. */
     mret
+
+#endif /* Retained interrupted-stack implementation. */
 
     .size UmicomRiscvTrapEntry, . - UmicomRiscvTrapEntry
 

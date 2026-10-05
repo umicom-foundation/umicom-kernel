@@ -218,6 +218,10 @@ UmicomRiscvUserTrapEntry:
     sd gp, UMICOM_USER_FRAME_BASE+UMICOM_USER_FRAME_X3_GP(sp) /* Capture user gp. */
     sd tp, UMICOM_USER_FRAME_BASE+UMICOM_USER_FRAME_X4_TP(sp) /* Capture user tp. */
     sd t0, UMICOM_USER_FRAME_BASE+UMICOM_USER_FRAME_X5_T0(sp) /* Capture user t0. */
+    /* t0 is safely captured. From here a second fault must not repeat the
+     * user-stack exchange or overwrite the partially populated user frame. */
+    la t0, UmicomRiscvMachineTrapEmergency
+    csrw mtvec, t0
     sd t1, UMICOM_USER_FRAME_BASE+UMICOM_USER_FRAME_X6_T1(sp) /* Capture user t1. */
     sd t2, UMICOM_USER_FRAME_BASE+UMICOM_USER_FRAME_X7_T2(sp) /* Capture user t2. */
     sd s0, UMICOM_USER_FRAME_BASE+UMICOM_USER_FRAME_X8_S0(sp) /* Capture user s0. */
@@ -261,6 +265,11 @@ UmicomRiscvUserTrapEntry:
     /* During the C dispatcher a Kernel fault belongs to the existing fatal
      * trap handler, not this user save path. A nested Kernel fault must never
      * overwrite the saved user frame or exchange sp with a user-controlled value. */
+    /* Restore the scratch owner before its vector. The user's old sp has
+     * already been copied into the frame and is not a machine landing pointer.
+     * The existing later scratch write remains a harmless idempotent restore. */
+    ld t0, UMICOM_USER_SAVED_MSCRATCH(sp)
+    csrw mscratch, t0
     ld t0, UMICOM_USER_SAVED_MTVEC(sp)
     csrw mtvec, t0
     ld a0, UMICOM_USER_SAVED_SESSION(sp)
@@ -331,6 +340,11 @@ UmicomRiscvUserTrapEntry:
     csrw medeleg, t0 /* Restore the machine caller's medeleg. */
     ld t0, UMICOM_USER_SAVED_MIDELEG(sp)
     csrw mideleg, t0 /* Restore the machine caller's mideleg. */
+    /* Restore the scratch owner before its vector. The user's old sp has
+     * already been copied into the frame and is not a machine landing pointer.
+     * The existing later scratch write remains a harmless idempotent restore. */
+    ld t0, UMICOM_USER_SAVED_MSCRATCH(sp)
+    csrw mscratch, t0
     ld t0, UMICOM_USER_SAVED_MTVEC(sp)
     csrw mtvec, t0 /* Restore the machine caller's mtvec. */
     ld t0, UMICOM_USER_SAVED_MSCRATCH(sp)

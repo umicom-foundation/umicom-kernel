@@ -39,6 +39,9 @@
  *   MIT
  *---------------------------------------------------------------------------*/
 
+/* Validate owned trap stacks and precise privilege-state restoration. */
+#include "umicom/kernel/riscv64/trap_integrity.h"
+
 /* Import overflow/alignment-safe address helpers used by memory validation. */
 #include "umicom/kernel/address.h"
 
@@ -1473,6 +1476,10 @@ void UmicomKernelMain(UmicomU64 hartId, UmicomAddress deviceTreeAddress)
     /* Build bounded event waits on the existing cooperative stacks, then use
      * those notifications to coordinate the unchanged message queues. */
     UmicomKernelEventsValidateExecution();
+
+    /* Audit machine trap boundaries after the existing execution and event
+     * paths return. The original cause policy remains part of these checks. */
+    UmicomKernelTrapHardeningValidate();
 
     /* Mark the end of deterministic Kernel capability evidence. */
     UmicomKernelConsoleWriteLine("UMICOM_KERNEL_END");

@@ -163,3 +163,8 @@ ASSERT(
     __kernel_end <= ORIGIN(RAM) + LENGTH(RAM),
     "Umicom Kernel the first-boot foundation image exceeds the configured QEMU RAM region"
 )
+
+/* Bound instruction inspection to executable bytes, not all Kernel memory.
+ * The trap guard validates this range before reading an ECALL encoding. */
+__umicom_trap_text_begin = ADDR(.text);
+__umicom_trap_text_end = ADDR(.text) + SIZEOF(.text);
