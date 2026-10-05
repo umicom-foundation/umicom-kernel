@@ -879,3 +879,29 @@ const char *UmicomKernelMemoryStatusName(UmicomKernelMemoryStatus status)
             return "unknown-status";
     }
 }
+
+UmicomKernelMemoryStatus UmicomKernelPhysicalMemoryFrameQuery(
+    UmicomAddress frameAddress, UmicomKernelPhysicalFrameState *outState)
+{
+    /* Validate the destination before consulting allocator-private metadata. */
+    if (outState == (UmicomKernelPhysicalFrameState *)0) {
+        return UMICOM_KERNEL_MEMORY_INVALID_ARGUMENT;
+    }
+    /* Reuse the same alignment, initialisation and range checks as FreeFrame.
+     * This is an observation only: no reservation or allocation bit is changed. */
+    UmicomSize frameIndex = 0U;
+    const UmicomKernelMemoryStatus status = FrameAddressToIndex(frameAddress, &frameIndex);
+    if (status != UMICOM_KERNEL_MEMORY_OK) {
+        return status;
+    }
+    const UmicomBoolean reserved = BitmapRead(gReservedBitmap, frameIndex);
+    const UmicomBoolean allocated = BitmapRead(gAllocatedBitmap, frameIndex);
+    /* A frame cannot belong to both classes. Do not publish an arbitrary winner
+     * if corruption made both bits true. The caller receives no new state. */
+    if (reserved != UMICOM_FALSE && allocated != UMICOM_FALSE) {
+        return UMICOM_KERNEL_MEMORY_INVARIANT_FAILURE;
+    }
+    *outState = reserved != UMICOM_FALSE ? UMICOM_PHYSICAL_FRAME_RESERVED :
+        (allocated != UMICOM_FALSE ? UMICOM_PHYSICAL_FRAME_ALLOCATED : UMICOM_PHYSICAL_FRAME_FREE);
+    return UMICOM_KERNEL_MEMORY_OK;
+}

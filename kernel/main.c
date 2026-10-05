@@ -76,6 +76,9 @@
 /* Parent authority and terminal collection reuse the scheduled task owners. */
 #include "umicom/kernel/process_supervisor.h"
 
+/* Checked small-object storage is layered on the established frame owner. */
+#include "umicom/kernel/object_cache.h"
+
 #include "umicom/kernel/user_scheduler.h"
 
 /* Import linker-defined Kernel image boundaries. */
@@ -1508,6 +1511,10 @@ void UmicomKernelMain(UmicomU64 hartId, UmicomAddress deviceTreeAddress)
     /* Check family policy and coordinated cleanup after message waits have
      * demonstrated that their user continuations return safely. */
     UmicomKernelProcessSupervisionValidateExecution();
+
+    /* Allocate and reclaim service-sized records only after process cleanup
+     * has returned all of its temporary frame ownership. */
+    UmicomKernelObjectCachesValidateExecution();
 
     /* Mark the end of deterministic Kernel capability evidence. */
     UmicomKernelConsoleWriteLine("UMICOM_KERNEL_END");

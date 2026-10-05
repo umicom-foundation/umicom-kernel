@@ -484,3 +484,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/BlockingIpc.cmake")
 # Coordinate parent lifetimes and terminal collection above the existing task
 # and IPC owners. Their execution and memory implementations remain unchanged.
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/ProcessSupervision.cmake")
+
+# Allocate small Kernel records from owned physical frames without replacing
+# the existing allocator, schedulers or service storage.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/ObjectCaches.cmake")

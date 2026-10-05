@@ -162,4 +162,19 @@ UmicomKernelMemoryStatus UmicomKernelPhysicalMemoryValidate(void);
 /* Return a stable human-readable name for one memory status value. */
 const char *UmicomKernelMemoryStatusName(UmicomKernelMemoryStatus status);
 
+/* A read-only classification, not a transferable ownership token. It lets
+ * higher allocators reject a missing or reserved backing frame before touching
+ * its bytes. A caller must still retain exclusive ownership until FreeFrame. */
+typedef enum UmicomKernelPhysicalFrameState {
+    UMICOM_PHYSICAL_FRAME_FREE,
+    UMICOM_PHYSICAL_FRAME_RESERVED,
+    UMICOM_PHYSICAL_FRAME_ALLOCATED
+} UmicomKernelPhysicalFrameState;
+
+/* Inspect one aligned, managed frame without altering allocation state.
+ * The output is unchanged on error. ALLOCATED does not identify the owner or
+ * detect a frame freed and reallocated behind that owner's back. */
+UmicomKernelMemoryStatus UmicomKernelPhysicalMemoryFrameQuery(
+    UmicomAddress frameAddress, UmicomKernelPhysicalFrameState *outState);
+
 #endif /* UMICOM_KERNEL_PHYSICAL_MEMORY_H */
