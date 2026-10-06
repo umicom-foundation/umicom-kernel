@@ -492,3 +492,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/ObjectCaches.cmake")
 # Own immutable mapped regions and protected stacks above the existing mapper.
 # Borrowed roots cannot be torn down while their execution lease is active.
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/MappedRegions.cmake")
+
+# Resolve typed paths and client descriptors over owned RAM-backed file data.
+# Existing allocation, process, IPC and execution services remain unchanged.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/VirtualFilesystem.cmake")

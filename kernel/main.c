@@ -82,6 +82,9 @@
 /* Own mapped regions and guard pages without replacing established allocators. */
 #include "umicom/kernel/mapped_regions.h"
 
+/* Add typed filesystem operations above the existing memory owners. */
+#include "umicom/kernel/vfs.h"
+
 #include "umicom/kernel/user_scheduler.h"
 
 /* Import linker-defined Kernel image boundaries. */
@@ -1522,6 +1525,10 @@ void UmicomKernelMain(UmicomU64 hartId, UmicomAddress deviceTreeAddress)
     /* Check region ownership and actual protected supervisor stack accesses
      * after all existing allocation and execution paths have completed. */
     UmicomKernelMappedRegionsValidateExecution();
+
+    /* Store and reclaim named RAM files, then run their copied ELF bytes
+     * through the existing process loader before checking final ownership. */
+    UmicomKernelVfsValidateExecution();
 
     /* Mark the end of deterministic Kernel capability evidence. */
     UmicomKernelConsoleWriteLine("UMICOM_KERNEL_END");
