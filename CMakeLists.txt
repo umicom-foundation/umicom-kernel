@@ -516,3 +516,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/ProgramLaunch.cmake")
 # Select normal startup and independent recovery without removing diagnostics.
 # Startup jobs reuse the existing process, launch and stream owners.
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/NormalBoot.cmake")
+
+# Monitor live native services through explicit readiness and health reports.
+# One-shot boot jobs and every existing execution path remain available.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/ManagedServices.cmake")

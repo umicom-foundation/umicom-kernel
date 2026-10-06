@@ -19,6 +19,10 @@
  *   Umicom Foundation
  * LICENCE: MIT
  *---------------------------------------------------------------------------*/
+#ifdef UMICOM_KERNEL_MANAGED_SERVICES
+/* Explicit readiness reports use the same checked trap and saved-frame path. */
+#include "umicom/kernel/service_manager.h"
+#endif
 #ifdef UMICOM_KERNEL_BLOCKING_IPC
 #include "umicom/kernel/user_ipc.h"
 #endif
@@ -167,6 +171,11 @@ UmicomKernelUserScheduleStatus UmicomKernelUserSchedulerRunOne(UmicomKernelUserS
              * A peer or terminal driver must make progress before resumption. */
             if (UmicomKernelUserStreamsWaiting(scheduler, &scheduler->tasks[slot])) continue;
 #endif
+#ifdef UMICOM_KERNEL_MANAGED_SERVICES
+            /* Service reports can park a continuation until its next heartbeat
+             * opportunity. Unmanaged tasks keep their original eligibility. */
+            if (!UmicomKernelServiceTaskEligible(scheduler, &scheduler->tasks[slot])) continue;
+#endif
             selected = slot;
             break;
         }
@@ -299,6 +308,26 @@ UmicomKernelUserScheduleStatus UmicomKernelUserSchedulerRunOne(UmicomKernelUserS
     if (UmicomKernelUserIpcPending(scheduler, task) != UMICOM_FALSE)
         return UmicomKernelUserIpcSuspend(scheduler, task, expired);
 #endif
+#ifdef UMICOM_KERNEL_MANAGED_SERVICES
+    /* A service checkpoint is not a timer interrupt. Publish readiness only
+     * after SliceRun verified machine restoration and the retained frame. */
+    if (UmicomKernelServiceCheckpointPending(scheduler, task)) {
+        if (expired || !UmicomKernelServiceCheckpointCommit(scheduler, task)) {
+            scheduler->poisoned = UMICOM_TRUE;
+            task->state = UMICOM_USER_TASK_ERROR;
+            return UMICOM_USER_SCHEDULE_MACHINE_STATE_ERROR;
+        }
+        if (task->slices < task->sliceLimit) {
+            task->state = UMICOM_USER_TASK_PAUSED;
+            return UMICOM_USER_SCHEDULE_OK;
+        }
+        /* Do not reset budgets or fabricate a timer count when the final
+         * allowed slice completed a report. Reuse the ordinary terminal tail. */
+        task->state = UMICOM_USER_TASK_EXHAUSTED;
+        task->process.state = UMICOM_PROCESS_CLEANUP_REQUIRED;
+        goto umicomUserTaskTerminal;
+    }
+#endif
     if (expired != UMICOM_FALSE) {
         ++task->preemptions;
         if (task->slices < task->sliceLimit) {
@@ -329,6 +358,9 @@ UmicomKernelUserScheduleStatus UmicomKernelUserSchedulerRunOne(UmicomKernelUserS
                 break;
         }
     }
+#ifdef UMICOM_KERNEL_MANAGED_SERVICES
+umicomUserTaskTerminal:
+#endif
     task->process.quiesced = UMICOM_TRUE; /* Terminal, but not implicitly destroyed. */
 #ifdef UMICOM_KERNEL_STANDARD_STREAMS
     /* End input/waits now; accepted output remains available to the collector. */

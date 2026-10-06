@@ -22,6 +22,10 @@
  * LICENCE:
  *   MIT
  *---------------------------------------------------------------------------*/
+#ifdef UMICOM_KERNEL_MANAGED_SERVICES
+/* Explicit readiness reports use the same checked trap and saved-frame path. */
+#include "umicom/kernel/service_manager.h"
+#endif
 #ifdef UMICOM_KERNEL_BLOCKING_IPC
 /* A waiting syscall returns to the scheduler, not a busy loop in user code. */
 #include "umicom/kernel/user_ipc.h"
@@ -178,6 +182,13 @@ UmicomU64 UmicomKernelUserTrapDispatch(
      * the UART or a host callback while this borrowed user context is active. */
     if (frame->x17_a7 == UMICOM_USER_CALL_STREAM_READ || frame->x17_a7 == UMICOM_USER_CALL_STREAM_WRITE)
         return UmicomKernelUserStreamDispatch(session, frame, nextPc);
+#endif
+
+#ifdef UMICOM_KERNEL_MANAGED_SERVICES
+    /* Only validated user-origin calls reach the report protocol. A successful
+     * checkpoint returns to the controller for post-restoration commitment. */
+    if (frame->x17_a7 == UMICOM_USER_CALL_SERVICE_REPORT)
+        return UmicomKernelServiceReportDispatch(session, frame, nextPc);
 #endif
 
     UmicomU64 result = UMICOM_USER_RESULT_UNKNOWN_CALL;

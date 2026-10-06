@@ -1,0 +1,9 @@
+/* Umicom Kernel immutable managed-service ELF carrier. The existing loader
+ * copies these bytes into a user image. Sammy Hegab, Umicom Foundation. MIT. */
+    .section .rodata.umicom_health_executable, "a", @progbits
+    .balign 16
+    .global UmicomHealthExecutableStart
+    .global UmicomHealthExecutableEnd
+UmicomHealthExecutableStart:
+    .incbin "@UMICOM_HEALTH_EXECUTABLE_FILE@"
+UmicomHealthExecutableEnd:

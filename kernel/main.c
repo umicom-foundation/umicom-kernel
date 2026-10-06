@@ -39,6 +39,9 @@
  *   MIT
  *---------------------------------------------------------------------------*/
 
+/* Live native-service validation reuses the existing supervised task path. */
+#include "umicom/kernel/service_manager.h"
+
 /* Validate owned trap stacks and precise privilege-state restoration. */
 #include "umicom/kernel/riscv64/trap_integrity.h"
 
@@ -1568,6 +1571,9 @@ void UmicomKernelMain(UmicomU64 hartId, UmicomAddress deviceTreeAddress)
 
     /* Test startup policy in the diagnostic image with real native jobs. */
     UmicomKernelBootServicesValidateExecution();
+
+    /* Live-service checks distinguish a readiness report from terminal success. */
+    UmicomKernelManagedServicesValidateExecution();
 
 #ifdef UMICOM_KERNEL_INTERACTIVE_CONSOLE
     /* Only the explicitly named console image stays at a prompt. It returns

@@ -19,6 +19,10 @@
  * AUTHOR AND ORGANISATION: Sammy Hegab, Umicom Foundation
  * LICENCE: MIT
  *---------------------------------------------------------------------------*/
+#ifdef UMICOM_KERNEL_SERVICE_CONSOLE
+/* Optional live-service domain; the original boot-job report is unchanged. */
+#include "umicom/kernel/service_console.h"
+#endif
 #include "umicom/kernel/console_shell.h"
 #ifdef UMICOM_KERNEL_TERMINAL
 #include "umicom/kernel/console_terminal.h"
@@ -436,8 +440,16 @@ UmicomKernelShellStatus UmicomKernelConsoleShellExecute(UmicomKernelConsoleShell
         return UMICOM_SHELL_OK;
     }
 #endif
+#ifdef UMICOM_KERNEL_SERVICE_CONSOLE
+    UmicomBoolean serviceHandled = UMICOM_FALSE;
+    const UmicomKernelShellStatus serviceResult = UmicomKernelServiceConsoleCommand(shell, &command, &serviceHandled);
+    if (serviceHandled) { shell->busy = UMICOM_FALSE; return serviceResult; }
+#endif
     UmicomBoolean poweroff = UMICOM_FALSE;
     if (UmicomShellEqual(name, "help") && command.count == 1U) {
+#ifdef UMICOM_KERNEL_SERVICE_CONSOLE
+        UmicomShellText(shell, "daemons start [MODE] | daemons status | daemons restart INDEX | daemons stop\r\n");
+#endif
 #ifdef UMICOM_KERNEL_STARTUP_SERVICES
         UmicomShellText(shell, "services (normal-startup result snapshots)\r\n");
 #endif
@@ -688,6 +700,14 @@ UmicomKernelShellStatus UmicomKernelConsoleShellClose(UmicomKernelConsoleShell *
     }
 #ifdef UMICOM_KERNEL_TERMINAL
     if (UmicomKernelConsoleTerminalClose(shell) != UMICOM_SHELL_OK) {
+        shell->busy = UMICOM_FALSE;
+        return UMICOM_SHELL_CLEANUP_FAILED;
+    }
+#endif
+#ifdef UMICOM_KERNEL_SERVICE_CONSOLE
+    /* Stop background instances before dismantling this console's file owners.
+     * A refused cleanup remains retryable; poweroff must not bypass it. */
+    if (UmicomKernelServiceConsoleClose(shell) != UMICOM_SHELL_OK) {
         shell->busy = UMICOM_FALSE;
         return UMICOM_SHELL_CLEANUP_FAILED;
     }

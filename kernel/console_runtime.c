@@ -14,6 +14,10 @@
  * AUTHOR AND ORGANISATION: Sammy Hegab, Umicom Foundation
  * LICENCE: MIT
  *---------------------------------------------------------------------------*/
+#ifdef UMICOM_KERNEL_SERVICE_CONSOLE
+/* Optional live-service domain; the original boot-job report is unchanged. */
+#include "umicom/kernel/service_console.h"
+#endif
 #include "umicom/kernel/console_shell.h"
 #ifdef UMICOM_KERNEL_TERMINAL
 #include "umicom/kernel/console_terminal.h"
@@ -91,6 +95,15 @@ void UmicomKernelConsoleShellRun(void)
     UmicomKernelConsoleWriteLine("RAM-only data; no login, disk persistence or host filesystem access.");
     UmicomKernelConsoleShellPrompt(&umicomInteractiveShell);
     while (!umicomInteractiveShell.exitRequested) {
+#ifdef UMICOM_KERNEL_SERVICE_CONSOLE
+        /* One bounded background quantum precedes input draining. Foreground
+         * execution uses its original path after the machine state is restored. */
+        if (UmicomKernelServiceConsolePoll(&umicomInteractiveShell) != UMICOM_SHELL_OK) {
+            UmicomKernelConsoleWriteLine("UMICOM_KERNEL_FAIL");
+            UmicomPlatformFinishFailure(0xb6U);
+            UmicomPlatformHalt();
+        }
+#endif
         /* Bound input draining so a stream of characters cannot starve the
          * foreground program. Its original timer bounds each admitted quantum. */
         for (UmicomSize i = 0U; i < 16U && !umicomInteractiveShell.exitRequested; ++i) {

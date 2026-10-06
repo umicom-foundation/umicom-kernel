@@ -91,6 +91,8 @@ typedef struct UmicomKernelUserScheduler {
     struct UmicomKernelUserStreams *streams;
     UmicomSize next;        /* Next round-robin search begins here. */
     UmicomU64 nextIdentity; /* Never supplied by an executable or recycled on close. */
+    /* Optional live-service owner; normal schedulers retain a null pointer. */
+    struct UmicomKernelServiceManager *services;
     UmicomU64 dispatches;
     UmicomKernelUserTask tasks[UMICOM_USER_TASK_LIMIT];
     /* Optional owner for blocked messages; zero keeps the original path. */
