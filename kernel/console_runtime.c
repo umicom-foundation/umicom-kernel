@@ -1,0 +1,79 @@
+/*-----------------------------------------------------------------------------
+ * Umicom Kernel
+ * File: kernel/console_runtime.c
+ *
+ * PURPOSE:
+ *   Keep the explicit interactive image alive at a serial prompt while the
+ *   ordinary diagnostic image retains its existing automatic finish path.
+ *
+ * EDUCATIONAL NOTE:
+ *   UART input is polled with interrupts disabled. WFI would be wrong here:
+ *   no UART interrupt is enabled to wake a sleeping hart. This is deliberately
+ *   a development console, not an energy-efficient terminal or full init system.
+ *
+ * AUTHOR AND ORGANISATION: Sammy Hegab, Umicom Foundation
+ * LICENCE: MIT
+ *---------------------------------------------------------------------------*/
+#include "umicom/kernel/console_shell.h"
+#include "umicom/kernel/console_input.h"
+#include "umicom/kernel/console.h"
+#include "umicom/kernel/platform.h"
+
+extern const UmicomU8 UmicomEmbeddedExecutableStart[];
+extern const UmicomU8 UmicomEmbeddedExecutableEnd[];
+extern const UmicomU8 UmicomFileExecutableStart[];
+extern const UmicomU8 UmicomFileExecutableEnd[];
+static UmicomKernelConsoleShell umicomInteractiveShell;
+
+static void UmicomInteractiveOutput(void *context, const char *text, UmicomSize bytes)
+{
+    (void)context;
+    /* Forward exact byte counts. A file containing NUL never reaches this path
+     * as an unchecked C string; the command engine already escaped controls. */
+    for (UmicomSize i = 0U; i < bytes; ++i) UmicomPlatformConsoleWriteByte((UmicomU8)text[i]);
+}
+void UmicomKernelConsoleShellRun(void)
+{
+    const UmicomKernelShellImage images[] = {
+        {"/bin/umicom-diagnostic.elf", UmicomEmbeddedExecutableStart,
+            (UmicomSize)(UmicomEmbeddedExecutableEnd - UmicomEmbeddedExecutableStart)},
+        {"/bin/umicom-file-client.elf", UmicomFileExecutableStart,
+            (UmicomSize)(UmicomFileExecutableEnd - UmicomFileExecutableStart)}
+    };
+    if (UmicomKernelConsoleShellInitialize(&umicomInteractiveShell, UmicomInteractiveOutput,
+            (void *)0, images, sizeof(images) / sizeof(images[0])) != UMICOM_SHELL_OK) {
+        (void)UmicomKernelConsoleShellClose(&umicomInteractiveShell);
+        UmicomKernelConsoleWriteLine("UMICOM_KERNEL_FAIL");
+        UmicomPlatformFinishFailure(0x94U);
+        UmicomPlatformHalt();
+    }
+    UmicomKernelConsoleWriteLine("UMICOM_KERNEL_CONSOLE_READY");
+    UmicomKernelConsoleWriteLine("Umicom Kernel development console. Type help.");
+    UmicomKernelConsoleWriteLine("RAM-only data; no login, disk persistence or host filesystem access.");
+    UmicomKernelConsoleShellPrompt(&umicomInteractiveShell);
+    while (!umicomInteractiveShell.exitRequested) {
+        /* Bound input draining so a stream of characters cannot starve the
+         * foreground program. Its original timer bounds each admitted quantum. */
+        for (UmicomSize i = 0U; i < 16U && !umicomInteractiveShell.exitRequested; ++i) {
+            UmicomU8 byte = 0U;
+            const UmicomKernelConsoleInputStatus input = UmicomPlatformConsoleTryReadByte(&byte);
+            if (input == UMICOM_CONSOLE_INPUT_IDLE) break;
+            if (input == UMICOM_CONSOLE_INPUT_BYTE) (void)UmicomKernelConsoleShellFeed(&umicomInteractiveShell, byte);
+            else UmicomKernelConsoleShellInputLost(&umicomInteractiveShell);
+        }
+        if (umicomInteractiveShell.foreground != 0U) {
+            const UmicomKernelShellStatus step = UmicomKernelConsoleShellStep(&umicomInteractiveShell);
+            if (step == UMICOM_SHELL_UNSAFE || umicomInteractiveShell.state == UMICOM_VFS_POISONED ||
+                (step != UMICOM_SHELL_OK && umicomInteractiveShell.foreground != 0U)) {
+                /* A prompt after an unverified Kernel return would imply that
+                 * file operations were safe. Retain ownership and stop instead. */
+                UmicomKernelConsoleWriteLine("console: foreground lifecycle failure; stopping without forced reclamation");
+                UmicomKernelConsoleWriteLine("UMICOM_KERNEL_FAIL");
+                UmicomPlatformFinishFailure(0x95U);
+                UmicomPlatformHalt();
+            }
+        }
+    }
+    /* poweroff already completed orderly task/file cleanup. Returning uses the
+     * original UMICOM_KERNEL_END and finisher code rather than duplicating it. */
+}

@@ -500,3 +500,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/VirtualFilesystem.cmake")
 # Bind client-local file authority to scheduled task lifetimes. Accepted file
 # requests complete only after the existing machine-return checks have passed.
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/UserFiles.cmake")
+
+# Keep an explicit interactive console beside the deterministic test image.
+# File commands and foreground programs reuse the existing service owners.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/InteractiveConsole.cmake")

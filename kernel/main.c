@@ -45,6 +45,9 @@
 /* Coordinate interrupt ownership only after the trap entry has its own stack. */
 #include "umicom/kernel/interrupts.h"
 
+/* The optional prompt shares the same command engine as console acceptance. */
+#include "umicom/kernel/console_shell.h"
+
 /* Import overflow/alignment-safe address helpers used by memory validation. */
 #include "umicom/kernel/address.h"
 
@@ -1536,6 +1539,15 @@ void UmicomKernelMain(UmicomU64 hartId, UmicomAddress deviceTreeAddress)
     /* Let loaded programs use the tested filesystem through checked requests,
      * then prove terminal cleanup releases their descriptor ownership. */
     UmicomKernelUserFilesValidateExecution();
+
+    /* Exercise command editing, file operations and foreground process cleanup. */
+    UmicomKernelConsoleShellValidateExecution();
+
+#ifdef UMICOM_KERNEL_INTERACTIVE_CONSOLE
+    /* Only the explicitly named console image stays at a prompt. It returns
+     * after orderly poweroff, leaving the original final-marker/finisher intact. */
+    UmicomKernelConsoleShellRun();
+#endif
 
     /* Mark the end of deterministic Kernel capability evidence. */
     UmicomKernelConsoleWriteLine("UMICOM_KERNEL_END");

@@ -121,3 +121,30 @@ void UmicomPlatformConsoleWriteByte(UmicomU8 value)
     /* Writing THR sends exactly the byte supplied by the caller. */
     *UartRegister(UMICOM_UART_THR) = value;
 }
+
+/* Polling input shares the established UART register helper and initialisation.
+ * Output above is unchanged; input does not install an IRQ handler or alter DLAB. */
+#include "umicom/kernel/console_input.h"
+
+UmicomKernelConsoleInputStatus UmicomPlatformConsoleTryReadByte(UmicomU8 *outByte)
+{
+    if (!outByte) return UMICOM_CONSOLE_INPUT_INVALID_ARGUMENT;
+    /* Read LSR once. DR says a byte is available; OE/PE/FE/BI say input may be
+     * incomplete or damaged. Even an apparently printable byte is unsafe as
+     * part of a command after an overrun, so the editor must discard the line. */
+    const UmicomU8 status = *UartRegister(UMICOM_UART_LSR);
+    const UmicomU8 dataReady = (UmicomU8)0x01U;
+    const UmicomU8 lineErrors = (UmicomU8)0x1eU;
+    if ((status & lineErrors) != 0U) {
+        if ((status & dataReady) != 0U) {
+            /* RBR shares offset zero with THR. Drain one damaged receive byte;
+             * the volatile read must happen even though its value is discarded. */
+            const UmicomU8 discarded = *UartRegister(0U);
+            (void)discarded;
+        }
+        return UMICOM_CONSOLE_INPUT_ERROR;
+    }
+    if ((status & dataReady) == 0U) return UMICOM_CONSOLE_INPUT_IDLE;
+    *outByte = *UartRegister(0U); /* Only BYTE publishes a new output value. */
+    return UMICOM_CONSOLE_INPUT_BYTE;
+}
