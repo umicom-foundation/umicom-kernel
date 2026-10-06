@@ -21,6 +21,9 @@
 #include "umicom/kernel/console_input.h"
 #include "umicom/kernel/console.h"
 #include "umicom/kernel/platform.h"
+#ifdef UMICOM_KERNEL_STARTUP_SERVICES
+#include "umicom/kernel/startup.h"
+#endif
 
 extern const UmicomU8 UmicomEmbeddedExecutableStart[];
 extern const UmicomU8 UmicomEmbeddedExecutableEnd[];
@@ -63,6 +66,10 @@ void UmicomKernelConsoleShellRun(void)
     if (UmicomKernelConsoleShellInitialize(&umicomInteractiveShell, UmicomInteractiveOutput,
             (void *)0, images, sizeof(images) / sizeof(images[0])) != UMICOM_SHELL_OK) {
         (void)UmicomKernelConsoleShellClose(&umicomInteractiveShell);
+#ifdef UMICOM_KERNEL_STARTUP_SERVICES
+        /* Recovery cannot allocate or restart a partially initialised owner. */
+        UmicomKernelNormalBootRecover("console-initialisation");
+#endif
         UmicomKernelConsoleWriteLine("UMICOM_KERNEL_FAIL");
         UmicomPlatformFinishFailure(0x94U);
         UmicomPlatformHalt();
@@ -70,6 +77,10 @@ void UmicomKernelConsoleShellRun(void)
 #ifdef UMICOM_KERNEL_TERMINAL
     if (UmicomKernelConsoleTerminalAttach(&umicomInteractiveTerminal, &umicomInteractiveShell) != UMICOM_SHELL_OK) {
         (void)UmicomKernelConsoleShellClose(&umicomInteractiveShell);
+#ifdef UMICOM_KERNEL_STARTUP_SERVICES
+        /* Recovery cannot allocate or restart a partially initialised owner. */
+        UmicomKernelNormalBootRecover("console-initialisation");
+#endif
         UmicomKernelConsoleWriteLine("UMICOM_KERNEL_FAIL");
         UmicomPlatformFinishFailure(0x96U);
         UmicomPlatformHalt();

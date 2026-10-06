@@ -24,6 +24,9 @@
 #include "umicom/kernel/console_terminal.h"
 #endif
 #include "console_internal.h"
+#ifdef UMICOM_KERNEL_STARTUP_SERVICES
+#include "umicom/kernel/startup.h"
+#endif
 
 static void UmicomShellClear(void *target, UmicomSize bytes)
 {
@@ -425,8 +428,19 @@ UmicomKernelShellStatus UmicomKernelConsoleShellExecute(UmicomKernelConsoleShell
      * new command-local descriptor. Its token is never silently overwritten. */
     const UmicomKernelVfsStatus closed = UmicomShellDescriptorClose(shell);
     if (closed != UMICOM_VFS_OK) { shell->busy = UMICOM_FALSE; return UmicomShellFileError(shell, closed); }
+#ifdef UMICOM_KERNEL_STARTUP_SERVICES
+    /* Read the closed boot report; this does not restart or mutate a service. */
+    if (UmicomShellEqual(name, "services") && command.count == 1U) {
+        UmicomKernelNormalBootReport(shell->outputContext, shell->output);
+        shell->busy = UMICOM_FALSE;
+        return UMICOM_SHELL_OK;
+    }
+#endif
     UmicomBoolean poweroff = UMICOM_FALSE;
     if (UmicomShellEqual(name, "help") && command.count == 1U) {
+#ifdef UMICOM_KERNEL_STARTUP_SERVICES
+        UmicomShellText(shell, "services (normal-startup result snapshots)\r\n");
+#endif
 #ifdef UMICOM_KERNEL_PROGRAM_LAUNCH
         UmicomShellText(shell, "exec PATH [ARG ...] | execrw PATH [ARG ...] (structured argv)\r\n");
 #endif

@@ -72,6 +72,10 @@
 /* Task-owned terminal streams are validated above the existing console. */
 #include "umicom/kernel/user_streams.h"
 
+/* Normal startup is an explicit image choice, not abbreviated test output. */
+#include "umicom/kernel/startup.h"
+#include "umicom/kernel/boot_services.h"
+
 /* Import the C entry-point declaration shared with boot.S. */
 #include "umicom/kernel/kernel.h"
 /* Structured launch copies user addresses, never Kernel string pointers. */
@@ -1408,6 +1412,12 @@ static void RunHardwareAddressTranslationTest(void)
 
 void UmicomKernelMain(UmicomU64 hartId, UmicomAddress deviceTreeAddress)
 {
+#ifdef UMICOM_KERNEL_NORMAL_BOOT
+    /* The normal/recovery entries establish their own boot prerequisites and
+     * do not execute the cumulative diagnostic path retained below. */
+    UmicomKernelNormalBoot(hartId, deviceTreeAddress);
+#endif
+
 
     /* Initialize the polling UART before any boot/trap/memory evidence is printed. */
     UmicomKernelConsoleInitialize();
@@ -1555,6 +1565,9 @@ void UmicomKernelMain(UmicomU64 hartId, UmicomAddress deviceTreeAddress)
     /* Validate argv/environment ownership before opening the normal console.
      * Every earlier execution and file/stream regression remains in place. */
     UmicomKernelProgramLaunchValidateExecution();
+
+    /* Test startup policy in the diagnostic image with real native jobs. */
+    UmicomKernelBootServicesValidateExecution();
 
 #ifdef UMICOM_KERNEL_INTERACTIVE_CONSOLE
     /* Only the explicitly named console image stays at a prompt. It returns

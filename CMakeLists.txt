@@ -512,3 +512,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/StandardStreams.cmake")
 # Prepare explicit argv/environment in task-owned memory and keep numeric launch.
 # The same parser, foreground runner and saved-register path serve both modes.
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/ProgramLaunch.cmake")
+
+# Select normal startup and independent recovery without removing diagnostics.
+# Startup jobs reuse the existing process, launch and stream owners.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/NormalBoot.cmake")
