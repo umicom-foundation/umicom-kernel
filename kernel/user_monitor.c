@@ -26,6 +26,10 @@
 /* A waiting syscall returns to the scheduler, not a busy loop in user code. */
 #include "umicom/kernel/user_ipc.h"
 #endif
+#ifdef UMICOM_KERNEL_FILE_SERVICES
+/* File requests leave the borrowed user root before filesystem allocation. */
+#include "umicom/kernel/user_files.h"
+#endif
 #include "umicom/kernel/address.h"
 #include "umicom/kernel/riscv64/user_execution.h"
 #ifdef UMICOM_KERNEL_USER_SLICES
@@ -148,6 +152,14 @@ UmicomU64 UmicomKernelUserTrapDispatch(
         session->stopReason = UMICOM_USER_STOP_MONITOR_ERROR;
         return 0U;
     }
+
+#ifdef UMICOM_KERNEL_FILE_SERVICES
+    /* Keep the same origin, instruction and budget validation. The file layer
+     * copies arguments here and completes in the restored machine dispatcher. */
+    if (frame->x17_a7 == UMICOM_USER_CALL_FILE) {
+        return UmicomKernelUserFileDispatch(session, frame, nextPc);
+    }
+#endif
 
 #ifdef UMICOM_KERNEL_BLOCKING_IPC
     /* The origin, executable-PC and call-budget checks above still apply.

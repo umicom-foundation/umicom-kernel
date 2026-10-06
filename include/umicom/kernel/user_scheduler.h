@@ -76,8 +76,11 @@ typedef struct UmicomKernelUserTask {
     UmicomBoolean retired;
 } UmicomKernelUserTask;
 
+/* Optional file ownership is separate from task storage and attached before admission. */
+struct UmicomKernelUserFiles;
 typedef struct UmicomKernelUserScheduler {
     const struct UmicomKernelUserScheduler *self;
+    struct UmicomKernelUserFiles *files; /* Private per-task clients, never user-supplied. */
     UmicomBoolean initialised;
     UmicomBoolean active;   /* Serial reentry guard; it is not an atomic SMP lock. */
     UmicomBoolean poisoned; /* Unverified return forbids another dispatch or free. */

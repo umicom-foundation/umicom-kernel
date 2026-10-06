@@ -85,6 +85,9 @@
 /* Add typed filesystem operations above the existing memory owners. */
 #include "umicom/kernel/vfs.h"
 
+/* Checked file requests use private clients and the existing task lifetime. */
+#include "umicom/kernel/user_files.h"
+
 #include "umicom/kernel/user_scheduler.h"
 
 /* Import linker-defined Kernel image boundaries. */
@@ -1529,6 +1532,10 @@ void UmicomKernelMain(UmicomU64 hartId, UmicomAddress deviceTreeAddress)
     /* Store and reclaim named RAM files, then run their copied ELF bytes
      * through the existing process loader before checking final ownership. */
     UmicomKernelVfsValidateExecution();
+
+    /* Let loaded programs use the tested filesystem through checked requests,
+     * then prove terminal cleanup releases their descriptor ownership. */
+    UmicomKernelUserFilesValidateExecution();
 
     /* Mark the end of deterministic Kernel capability evidence. */
     UmicomKernelConsoleWriteLine("UMICOM_KERNEL_END");

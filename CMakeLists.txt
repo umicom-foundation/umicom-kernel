@@ -496,3 +496,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/MappedRegions.cmake")
 # Resolve typed paths and client descriptors over owned RAM-backed file data.
 # Existing allocation, process, IPC and execution services remain unchanged.
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/VirtualFilesystem.cmake")
+
+# Bind client-local file authority to scheduled task lifetimes. Accepted file
+# requests complete only after the existing machine-return checks have passed.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/UserFiles.cmake")

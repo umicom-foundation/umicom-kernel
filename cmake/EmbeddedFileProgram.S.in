@@ -1,0 +1,9 @@
+/* Umicom Kernel immutable file-client carrier. The ELF is loader input, not
+ * Kernel-callable code. Sammy Hegab, Umicom Foundation. MIT licence. */
+    .section .rodata.umicom_file_executable, "a", @progbits
+    .balign 16
+    .global UmicomFileExecutableStart
+    .global UmicomFileExecutableEnd
+UmicomFileExecutableStart:
+    .incbin "@UMICOM_FILE_EXECUTABLE_FILE@"
+UmicomFileExecutableEnd:
