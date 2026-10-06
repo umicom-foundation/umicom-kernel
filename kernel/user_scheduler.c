@@ -522,6 +522,32 @@ UmicomKernelUserScheduleStatus UmicomKernelUserTaskSetArgument(UmicomKernelUserS
     /* Admission may not overwrite a retained syscall result or paused register. */
     if (task->state != UMICOM_USER_TASK_READY || task->slices != 0U)
         return UMICOM_USER_SCHEDULE_BAD_STATE;
+#ifdef UMICOM_KERNEL_PROGRAM_LAUNCH
+    /* argc is part of a committed structured launch, not a spare integer. */
+    if (task->structuredLaunch) return UMICOM_USER_SCHEDULE_BAD_STATE;
+#endif
     task->frame.x10_a0 = argument;
     return UMICOM_USER_SCHEDULE_OK;
 }
+
+#ifdef UMICOM_KERNEL_PROGRAM_LAUNCH
+UmicomKernelUserScheduleStatus UmicomKernelUserTaskSetLaunch(UmicomKernelUserScheduler *scheduler,
+    UmicomKernelUserTaskHandle handle, const UmicomKernelProgramLaunchSpec *spec)
+{
+    const UmicomKernelUserScheduleStatus ready = UmicomUserSchedulerReady(scheduler);
+    if (ready != UMICOM_USER_SCHEDULE_OK) return ready;
+    UmicomKernelUserTask *const task = UmicomUserTaskFind(scheduler, handle);
+    if (!task) return UMICOM_USER_SCHEDULE_INVALID_HANDLE;
+    /* Never edit a suspended syscall result or an already-entered stack. A
+     * refused admission preserves the task and its original numeric argument. */
+    if (task->state != UMICOM_USER_TASK_READY || task->slices != 0U || task->structuredLaunch)
+        return UMICOM_USER_SCHEDULE_BAD_STATE;
+    const UmicomKernelLaunchStatus status = UmicomKernelProgramLaunchPrepare(
+        &task->process.report.memory, spec, &task->frame);
+    if (status == UMICOM_LAUNCH_UNSAFE) return UMICOM_USER_SCHEDULE_ENTRY_REFUSED;
+    if (status == UMICOM_LAUNCH_BAD_MEMORY) return UMICOM_USER_SCHEDULE_INVALID_CONTEXT;
+    if (status != UMICOM_LAUNCH_OK) return UMICOM_USER_SCHEDULE_INVALID_ARGUMENT;
+    task->structuredLaunch = UMICOM_TRUE; /* Publish after the complete user copy. */
+    return UMICOM_USER_SCHEDULE_OK;
+}
+#endif

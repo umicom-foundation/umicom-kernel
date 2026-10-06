@@ -67,6 +67,14 @@ UmicomKernelConsoleLineEvent UmicomKernelConsoleLineFeed(UmicomKernelConsoleLine
 UmicomKernelShellStatus UmicomKernelShellParse(const char *line, UmicomSize bytes,
     UmicomKernelShellCommand *out)
 {
+    /* The old parser below is retained verbatim. Its fixed four-token storage
+     * could not represent a useful argv. Both old commands and structured
+     * launch now share the bounded tokenizer; this wrapper keeps the original
+     * public output type and four-token behaviour for all existing callers. */
+    if (!out) return UMICOM_SHELL_INVALID_ARGUMENT;
+    return UmicomKernelShellTokenize(line, bytes, out->bytes, out->offsets,
+        UMICOM_SHELL_ARGUMENT_LIMIT, &out->count);
+#if 0 /* Superseded fixed-storage parser; retained for comparison and teaching. */
     if (!out || (!line && bytes != 0U) || bytes >= UMICOM_SHELL_LINE_BYTES) return UMICOM_SHELL_INVALID_ARGUMENT;
     /* Parse into temporary storage: the caller receives no partially accepted
      * argv when a final quote or extra token makes the complete command invalid. */
@@ -100,6 +108,7 @@ UmicomKernelShellStatus UmicomKernelShellParse(const char *line, UmicomSize byte
     }
     UmicomConsoleCopy(out, &command, sizeof(command));
     return UMICOM_SHELL_OK;
+#endif /* Retained parser body. */
 }
 UmicomBoolean UmicomKernelShellUnsigned(const char *text, UmicomU64 *out)
 {
@@ -116,4 +125,50 @@ UmicomBoolean UmicomKernelShellUnsigned(const char *text, UmicomU64 *out)
         value = value * 10U + digit;
     }
     return UMICOM_FALSE;
+}
+
+
+UmicomKernelShellStatus UmicomKernelShellTokenize(const char *line, UmicomSize bytes,
+    char *text, UmicomSize *offsets, UmicomSize capacity, UmicomSize *outCount)
+{
+    if (!text || !offsets || !outCount || (!line && bytes != 0U) ||
+        bytes >= UMICOM_SHELL_LINE_BYTES || capacity == 0U || capacity > UMICOM_SHELL_TOKEN_LIMIT)
+        return UMICOM_SHELL_INVALID_ARGUMENT;
+    /* The grammar is unchanged: quotes surround a whole token, and nothing is
+     * expanded. Local staging prevents partial output after a late syntax error. */
+    char staged[UMICOM_SHELL_LINE_BYTES];
+    UmicomSize positions[UMICOM_SHELL_TOKEN_LIMIT];
+    UmicomConsoleClear(staged, sizeof(staged));
+    UmicomConsoleClear(positions, sizeof(positions));
+    UmicomSize count = 0U, used = 0U, at = 0U;
+    for (UmicomSize i = 0U; i < bytes; ++i) {
+        const unsigned char ch = (unsigned char)line[i];
+        if ((ch < 32U && ch != 9U) || ch > 126U) return UMICOM_SHELL_SYNTAX;
+    }
+    while (at < bytes) {
+        while (at < bytes && (line[at] == ' ' || line[at] == '\t')) ++at;
+        if (at == bytes) break;
+        if (count == capacity) return UMICOM_SHELL_SYNTAX;
+        positions[count++] = used;
+        const char quote = line[at] == '"' || line[at] == '\'' ? line[at++] : '\0';
+        UmicomBoolean closed = quote == '\0' ? UMICOM_TRUE : UMICOM_FALSE;
+        while (at < bytes) {
+            const char ch = line[at];
+            if (quote != '\0' && ch == quote) { ++at; closed = UMICOM_TRUE; break; }
+            if (quote == '\0' && (ch == ' ' || ch == '\t')) break;
+            if (quote == '\0' && (ch == '"' || ch == '\'')) return UMICOM_SHELL_SYNTAX;
+            if (used >= sizeof(staged) - 1U) return UMICOM_SHELL_RANGE;
+            staged[used++] = ch;
+            ++at;
+        }
+        if (!closed || (at < bytes && line[at] != ' ' && line[at] != '\t')) return UMICOM_SHELL_SYNTAX;
+        if (used >= sizeof(staged)) return UMICOM_SHELL_RANGE;
+        staged[used++] = '\0';
+    }
+    /* Publish arrays before the count. None of these values points into this
+     * temporary stack, and the unused output tail remains cleared. */
+    UmicomConsoleCopy(text, staged, sizeof(staged));
+    UmicomConsoleCopy(offsets, positions, capacity * sizeof(positions[0]));
+    *outCount = count;
+    return UMICOM_SHELL_OK;
 }

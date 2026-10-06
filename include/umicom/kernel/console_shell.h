@@ -27,6 +27,8 @@
 
 #define UMICOM_SHELL_LINE_BYTES 512U
 #define UMICOM_SHELL_ARGUMENT_LIMIT 4U
+/* Structured launch adds a command token plus up to sixteen argv elements. */
+#define UMICOM_SHELL_TOKEN_LIMIT 17U
 #define UMICOM_SHELL_IMAGE_BYTES 131072U
 #define UMICOM_SHELL_QUANTUM_TICKS 50000U
 #define UMICOM_SHELL_SLICE_LIMIT 256U
@@ -80,6 +82,8 @@ typedef struct UmicomKernelConsoleShell {
     void *outputContext;
     /* Optional terminal attachment leaves the original command-only path available. */
     struct UmicomKernelConsoleTerminal *terminal;
+    /* Borrowed only during synchronous admission; cleared before a quantum. */
+    const UmicomKernelProgramLaunchSpec *launchSpec;
     UmicomKernelConsoleLine line;
     UmicomKernelRamfs storage;
     UmicomKernelVfs vfs;
@@ -126,4 +130,9 @@ void UmicomKernelConsoleShellPrompt(UmicomKernelConsoleShell *shell);
 UmicomKernelShellStatus UmicomKernelConsoleShellClose(UmicomKernelConsoleShell *shell);
 void UmicomKernelConsoleShellValidateExecution(void);
 void UmicomKernelConsoleShellRun(void);
+/* Shared tokenizer. text has LINE_BYTES storage; offsets has capacity entries.
+ * Inputs/outputs are trusted non-overlapping Kernel buffers. Complete failure
+ * leaves all outputs unchanged. Legacy Parse retains its four-token ceiling. */
+UmicomKernelShellStatus UmicomKernelShellTokenize(const char *line, UmicomSize bytes,
+    char *text, UmicomSize *offsets, UmicomSize capacity, UmicomSize *outCount);
 #endif /* UMICOM_KERNEL_CONSOLE_SHELL_H */

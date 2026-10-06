@@ -26,6 +26,7 @@
 #ifndef UMICOM_KERNEL_USER_SCHEDULER_H
 #define UMICOM_KERNEL_USER_SCHEDULER_H
 #include "umicom/kernel/process.h"
+#include "umicom/kernel/program_launch.h"
 
 /* Admission is bounded before any image is loaded. A quantum is measured in
  * the selected platform's timer ticks, not host CPU cycles or instructions. */
@@ -74,6 +75,8 @@ typedef struct UmicomKernelUserTask {
     UmicomU64 sliceLimit;
     UmicomU32 generation;
     UmicomBoolean retired;
+    /* Set once before first dispatch; numeric setup may not overwrite argc. */
+    UmicomBoolean structuredLaunch;
 } UmicomKernelUserTask;
 
 /* Optional file ownership is separate from task storage and attached before admission. */
@@ -139,4 +142,8 @@ void UmicomKernelUserSchedulingValidateExecution(void);
  * issued endpoint after both task identities have been allocated. */
 UmicomKernelUserScheduleStatus UmicomKernelUserTaskSetArgument(UmicomKernelUserScheduler *scheduler,
     UmicomKernelUserTaskHandle handle, UmicomU64 argument);
+/* Copy structured arguments into an unstarted task. The old numeric setup
+ * remains available, but may not be mixed with this one-shot admission. */
+UmicomKernelUserScheduleStatus UmicomKernelUserTaskSetLaunch(UmicomKernelUserScheduler *scheduler,
+    UmicomKernelUserTaskHandle handle, const UmicomKernelProgramLaunchSpec *spec);
 #endif /* UMICOM_KERNEL_USER_SCHEDULER_H */

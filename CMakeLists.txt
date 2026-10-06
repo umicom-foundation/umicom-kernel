@@ -508,3 +508,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/InteractiveConsole.cmake")
 # Give foreground programs copied standard streams without changing file tokens.
 # The terminal driver drains output only after verified machine-state return.
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/StandardStreams.cmake")
+
+# Prepare explicit argv/environment in task-owned memory and keep numeric launch.
+# The same parser, foreground runner and saved-register path serve both modes.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/ProgramLaunch.cmake")

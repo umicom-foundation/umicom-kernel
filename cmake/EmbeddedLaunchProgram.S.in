@@ -1,0 +1,9 @@
+/* Umicom Kernel launch-client carrier. These immutable ELF bytes are loader
+ * input, never Kernel-callable functions. Sammy Hegab, Umicom Foundation. MIT. */
+    .section .rodata.umicom_launch_executable, "a", @progbits
+    .balign 16
+    .global UmicomLaunchExecutableStart
+    .global UmicomLaunchExecutableEnd
+UmicomLaunchExecutableStart:
+    .incbin "@UMICOM_LAUNCH_EXECUTABLE_FILE@"
+UmicomLaunchExecutableEnd:

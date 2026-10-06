@@ -186,4 +186,9 @@ UmicomKernelSupervisionStatus UmicomKernelProcessSupervisorSnapshot(UmicomKernel
 UmicomKernelSupervisionStatus UmicomKernelProcessSupervisorValidate(UmicomKernelProcessSupervisor *supervisor);
 const char *UmicomKernelSupervisionStatusName(UmicomKernelSupervisionStatus status);
 void UmicomKernelProcessSupervisionValidateExecution(void);
+/* Parent-checked structured setup; caller identity remains trusted Kernel
+ * context, exactly as for the existing numeric-argument admission helper. */
+UmicomKernelSupervisionStatus UmicomKernelProcessSupervisorSetLaunch(UmicomKernelProcessSupervisor *supervisor,
+    UmicomU64 caller, UmicomKernelSupervisedProcessHandle handle,
+    const UmicomKernelProgramLaunchSpec *spec);
 #endif /* UMICOM_KERNEL_PROCESS_SUPERVISOR_H */

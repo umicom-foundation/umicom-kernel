@@ -615,3 +615,21 @@ const char *UmicomKernelSupervisionStatusName(UmicomKernelSupervisionStatus stat
         default: return "unknown-status";
     }
 }
+
+#ifdef UMICOM_KERNEL_PROGRAM_LAUNCH
+UmicomKernelSupervisionStatus UmicomKernelProcessSupervisorSetLaunch(UmicomKernelProcessSupervisor *supervisor,
+    UmicomU64 caller, UmicomKernelSupervisedProcessHandle handle,
+    const UmicomKernelProgramLaunchSpec *spec)
+{
+    /* Reuse the family authority checks rather than invent a launch-specific
+     * token domain. A sibling cannot edit another program's initial arguments. */
+    UmicomKernelSupervisionStatus status = UmicomKernelProcessSupervisorPump(supervisor);
+    if (status != UMICOM_SUPERVISION_OK) return status;
+    UmicomKernelSupervisedProcessRecord *const record = UmicomSupervisionFind(supervisor, handle);
+    if (!record) return UMICOM_SUPERVISION_INVALID_HANDLE;
+    status = UmicomSupervisionAuthority(supervisor, caller, record);
+    if (status != UMICOM_SUPERVISION_OK) return status;
+    return UmicomKernelUserTaskSetLaunch(&supervisor->scheduler, handle, spec) == UMICOM_USER_SCHEDULE_OK
+        ? UMICOM_SUPERVISION_OK : UMICOM_SUPERVISION_BAD_STATE;
+}
+#endif

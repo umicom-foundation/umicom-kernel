@@ -279,8 +279,19 @@ static UmicomKernelShellStatus UmicomShellRun(UmicomKernelConsoleShell *shell,
         const UmicomKernelSupervisionStatus cleanup = UmicomKernelProcessSupervisorReapRetained(&shell->supervisor, &reaped);
         return UmicomShellProcessError(shell, cleanup != UMICOM_SUPERVISION_OK ? cleanup : spawned);
     }
+#ifdef UMICOM_KERNEL_PROGRAM_LAUNCH
+    if (shell->launchSpec && UmicomKernelProcessSupervisorSetLaunch(&shell->supervisor,
+            UMICOM_SUPERVISION_GUARDIAN, shell->foreground, shell->launchSpec) != UMICOM_SUPERVISION_OK) {
+        UmicomShellText(shell, "structured launch refused before execution\r\n");
+        status = UMICOM_VFS_INVALID_ARGUMENT;
+    }
+#endif
     const UmicomKernelVfsRights rights = writable ? UMICOM_VFS_RIGHT_ALL :
         UMICOM_VFS_RIGHT_READ | UMICOM_VFS_RIGHT_QUERY | UMICOM_VFS_RIGHT_ENUMERATE;
+#ifdef UMICOM_KERNEL_PROGRAM_LAUNCH
+    /* A rejected launch uses the original grant-failure cancellation path. */
+    if (status == UMICOM_VFS_OK)
+#endif
     status = UmicomKernelUserFilesGrant(&shell->files, shell->foreground, rights);
 #ifdef UMICOM_KERNEL_TERMINAL
     /* Admission grants streams separately from filesystem write authority. If
@@ -331,6 +342,48 @@ static UmicomKernelShellStatus UmicomShellStatus(UmicomKernelConsoleShell *shell
     }
     return UMICOM_SHELL_OK;
 }
+#ifdef UMICOM_KERNEL_PROGRAM_LAUNCH
+static UmicomKernelShellStatus UmicomShellStructured(UmicomKernelConsoleShell *shell,
+    const char *line, UmicomSize bytes, UmicomBoolean *handled)
+{
+    char words[UMICOM_SHELL_LINE_BYTES];
+    UmicomSize offsets[UMICOM_SHELL_TOKEN_LIMIT];
+    UmicomSize count = 0U;
+    UmicomConsoleClear(words, sizeof(words));
+    UmicomConsoleClear(offsets, sizeof(offsets));
+    *handled = UMICOM_FALSE;
+    const UmicomKernelShellStatus parsed = UmicomKernelShellTokenize(line, bytes,
+        words, offsets, UMICOM_SHELL_TOKEN_LIMIT, &count);
+    /* Invalid or ordinary lines still go through the established command path.
+     * In particular, adding exec does not widen the old four-token grammar. */
+    if (parsed != UMICOM_SHELL_OK || count == 0U) return UMICOM_SHELL_OK;
+    const UmicomBoolean writable = UmicomShellEqual(words, "execrw");
+    if (!writable && !UmicomShellEqual(words, "exec")) return UMICOM_SHELL_OK;
+    *handled = UMICOM_TRUE;
+    if (count < 2U) return UMICOM_SHELL_SYNTAX;
+    if (shell->commands != ~(UmicomU64)0U) ++shell->commands;
+    const UmicomKernelVfsStatus closed = UmicomShellDescriptorClose(shell);
+    if (closed != UMICOM_VFS_OK) return UmicomShellFileError(shell, closed);
+    UmicomKernelLaunchString arguments[UMICOM_LAUNCH_ARGUMENT_LIMIT];
+    UmicomConsoleClear(arguments, sizeof(arguments));
+    for (UmicomSize i = 1U; i < count; ++i) {
+        arguments[i - 1U].data = words + offsets[i];
+        arguments[i - 1U].bytes = UmicomShellLength(arguments[i - 1U].data);
+    }
+    /* These explicit values are descriptive data, not authority and not host
+     * environment inheritance. No working-directory or PATH search is implied. */
+    const UmicomKernelLaunchString environment[] = {{"LANG=C", 6U}, {"UMICOM_CONSOLE=serial", 21U}};
+    const UmicomKernelProgramLaunchSpec spec = {arguments, count - 1U, environment, 2U};
+    shell->launchSpec = &spec;
+    const UmicomKernelShellStatus result = UmicomShellRun(shell, arguments[0].data, 0U, writable);
+    shell->launchSpec = (const UmicomKernelProgramLaunchSpec *)0;
+    /* No execution step occurs inside Run. All admitted strings are now owned
+     * by user pages, and this short-lived parser storage may safely disappear. */
+    UmicomConsoleClear(words, sizeof(words));
+    return result;
+}
+#endif
+
 UmicomKernelShellStatus UmicomKernelConsoleShellExecute(UmicomKernelConsoleShell *shell,
     const char *line, UmicomSize bytes)
 {
@@ -351,6 +404,11 @@ UmicomKernelShellStatus UmicomKernelConsoleShellExecute(UmicomKernelConsoleShell
     if (shell->state != UMICOM_VFS_OPEN) return UMICOM_SHELL_BAD_STATE;
     if (!UmicomKernelObjectCacheAccessAllowed()) return UMICOM_SHELL_UNSAFE;
     shell->busy = UMICOM_TRUE;
+#ifdef UMICOM_KERNEL_PROGRAM_LAUNCH
+    UmicomBoolean handled = UMICOM_FALSE;
+    const UmicomKernelShellStatus structured = UmicomShellStructured(shell, line, bytes, &handled);
+    if (handled) { shell->busy = UMICOM_FALSE; return structured; }
+#endif
     UmicomKernelShellCommand command;
     UmicomConsoleClear(&command, sizeof(command));
     UmicomKernelShellStatus result = UmicomKernelShellParse(line, bytes, &command);
@@ -369,6 +427,9 @@ UmicomKernelShellStatus UmicomKernelConsoleShellExecute(UmicomKernelConsoleShell
     if (closed != UMICOM_VFS_OK) { shell->busy = UMICOM_FALSE; return UmicomShellFileError(shell, closed); }
     UmicomBoolean poweroff = UMICOM_FALSE;
     if (UmicomShellEqual(name, "help") && command.count == 1U) {
+#ifdef UMICOM_KERNEL_PROGRAM_LAUNCH
+        UmicomShellText(shell, "exec PATH [ARG ...] | execrw PATH [ARG ...] (structured argv)\r\n");
+#endif
         UmicomShellText(shell,
             "help | about | status | mem | pwd\r\n"
             "ls [PATH] | stat PATH | cat PATH\r\n"

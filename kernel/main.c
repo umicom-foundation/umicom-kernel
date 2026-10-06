@@ -74,6 +74,9 @@
 
 /* Import the C entry-point declaration shared with boot.S. */
 #include "umicom/kernel/kernel.h"
+/* Structured launch copies user addresses, never Kernel string pointers. */
+#include "umicom/kernel/program_launch.h"
+
 
 /* Timer-driven user continuations use the established loader and monitor. */
 /* Pending user messages retain their own buffers and resumable task state. */
@@ -1548,6 +1551,10 @@ void UmicomKernelMain(UmicomU64 hartId, UmicomAddress deviceTreeAddress)
 
     /* The automatic image checks waiting streams without requiring host input. */
     UmicomKernelStandardStreamsValidateExecution();
+
+    /* Validate argv/environment ownership before opening the normal console.
+     * Every earlier execution and file/stream regression remains in place. */
+    UmicomKernelProgramLaunchValidateExecution();
 
 #ifdef UMICOM_KERNEL_INTERACTIVE_CONSOLE
     /* Only the explicitly named console image stays at a prompt. It returns

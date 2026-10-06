@@ -26,6 +26,10 @@ extern const UmicomU8 UmicomEmbeddedExecutableStart[];
 extern const UmicomU8 UmicomEmbeddedExecutableEnd[];
 extern const UmicomU8 UmicomFileExecutableStart[];
 extern const UmicomU8 UmicomFileExecutableEnd[];
+#ifdef UMICOM_KERNEL_PROGRAM_LAUNCH
+extern const UmicomU8 UmicomLaunchExecutableStart[];
+extern const UmicomU8 UmicomLaunchExecutableEnd[];
+#endif
 static UmicomKernelConsoleShell umicomInteractiveShell;
 #ifdef UMICOM_KERNEL_TERMINAL
 extern const UmicomU8 UmicomStreamExecutableStart[];
@@ -43,6 +47,10 @@ static void UmicomInteractiveOutput(void *context, const char *text, UmicomSize 
 void UmicomKernelConsoleShellRun(void)
 {
     const UmicomKernelShellImage images[] = {
+#ifdef UMICOM_KERNEL_PROGRAM_LAUNCH
+        {"/bin/umicom-launch-client.elf", UmicomLaunchExecutableStart,
+            (UmicomSize)(UmicomLaunchExecutableEnd - UmicomLaunchExecutableStart)},
+#endif
 #ifdef UMICOM_KERNEL_TERMINAL
         {"/bin/umicom-stream-client.elf", UmicomStreamExecutableStart,
             (UmicomSize)(UmicomStreamExecutableEnd - UmicomStreamExecutableStart)},
