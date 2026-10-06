@@ -84,6 +84,8 @@ typedef struct UmicomKernelUserScheduler {
     UmicomBoolean initialised;
     UmicomBoolean active;   /* Serial reentry guard; it is not an atomic SMP lock. */
     UmicomBoolean poisoned; /* Unverified return forbids another dispatch or free. */
+    /* Optional copied standard streams; the service owns wait eligibility. */
+    struct UmicomKernelUserStreams *streams;
     UmicomSize next;        /* Next round-robin search begins here. */
     UmicomU64 nextIdentity; /* Never supplied by an executable or recycled on close. */
     UmicomU64 dispatches;

@@ -20,6 +20,9 @@
  * LICENCE: MIT
  *---------------------------------------------------------------------------*/
 #include "umicom/kernel/console_shell.h"
+#ifdef UMICOM_KERNEL_TERMINAL
+#include "umicom/kernel/console_terminal.h"
+#endif
 #include "console_internal.h"
 
 static void UmicomShellClear(void *target, UmicomSize bytes)
@@ -279,6 +282,12 @@ static UmicomKernelShellStatus UmicomShellRun(UmicomKernelConsoleShell *shell,
     const UmicomKernelVfsRights rights = writable ? UMICOM_VFS_RIGHT_ALL :
         UMICOM_VFS_RIGHT_READ | UMICOM_VFS_RIGHT_QUERY | UMICOM_VFS_RIGHT_ENUMERATE;
     status = UmicomKernelUserFilesGrant(&shell->files, shell->foreground, rights);
+#ifdef UMICOM_KERNEL_TERMINAL
+    /* Admission grants streams separately from filesystem write authority. If
+     * it fails, the existing cancellation/collection branch below owns rollback. */
+    if (status == UMICOM_VFS_OK && shell->terminal && !UmicomKernelConsoleTerminalGrant(shell))
+        status = UMICOM_VFS_BAD_STATE;
+#endif
     if (status != UMICOM_VFS_OK) {
         /* Keep the task token even if cancellation or collection must be retried.
          * A failed grant never admits the user to run with accidental authority. */
@@ -292,6 +301,13 @@ static UmicomKernelShellStatus UmicomShellRun(UmicomKernelConsoleShell *shell,
         return UmicomShellFileError(shell, status);
     }
     UmicomShellText(shell, writable ? "running with shared-filesystem write rights\r\n" : "running with read-only file rights\r\n");
+#ifdef UMICOM_KERNEL_TERMINAL
+    if (shell->terminal) {
+        /* The original discard-only behaviour below remains the unattached path. */
+        UmicomKernelConsoleTerminalAnnounce(shell);
+        return UMICOM_SHELL_OK;
+    }
+#endif
     UmicomShellText(shell, "Ctrl-C cancels the foreground program. Other input is discarded.\r\n");
     return UMICOM_SHELL_OK;
 }
@@ -449,6 +465,13 @@ UmicomKernelShellStatus UmicomKernelConsoleShellStep(UmicomKernelConsoleShell *s
         shell->busy = UMICOM_FALSE;
         return UMICOM_SHELL_UNSAFE;
     }
+#ifdef UMICOM_KERNEL_TERMINAL
+    /* Drain before collection: accepted stdout/stderr outlives user execution. */
+    if (UmicomKernelConsoleTerminalDrain(shell) != UMICOM_SHELL_OK) {
+        shell->busy = UMICOM_FALSE;
+        return UMICOM_SHELL_UNSAFE;
+    }
+#endif
     if (!info.terminal) { shell->busy = UMICOM_FALSE; return UMICOM_SHELL_OK; }
     UmicomKernelProcessCompletion completion;
     UmicomConsoleClear(&completion, sizeof(completion));
@@ -458,6 +481,9 @@ UmicomKernelShellStatus UmicomKernelConsoleShellStep(UmicomKernelConsoleShell *s
         shell->busy = UMICOM_FALSE;
         return UmicomShellProcessError(shell, status);
     }
+#ifdef UMICOM_KERNEL_TERMINAL
+    UmicomKernelConsoleTerminalFinish(shell);
+#endif
     UmicomConsoleCopy(&shell->lastCompletion, &completion, sizeof(completion));
     shell->hasCompletion = UMICOM_TRUE;
     shell->foreground = 0U;
@@ -493,6 +519,12 @@ void UmicomKernelConsoleShellPrompt(UmicomKernelConsoleShell *shell)
 void UmicomKernelConsoleShellInputLost(UmicomKernelConsoleShell *shell)
 {
     if (!shell || shell->self != shell || shell->busy || !shell->output) return;
+#ifdef UMICOM_KERNEL_TERMINAL
+    if (shell->foreground && shell->terminal) {
+        UmicomKernelConsoleTerminalInputLost(shell);
+        return;
+    }
+#endif
     /* Neither a terminal error nor FIFO overrun tells us which characters were
      * lost. Require a fresh delimiter, not a best guess at the damaged command. */
     shell->line.discard = UMICOM_TRUE;
@@ -507,6 +539,9 @@ UmicomKernelShellStatus UmicomKernelConsoleShellFeed(UmicomKernelConsoleShell *s
     if (shell->foreground != 0U) {
         if (byte == 3U) {
             UmicomShellText(shell, "^C\r\n");
+#ifdef UMICOM_KERNEL_TERMINAL
+            if (shell->terminal) UmicomKernelConsoleLineConsume(&shell->terminal->input);
+#endif
             UmicomKernelConsoleLineConsume(&shell->line);
             shell->inputDuringRun = UMICOM_FALSE;
             const UmicomKernelSupervisionStatus status = UmicomKernelProcessSupervisorCancel(&shell->supervisor,
@@ -514,6 +549,10 @@ UmicomKernelShellStatus UmicomKernelConsoleShellFeed(UmicomKernelConsoleShell *s
             if (status != UMICOM_SUPERVISION_OK) return UmicomShellProcessError(shell, status);
             return UmicomKernelConsoleShellStep(shell); /* Collect without running a cancelled image. */
         }
+#ifdef UMICOM_KERNEL_TERMINAL
+        /* Program input belongs to a different editor, never the command parser. */
+        if (shell->terminal) return UmicomKernelConsoleTerminalFeed(shell, byte);
+#endif
         /* No type-ahead after a program. Otherwise the tail of a pasted line
          * could become a different command when the foreground exits. */
         shell->inputDuringRun = byte == 13U || byte == 10U ? UMICOM_FALSE : UMICOM_TRUE;
@@ -552,6 +591,12 @@ UmicomKernelShellStatus UmicomKernelConsoleShellClose(UmicomKernelConsoleShell *
     if (shell->supervisor.initialised) {
         UmicomKernelSupervisionStatus status = UmicomKernelProcessSupervisorBeginShutdown(&shell->supervisor);
         if (status != UMICOM_SUPERVISION_OK) { shell->busy = UMICOM_FALSE; return UmicomShellProcessError(shell, status); }
+#ifdef UMICOM_KERNEL_TERMINAL
+        if (UmicomKernelConsoleTerminalDrain(shell) != UMICOM_SHELL_OK) {
+            shell->busy = UMICOM_FALSE;
+            return UMICOM_SHELL_CLEANUP_FAILED;
+        }
+#endif
         /* There are at most four task owners. Cancellation precedes collection,
          * so no retained instruction stream can refer to a reclaimed image. */
         for (UmicomSize i = 0U; i < UMICOM_USER_TASK_LIMIT; ++i) {
@@ -566,6 +611,12 @@ UmicomKernelShellStatus UmicomKernelConsoleShellClose(UmicomKernelConsoleShell *
         if (status != UMICOM_SUPERVISION_OK) { shell->busy = UMICOM_FALSE; return UmicomShellProcessError(shell, status); }
         shell->foreground = 0U;
     }
+#ifdef UMICOM_KERNEL_TERMINAL
+    if (UmicomKernelConsoleTerminalClose(shell) != UMICOM_SHELL_OK) {
+        shell->busy = UMICOM_FALSE;
+        return UMICOM_SHELL_CLEANUP_FAILED;
+    }
+#endif
     UmicomKernelVfsStatus status = UMICOM_VFS_OK;
     if (shell->files.self && shell->files.state != UMICOM_VFS_CLOSED)
         status = UmicomKernelUserFilesClose(&shell->files);

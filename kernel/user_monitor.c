@@ -30,6 +30,10 @@
 /* File requests leave the borrowed user root before filesystem allocation. */
 #include "umicom/kernel/user_files.h"
 #endif
+#ifdef UMICOM_KERNEL_STANDARD_STREAMS
+/* Standard streams use the existing checked origin and retained user frame. */
+#include "umicom/kernel/user_streams.h"
+#endif
 #include "umicom/kernel/address.h"
 #include "umicom/kernel/riscv64/user_execution.h"
 #ifdef UMICOM_KERNEL_USER_SLICES
@@ -167,6 +171,13 @@ UmicomU64 UmicomKernelUserTrapDispatch(
     if (UmicomKernelUserIpcRecognizes(frame->x17_a7) != UMICOM_FALSE) {
         return UmicomKernelUserIpcDispatch(session, frame, nextPc);
     }
+#endif
+
+#ifdef UMICOM_KERNEL_STANDARD_STREAMS
+    /* The stream service receives only a validated continuation. It never calls
+     * the UART or a host callback while this borrowed user context is active. */
+    if (frame->x17_a7 == UMICOM_USER_CALL_STREAM_READ || frame->x17_a7 == UMICOM_USER_CALL_STREAM_WRITE)
+        return UmicomKernelUserStreamDispatch(session, frame, nextPc);
 #endif
 
     UmicomU64 result = UMICOM_USER_RESULT_UNKNOWN_CALL;

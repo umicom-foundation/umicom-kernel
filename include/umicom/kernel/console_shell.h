@@ -78,6 +78,8 @@ typedef struct UmicomKernelConsoleShell {
     UmicomBoolean exitRequested;
     UmicomKernelShellOutput output;
     void *outputContext;
+    /* Optional terminal attachment leaves the original command-only path available. */
+    struct UmicomKernelConsoleTerminal *terminal;
     UmicomKernelConsoleLine line;
     UmicomKernelRamfs storage;
     UmicomKernelVfs vfs;

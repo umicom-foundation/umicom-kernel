@@ -69,6 +69,9 @@
 /* Import the minimum FDT header inspection needed to protect DTB pages. */
 #include "umicom/kernel/device_tree.h"
 
+/* Task-owned terminal streams are validated above the existing console. */
+#include "umicom/kernel/user_streams.h"
+
 /* Import the C entry-point declaration shared with boot.S. */
 #include "umicom/kernel/kernel.h"
 
@@ -1542,6 +1545,9 @@ void UmicomKernelMain(UmicomU64 hartId, UmicomAddress deviceTreeAddress)
 
     /* Exercise command editing, file operations and foreground process cleanup. */
     UmicomKernelConsoleShellValidateExecution();
+
+    /* The automatic image checks waiting streams without requiring host input. */
+    UmicomKernelStandardStreamsValidateExecution();
 
 #ifdef UMICOM_KERNEL_INTERACTIVE_CONSOLE
     /* Only the explicitly named console image stays at a prompt. It returns

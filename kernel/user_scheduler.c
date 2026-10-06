@@ -25,6 +25,9 @@
 #ifdef UMICOM_KERNEL_FILE_SERVICES
 #include "umicom/kernel/user_files.h"
 #endif
+#ifdef UMICOM_KERNEL_STANDARD_STREAMS
+#include "umicom/kernel/user_streams.h"
+#endif
 #include "umicom/kernel/user_scheduler.h"
 #include "umicom/kernel/riscv64/user_slice.h"
 
@@ -150,11 +153,20 @@ UmicomKernelUserScheduleStatus UmicomKernelUserSchedulerRunOne(UmicomKernelUserS
     /* Retry terminal descriptor cleanup before admitting another user quantum. */
     if (!UmicomKernelUserFilesPump(scheduler)) return UMICOM_USER_SCHEDULE_CLEANUP_FAILED;
 #endif
+#ifdef UMICOM_KERNEL_STANDARD_STREAMS
+    /* Queue readiness completes a retained call without spending a user slice. */
+    if (!UmicomKernelUserStreamsPump(scheduler)) return UMICOM_USER_SCHEDULE_MACHINE_STATE_ERROR;
+#endif
     UmicomSize selected = UMICOM_USER_TASK_LIMIT;
     for (UmicomSize offset = 0U; offset < UMICOM_USER_TASK_LIMIT; ++offset) {
         const UmicomSize slot = (scheduler->next + offset) % UMICOM_USER_TASK_LIMIT;
         if (scheduler->tasks[slot].state == UMICOM_USER_TASK_READY ||
             scheduler->tasks[slot].state == UMICOM_USER_TASK_PAUSED) {
+#ifdef UMICOM_KERNEL_STANDARD_STREAMS
+            /* PAUSED is not sufficient when its stream call is still waiting.
+             * A peer or terminal driver must make progress before resumption. */
+            if (UmicomKernelUserStreamsWaiting(scheduler, &scheduler->tasks[slot])) continue;
+#endif
             selected = slot;
             break;
         }
@@ -177,11 +189,26 @@ UmicomKernelUserScheduleStatus UmicomKernelUserSchedulerRunOne(UmicomKernelUserS
         return UMICOM_USER_SCHEDULE_ENTRY_REFUSED;
     }
 #endif
+#ifdef UMICOM_KERNEL_STANDARD_STREAMS
+    if (!UmicomKernelUserStreamsBegin(scheduler, task)) {
+#ifdef UMICOM_KERNEL_FILE_SERVICES
+        if (!UmicomKernelUserFilesEnd(scheduler, task)) scheduler->poisoned = UMICOM_TRUE;
+#endif
+#ifdef UMICOM_KERNEL_BLOCKING_IPC
+        if (!UmicomKernelUserIpcEnd(scheduler, task)) scheduler->poisoned = UMICOM_TRUE;
+#endif
+        return UMICOM_USER_SCHEDULE_ENTRY_REFUSED;
+    }
+#endif
     const UmicomKernelUserTaskState previousState = task->state;
     scheduler->active = UMICOM_TRUE;
     task->state = UMICOM_USER_TASK_RUNNING;
     UmicomBoolean expired = UMICOM_FALSE;
     const UmicomKernelUserScheduleStatus result = UmicomKernelUserSliceRun(task, quantumTicks, &expired);
+#ifdef UMICOM_KERNEL_STANDARD_STREAMS
+    /* Removing the binding does not touch user pointers, even on unsafe return. */
+    const UmicomBoolean streamsDetached = UmicomKernelUserStreamsEnd(scheduler, task);
+#endif
     scheduler->active = UMICOM_FALSE;
 #ifdef UMICOM_KERNEL_FILE_SERVICES
     /* Unbind even on an architecture error. No VFS access is needed to do so. */
@@ -197,6 +224,13 @@ UmicomKernelUserScheduleStatus UmicomKernelUserSchedulerRunOne(UmicomKernelUserS
 #endif
 #ifdef UMICOM_KERNEL_FILE_SERVICES
     if (!filesDetached) {
+        scheduler->poisoned = UMICOM_TRUE;
+        task->state = UMICOM_USER_TASK_ERROR;
+        return UMICOM_USER_SCHEDULE_MACHINE_STATE_ERROR;
+    }
+#endif
+#ifdef UMICOM_KERNEL_STANDARD_STREAMS
+    if (!streamsDetached) {
         scheduler->poisoned = UMICOM_TRUE;
         task->state = UMICOM_USER_TASK_ERROR;
         return UMICOM_USER_SCHEDULE_MACHINE_STATE_ERROR;
@@ -230,6 +264,20 @@ UmicomKernelUserScheduleStatus UmicomKernelUserSchedulerRunOne(UmicomKernelUserS
     ++task->slices;
     scheduler->next = (selected + 1U) % UMICOM_USER_TASK_LIMIT;
     *outHandle = UmicomUserTaskToken(task, selected);
+#ifdef UMICOM_KERNEL_STANDARD_STREAMS
+    if (UmicomKernelUserStreamsWaiting(scheduler, task)) {
+        const UmicomKernelUserScheduleStatus suspended = UmicomKernelUserStreamsSuspend(scheduler, task, expired);
+        if (suspended == UMICOM_USER_SCHEDULE_OK && task->process.quiesced) {
+#ifdef UMICOM_KERNEL_BLOCKING_IPC
+            if (!UmicomKernelUserIpcStop(scheduler, task)) return UMICOM_USER_SCHEDULE_MACHINE_STATE_ERROR;
+#endif
+#ifdef UMICOM_KERNEL_FILE_SERVICES
+            if (!UmicomKernelUserFilesStop(scheduler, task)) return UMICOM_USER_SCHEDULE_CLEANUP_FAILED;
+#endif
+        }
+        return suspended;
+    }
+#endif
 #ifdef UMICOM_KERNEL_FILE_SERVICES
     /* The original slice adapter restored the timer, root and machine controls.
      * Only now may a captured file request enter the existing VFS/RAMFS. */
@@ -282,6 +330,10 @@ UmicomKernelUserScheduleStatus UmicomKernelUserSchedulerRunOne(UmicomKernelUserS
         }
     }
     task->process.quiesced = UMICOM_TRUE; /* Terminal, but not implicitly destroyed. */
+#ifdef UMICOM_KERNEL_STANDARD_STREAMS
+    /* End input/waits now; accepted output remains available to the collector. */
+    if (!UmicomKernelUserStreamsStop(scheduler, task)) return UMICOM_USER_SCHEDULE_CLEANUP_FAILED;
+#endif
 #ifdef UMICOM_KERNEL_BLOCKING_IPC
     /* Close only this attached domain's references, not a peer's queued data. */
     if (UmicomKernelUserIpcStop(scheduler, task) == UMICOM_FALSE)
@@ -341,6 +393,9 @@ UmicomKernelUserScheduleStatus UmicomKernelUserTaskCancel(UmicomKernelUserSchedu
         return UMICOM_USER_SCHEDULE_MACHINE_STATE_ERROR;
 #endif
     task->process.quiesced = UMICOM_TRUE;
+#ifdef UMICOM_KERNEL_STANDARD_STREAMS
+    if (!UmicomKernelUserStreamsStop(scheduler, task)) return UMICOM_USER_SCHEDULE_CLEANUP_FAILED;
+#endif
 #ifdef UMICOM_KERNEL_FILE_SERVICES
     /* Cancellation does not run user CLOSE calls. End this client's pins here. */
     if (!UmicomKernelUserFilesStop(scheduler, task)) return UMICOM_USER_SCHEDULE_CLEANUP_FAILED;
@@ -364,6 +419,10 @@ UmicomKernelUserScheduleStatus UmicomKernelUserTaskReap(UmicomKernelUserSchedule
 #ifdef UMICOM_KERNEL_FILE_SERVICES
     /* A failed close cannot be bypassed by freeing/reusing this task's image. */
     if (!UmicomKernelUserFilesStop(scheduler, task)) return UMICOM_USER_SCHEDULE_CLEANUP_FAILED;
+#endif
+#ifdef UMICOM_KERNEL_STANDARD_STREAMS
+    /* Do not lose accepted output by freeing/reusing its producer's record. */
+    if (!UmicomKernelUserStreamsReap(scheduler, task)) return UMICOM_USER_SCHEDULE_CLEANUP_FAILED;
 #endif
     if (UmicomKernelProcessDestroy(&task->process) != UMICOM_PROCESS_OK)
         return UMICOM_USER_SCHEDULE_CLEANUP_FAILED;
@@ -428,6 +487,9 @@ UmicomKernelUserScheduleStatus UmicomKernelUserSchedulerValidate(UmicomKernelUse
 #endif
 #ifdef UMICOM_KERNEL_FILE_SERVICES
     if (!UmicomKernelUserFilesValidate(scheduler)) return UMICOM_USER_SCHEDULE_BAD_STATE;
+#endif
+#ifdef UMICOM_KERNEL_STANDARD_STREAMS
+    if (!UmicomKernelUserStreamsValidate(scheduler)) return UMICOM_USER_SCHEDULE_BAD_STATE;
 #endif
     return count <= scheduler->dispatches ? UMICOM_USER_SCHEDULE_OK : UMICOM_USER_SCHEDULE_BAD_STATE;
 }

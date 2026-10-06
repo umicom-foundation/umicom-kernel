@@ -1,0 +1,9 @@
+/* Umicom Kernel stream-client carrier. These bytes enter the existing ELF loader,
+ * never a Kernel call instruction. Sammy Hegab, Umicom Foundation. MIT licence. */
+    .section .rodata.umicom_stream_executable, "a", @progbits
+    .balign 16
+    .global UmicomStreamExecutableStart
+    .global UmicomStreamExecutableEnd
+UmicomStreamExecutableStart:
+    .incbin "@UMICOM_STREAM_EXECUTABLE_FILE@"
+UmicomStreamExecutableEnd:

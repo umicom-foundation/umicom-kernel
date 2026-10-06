@@ -15,6 +15,9 @@
  * LICENCE: MIT
  *---------------------------------------------------------------------------*/
 #include "umicom/kernel/console_shell.h"
+#ifdef UMICOM_KERNEL_TERMINAL
+#include "umicom/kernel/console_terminal.h"
+#endif
 #include "umicom/kernel/console_input.h"
 #include "umicom/kernel/console.h"
 #include "umicom/kernel/platform.h"
@@ -24,6 +27,11 @@ extern const UmicomU8 UmicomEmbeddedExecutableEnd[];
 extern const UmicomU8 UmicomFileExecutableStart[];
 extern const UmicomU8 UmicomFileExecutableEnd[];
 static UmicomKernelConsoleShell umicomInteractiveShell;
+#ifdef UMICOM_KERNEL_TERMINAL
+extern const UmicomU8 UmicomStreamExecutableStart[];
+extern const UmicomU8 UmicomStreamExecutableEnd[];
+static UmicomKernelConsoleTerminal umicomInteractiveTerminal;
+#endif
 
 static void UmicomInteractiveOutput(void *context, const char *text, UmicomSize bytes)
 {
@@ -35,6 +43,10 @@ static void UmicomInteractiveOutput(void *context, const char *text, UmicomSize 
 void UmicomKernelConsoleShellRun(void)
 {
     const UmicomKernelShellImage images[] = {
+#ifdef UMICOM_KERNEL_TERMINAL
+        {"/bin/umicom-stream-client.elf", UmicomStreamExecutableStart,
+            (UmicomSize)(UmicomStreamExecutableEnd - UmicomStreamExecutableStart)},
+#endif
         {"/bin/umicom-diagnostic.elf", UmicomEmbeddedExecutableStart,
             (UmicomSize)(UmicomEmbeddedExecutableEnd - UmicomEmbeddedExecutableStart)},
         {"/bin/umicom-file-client.elf", UmicomFileExecutableStart,
@@ -47,6 +59,14 @@ void UmicomKernelConsoleShellRun(void)
         UmicomPlatformFinishFailure(0x94U);
         UmicomPlatformHalt();
     }
+#ifdef UMICOM_KERNEL_TERMINAL
+    if (UmicomKernelConsoleTerminalAttach(&umicomInteractiveTerminal, &umicomInteractiveShell) != UMICOM_SHELL_OK) {
+        (void)UmicomKernelConsoleShellClose(&umicomInteractiveShell);
+        UmicomKernelConsoleWriteLine("UMICOM_KERNEL_FAIL");
+        UmicomPlatformFinishFailure(0x96U);
+        UmicomPlatformHalt();
+    }
+#endif
     UmicomKernelConsoleWriteLine("UMICOM_KERNEL_CONSOLE_READY");
     UmicomKernelConsoleWriteLine("Umicom Kernel development console. Type help.");
     UmicomKernelConsoleWriteLine("RAM-only data; no login, disk persistence or host filesystem access.");
