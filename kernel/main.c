@@ -48,6 +48,7 @@
 #include "umicom/kernel/fat16_update.h"
 #include "umicom/kernel/fat16_commit.h"
 #include "umicom/kernel/fat16_file_commit.h"
+#include "umicom/kernel/fat16_metadata.h"
 #include "umicom/kernel/virtio_block.h"
 
 /* Read firmware descriptions without probing or binding devices. */
@@ -1429,6 +1430,12 @@ static void RunHardwareAddressTranslationTest(void)
 
 void UmicomKernelMain(UmicomU64 hartId, UmicomAddress deviceTreeAddress)
 {
+#if defined(UMICOM_KERNEL_FAT16_METADATA_TEST) || defined(UMICOM_KERNEL_FAT16_METADATA_COMMITTED_TEST) || \
+    defined(UMICOM_KERNEL_FAT16_METADATA_DIRTY_TEST)
+    /* Read persisted metadata without retaining any writer result or acquiring
+     * a writable lease; dirty media is refused by the existing admission gate. */
+    UmicomKernelFat16MetadataBoot(hartId, deviceTreeAddress);
+#endif
 #if defined(UMICOM_KERNEL_FAT16_FILE_COMMIT_TEST) || defined(UMICOM_KERNEL_FAT16_FILE_COMMIT_READBACK_TEST) || \
     defined(UMICOM_KERNEL_FAT16_FILE_COMMIT_INTERRUPTED_TEST) || defined(UMICOM_KERNEL_FAT16_FILE_COMMIT_REJECTED_TEST)
     /* Timestamped file commits qualify data, the exact directory sector and

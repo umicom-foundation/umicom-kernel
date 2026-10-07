@@ -1056,3 +1056,191 @@ UmicomKernelDiskStatus UmicomKernelFat16PlanFileUpdate(UmicomKernelFat16 *volume
     volume->fatCached = UMICOM_FALSE;
     return UmicomFatFinish(volume, status);
 }
+
+/*-----------------------------------------------------------------------------
+ * Persisted short-entry metadata snapshots.
+ *
+ * The earlier writer's retained result describes an operation. This read path
+ * independently decodes the directory words which a later inspector actually
+ * observes. Existing Entry/VFS layouts and ordinary read-only interpretation
+ * remain intact; neither a malformed calendar nor this value snapshot grants
+ * permission to write, repair or trust the allocation beyond the stated path.
+ *---------------------------------------------------------------------------*/
+#include "umicom/kernel/fat16_metadata.h"
+
+UmicomKernelDiskStatus UmicomKernelFat16TimestampDecode(UmicomU16 rawTime,
+    UmicomU16 rawDate, UmicomKernelFat16Timestamp *outTimestamp)
+{
+    if (!UmicomFatPlanSpan(outTimestamp, sizeof(*outTimestamp)) ||
+        (UmicomAddress)outTimestamp % _Alignof(UmicomKernelFat16Timestamp))
+        return UMICOM_DISK_INVALID_ARGUMENT;
+    UmicomKernelFat16Timestamp stage;
+    UmicomFatClear(&stage, sizeof(stage));
+    stage.rawTime = rawTime;
+    stage.rawDate = rawDate;
+    if (rawTime || rawDate) {
+        stage.state = UMICOM_FAT16_TIMESTAMP_INVALID;
+        UmicomKernelFat16FileTime value;
+        UmicomFatClear(&value, sizeof(value));
+        value.year = (UmicomU16)(1980U + (rawDate >> 9U));
+        value.month = (UmicomU16)((rawDate >> 5U) & 0x0fU);
+        value.day = (UmicomU16)(rawDate & 0x1fU);
+        value.hour = (UmicomU16)(rawTime >> 11U);
+        value.minute = (UmicomU16)((rawTime >> 5U) & 0x3fU);
+        value.second = (UmicomU16)((rawTime & 0x1fU) * 2U);
+        UmicomKernelFat16FileTimeEncoding encoded;
+        /* Reuse the same Gregorian field checks as explicit write planning.
+         * A nonzero time with a zero date and the two reserved second values
+         * remain malformed observations, never silently normalised calendars. */
+        if (UmicomFatFileTimeFields(&value, &encoded) == UMICOM_DISK_OK) {
+            UmicomFatCopy(&stage.value, &value, sizeof(value));
+            stage.state = UMICOM_FAT16_TIMESTAMP_VALID;
+        }
+    }
+    UmicomFatCopy(outTimestamp, &stage, sizeof(stage));
+    return UMICOM_DISK_OK;
+}
+
+static UmicomKernelDiskStatus UmicomFatMetadataArguments(UmicomKernelFat16 *volume,
+    const char *path, UmicomKernelFat16Metadata *outMetadata, UmicomSize *outPathBytes)
+{
+    if (!UmicomFatPlanSpan(volume, sizeof(*volume)) ||
+        !UmicomFatPlanSpan(outMetadata, sizeof(*outMetadata)) ||
+        !UmicomFatPlanSpan(path, UMICOM_FAT16_PATH_BYTES) ||
+        (UmicomAddress)volume % _Alignof(UmicomKernelFat16) ||
+        (UmicomAddress)outMetadata % _Alignof(UmicomKernelFat16Metadata) ||
+        UmicomFatPlanOverlap(volume, sizeof(*volume), outMetadata, sizeof(*outMetadata)))
+        return UMICOM_DISK_INVALID_ARGUMENT;
+    UmicomSize bytes = 0U;
+    while (bytes < UMICOM_FAT16_PATH_BYTES) {
+        /* Check ownership before dereferencing each path byte. A path which
+         * starts just outside an output or owner must not scan into it while
+         * searching for a terminator, including the terminator byte itself. */
+        const char *const current = path + bytes;
+        if (UmicomFatPlanOverlap(current, 1U, volume, sizeof(*volume)) ||
+            UmicomFatPlanOverlap(current, 1U, outMetadata, sizeof(*outMetadata)))
+            return UMICOM_DISK_INVALID_ARGUMENT;
+        if (!path[bytes]) {
+            *outPathBytes = bytes + 1U;
+            return UMICOM_DISK_OK;
+        }
+        ++bytes;
+    }
+    return UMICOM_DISK_LIMIT;
+}
+
+static UmicomKernelDiskStatus UmicomFatMetadataGeometry(const UmicomKernelFat16 *volume)
+{
+    /* Open originally checked these arithmetic relationships. Recheck them
+     * before public owner fields become divisors or sector offsets, so damaged
+     * trusted storage produces an explicit refusal. Unlike writable planning,
+     * ordinary inspection accepts an oversized but geometrically valid FAT. */
+    const UmicomKernelFat16Info *const info = &volume->info;
+    if (!volume->reader.read || !volume->reader.sectors || !info->firstSector ||
+        !info->volumeSectors || !volume->partitionSectors ||
+        info->firstSector >= volume->reader.sectors ||
+        volume->partitionSectors > volume->reader.sectors - info->firstSector ||
+        info->volumeSectors > volume->partitionSectors ||
+        !info->sectorsPerCluster || info->sectorsPerCluster > 64U ||
+        (info->sectorsPerCluster & (info->sectorsPerCluster - 1U)) ||
+        !info->sectorsPerFat || !info->rootEntries || info->rootEntries % 16U ||
+        info->rootEntries > UMICOM_FAT16_SCAN_ENTRIES ||
+        info->clusters < 4085U || info->clusters >= 0xffefU ||
+        !volume->fatStart || volume->fatStart >= info->volumeSectors)
+        return UMICOM_DISK_BAD_STATE;
+    if ((UmicomU64)info->sectorsPerFat * 2U > info->volumeSectors - volume->fatStart)
+        return UMICOM_DISK_BAD_STATE;
+    const UmicomU64 root = volume->fatStart + (UmicomU64)info->sectorsPerFat * 2U;
+    if (root >= info->volumeSectors || volume->rootStart != root ||
+        (UmicomU64)info->rootEntries / 16U >= info->volumeSectors - root)
+        return UMICOM_DISK_BAD_STATE;
+    const UmicomU64 data = root + (UmicomU64)info->rootEntries / 16U;
+    if (volume->dataStart != data ||
+        (info->volumeSectors - data) / info->sectorsPerCluster != info->clusters ||
+        ((UmicomU64)info->clusters + 2U) * 2U >
+            (UmicomU64)info->sectorsPerFat * UMICOM_DISK_SECTOR_BYTES)
+        return UMICOM_DISK_BAD_STATE;
+    return UMICOM_DISK_OK;
+}
+
+static UmicomKernelDiskStatus UmicomFatMetadataTimestamp(UmicomKernelFat16 *volume,
+    UmicomU16 parent, const UmicomKernelFat16Entry *entry,
+    UmicomKernelFat16Timestamp *outTimestamp)
+{
+    UmicomU16 chain[UMICOM_FAT16_CHAIN_LIMIT];
+    UmicomFatClear(chain, sizeof(chain));
+    UmicomSize count = 0U;
+    UmicomU64 entries = volume->info.rootEntries;
+    if (parent) {
+        const UmicomKernelDiskStatus status = UmicomFatChain(volume, parent,
+            UMICOM_FALSE, 0U, chain, &count);
+        if (status != UMICOM_DISK_OK) return status;
+        entries = (UmicomU64)count * volume->info.sectorsPerCluster * 16U;
+    }
+    if (entries > UMICOM_FAT16_SCAN_ENTRIES) return UMICOM_DISK_LIMIT;
+    for (UmicomU64 i = 0U; i < entries; ++i) {
+        if (i % 16U == 0U) {
+            UmicomU64 relative = volume->rootStart + i / 16U;
+            if (parent) {
+                const UmicomU64 index = i / (16U * volume->info.sectorsPerCluster);
+                if (index >= count) return UMICOM_DISK_CORRUPT;
+                relative = volume->dataStart + ((UmicomU64)chain[index] - 2U) *
+                    volume->info.sectorsPerCluster + (i / 16U) % volume->info.sectorsPerCluster;
+            }
+            const UmicomKernelDiskStatus status = UmicomFatReadSector(volume, relative,
+                volume->dataSector);
+            if (status != UMICOM_DISK_OK) return status;
+        }
+        const UmicomU8 *const raw = volume->dataSector + (i % 16U) * 32U;
+        if (!raw[0]) break;
+        /* These are the established read-only rules: deleted records, dot
+         * entries, labels and long-name records do not become short entries. */
+        if (raw[0] == 0xe5U || raw[0] == '.' || (raw[11] & 0x08U)) continue;
+        char name[13];
+        UmicomFatClear(name, sizeof(name));
+        const UmicomKernelDiskStatus status = UmicomFatDecodeName(raw, name);
+        if (status != UMICOM_DISK_OK) return status;
+        if (!UmicomFatStringEqual(name, entry->name)) continue;
+        /* Lookup decoded the complete parent directory before this physical
+         * pass. Confirm the selected identity again before copying its time;
+         * scratch bytes from a failed or different record are never published. */
+        if (raw[11] != entry->attributes || (raw[12] & ~0x18U) ||
+            UmicomFat16Word(raw + 20U) ||
+            UmicomFat16Word(raw + 26U) != entry->firstCluster ||
+            UmicomFat32Word(raw + 28U) != entry->bytes)
+            return UMICOM_DISK_CORRUPT;
+        return UmicomKernelFat16TimestampDecode(UmicomFat16Word(raw + 22U),
+            UmicomFat16Word(raw + 24U), outTimestamp);
+    }
+    return UMICOM_DISK_CORRUPT; /* An already resolved short entry cannot vanish. */
+}
+
+UmicomKernelDiskStatus UmicomKernelFat16MetadataRead(UmicomKernelFat16 *volume,
+    const char *path, UmicomKernelFat16Metadata *outMetadata)
+{
+    UmicomSize pathBytes = 0U;
+    UmicomKernelDiskStatus status = UmicomFatMetadataArguments(volume, path,
+        outMetadata, &pathBytes);
+    if (status != UMICOM_DISK_OK) return status;
+    status = UmicomFatBegin(volume);
+    if (status != UMICOM_DISK_OK) return status;
+    char selected[UMICOM_FAT16_PATH_BYTES];
+    UmicomFatClear(selected, sizeof(selected));
+    UmicomFatCopy(selected, path, pathBytes);
+    UmicomKernelFat16Metadata stage;
+    UmicomFatClear(&stage, sizeof(stage));
+    UmicomU16 parent = 0U;
+    status = UmicomFatMetadataGeometry(volume);
+    if (status == UMICOM_DISK_OK)
+        status = UmicomFatFileLookup(volume, selected, &stage.entry, &parent);
+    if (status == UMICOM_DISK_OK && stage.entry.name[0] != '/') {
+        status = UmicomFatMetadataTimestamp(volume, parent, &stage.entry,
+            &stage.writeTimestamp);
+        if (status == UMICOM_DISK_OK) stage.directoryEntryPresent = UMICOM_TRUE;
+    }
+    if (status == UMICOM_DISK_OK) UmicomFatCopy(outMetadata, &stage, sizeof(stage));
+    UmicomFatClear(selected, sizeof(selected));
+    UmicomFatClear(&stage, sizeof(stage));
+    volume->fatCached = UMICOM_FALSE;
+    return UmicomFatFinish(volume, status);
+}

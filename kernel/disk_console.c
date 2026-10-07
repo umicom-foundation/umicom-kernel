@@ -12,6 +12,7 @@
  *---------------------------------------------------------------------------*/
 #include "umicom/kernel/disk_console.h"
 #include "umicom/kernel/platform.h"
+#include "umicom/kernel/disk_metadata_console.h"
 
 static UmicomKernelBlockDomain *umicomDiskDomain;
 static UmicomKernelBlockHandle umicomDiskHandle;
@@ -94,6 +95,8 @@ UmicomKernelDiskStatus UmicomKernelDiskInspect(UmicomSize slot, UmicomSize parti
 {
     if (!operation || !path || !output || slot >= UMICOM_BLOCK_SLOT_LIMIT ||
         partition >= UMICOM_DISK_PRIMARY_PARTITIONS) return UMICOM_DISK_INVALID_ARGUMENT;
+    if (UmicomDiskEqual(operation, "fatstat"))
+        return UmicomKernelDiskMetadataInspect(slot, partition, path, context, output);
     const UmicomBoolean partitions = UmicomDiskEqual(operation, "partitions");
     const UmicomBoolean infoOnly = UmicomDiskEqual(operation, "fatinfo");
     const UmicomBoolean list = UmicomDiskEqual(operation, "fatls");
@@ -192,6 +195,18 @@ UmicomKernelShellStatus UmicomKernelDiskInspectionCommand(UmicomKernelConsoleShe
     *handled = UMICOM_FALSE;
     if (!command->count) return UMICOM_SHELL_OK;
     const char *name = command->bytes + command->offsets[0];
+    if (UmicomDiskEqual(name, "fatstat")) {
+        *handled = UMICOM_TRUE;
+        UmicomU64 slot = 0U, partition = 0U;
+        if (command->count != 4U ||
+            !UmicomKernelShellUnsigned(command->bytes + command->offsets[1], &slot) ||
+            !UmicomKernelShellUnsigned(command->bytes + command->offsets[2], &partition) ||
+            slot >= UMICOM_BLOCK_SLOT_LIMIT || partition >= UMICOM_DISK_PRIMARY_PARTITIONS)
+            return UMICOM_SHELL_INVALID_ARGUMENT;
+        const UmicomKernelDiskStatus status = UmicomKernelDiskMetadataInspect(slot, partition,
+            command->bytes + command->offsets[3], shell->outputContext, shell->output);
+        return status == UMICOM_DISK_OK ? UMICOM_SHELL_OK : UMICOM_SHELL_IO_ERROR;
+    }
     const UmicomBoolean parts = UmicomDiskEqual(name, "partitions");
     const UmicomBoolean info = UmicomDiskEqual(name, "fatinfo");
     const UmicomBoolean list = UmicomDiskEqual(name, "fatls"), cat = UmicomDiskEqual(name, "fatcat");
@@ -200,6 +215,9 @@ UmicomKernelShellStatus UmicomKernelDiskInspectionCommand(UmicomKernelConsoleShe
     *handled = UMICOM_TRUE;
     if (close) {
         if (command->count != 1U) return UMICOM_SHELL_INVALID_ARGUMENT;
+        /* Reject an output callback's recursive close before reporting it
+         * through that same callback. The active adapter still owns cleanup. */
+        if (umicomDiskBusy) return UMICOM_SHELL_BUSY;
         const UmicomKernelBlockStatus status = UmicomKernelDiskInspectionClose();
         UmicomDiskText(shell->outputContext, shell->output, "disk.close=");
         UmicomDiskText(shell->outputContext, shell->output, UmicomKernelBlockStatusName(status));
@@ -216,4 +234,162 @@ UmicomKernelShellStatus UmicomKernelDiskInspectionCommand(UmicomKernelConsoleShe
     const UmicomKernelDiskStatus status = UmicomKernelDiskInspect(slot, partition, name, path,
         shell->outputContext, shell->output);
     return status == UMICOM_DISK_OK ? UMICOM_SHELL_OK : UMICOM_SHELL_IO_ERROR;
+}
+
+/*-----------------------------------------------------------------------------
+ * Persisted metadata inspection keeps the existing disk owner, but holds its
+ * reentry guard across admission, final cleanup and output. A callback cannot
+ * start another disk lifetime while this command is still reporting its own.
+ *---------------------------------------------------------------------------*/
+static UmicomSize umicomDiskMetadataReads;
+static UmicomBoolean umicomDiskMetadataLimit;
+
+static UmicomKernelBlockStatus UmicomDiskMetadataOwnedClose(void)
+{
+    /* Called only while this adapter owns the busy guard. The public Close
+     * must keep refusing callback reentry, including during device reset. */
+    if (umicomDiskVolume.open &&
+        UmicomKernelFat16Close(&umicomDiskVolume) != UMICOM_DISK_OK) return UMICOM_BLOCK_BUSY;
+    if (!umicomDiskHandle) return UMICOM_BLOCK_OK;
+    const UmicomKernelBlockStatus status = UmicomKernelBlockClose(umicomDiskDomain, umicomDiskHandle);
+    if (status == UMICOM_BLOCK_OK) umicomDiskHandle = 0U;
+    return status;
+}
+static UmicomBoolean UmicomDiskMetadataDeadline(void)
+{
+    const UmicomU64 now = UmicomPlatformTimerRead();
+    if (now < umicomDiskClock) {
+        umicomDiskLastBlock = UMICOM_BLOCK_CLOCK_ERROR;
+        return UMICOM_FALSE;
+    }
+    umicomDiskClock = now;
+    if (now - umicomDiskStarted >= 100000000U) {
+        umicomDiskLastBlock = UMICOM_BLOCK_TIMEOUT;
+        return UMICOM_FALSE;
+    }
+    return UMICOM_TRUE;
+}
+static UmicomBoolean UmicomDiskMetadataRead(void *context, UmicomU64 sector, UmicomU8 *output)
+{
+    /* Open and lookup have their own parser lifetimes. Count their combined
+     * physical reads as well, so resetting parser scratch cannot reset the
+     * enclosing command's finite work bound when a clock makes no progress. */
+    if (umicomDiskMetadataReads >= UMICOM_FAT16_IO_LIMIT) {
+        umicomDiskMetadataLimit = UMICOM_TRUE;
+        return UMICOM_FALSE;
+    }
+    ++umicomDiskMetadataReads;
+    return UmicomDiskRead(context, sector, output);
+}
+static void UmicomDiskMetadataHex(void *context, UmicomKernelBlockOutput output,
+    UmicomU16 value, UmicomSize digits)
+{
+    static const char alphabet[] = "0123456789abcdef";
+    char text[6] = {'0', 'x', '0', '0', '0', '0'};
+    for (UmicomSize i = 0U; i < digits; ++i) {
+        text[digits + 1U - i] = alphabet[value & 0x0fU];
+        value = (UmicomU16)(value >> 4U);
+    }
+    output(context, text, digits + 2U);
+}
+static void UmicomDiskMetadataDecimal(void *context, UmicomKernelBlockOutput output,
+    UmicomU16 value, UmicomSize width)
+{
+    char text[4];
+    for (UmicomSize i = 0U; i < width; ++i) {
+        text[width - 1U - i] = (char)('0' + value % 10U);
+        value = (UmicomU16)(value / 10U);
+    }
+    output(context, text, width);
+}
+static const char *UmicomDiskMetadataState(UmicomKernelFat16TimestampState state)
+{
+    switch (state) {
+    case UMICOM_FAT16_TIMESTAMP_ABSENT: return "absent";
+    case UMICOM_FAT16_TIMESTAMP_VALID: return "valid";
+    case UMICOM_FAT16_TIMESTAMP_INVALID: return "invalid";
+    }
+    return "invalid";
+}
+static void UmicomDiskMetadataOutput(void *context, UmicomKernelBlockOutput output,
+    const UmicomKernelFat16Metadata *metadata)
+{
+    const UmicomKernelFat16Entry *const entry = &metadata->entry;
+    const UmicomKernelFat16Timestamp *const stamp = &metadata->writeTimestamp;
+    UmicomDiskText(context, output, "disk.file.name="); UmicomDiskText(context, output, entry->name);
+    UmicomDiskText(context, output, entry->directory ? " kind=directory" : " kind=file");
+    UmicomDiskText(context, output, " bytes="); UmicomDiskNumber(context, output, entry->bytes);
+    UmicomDiskText(context, output, " first-cluster="); UmicomDiskNumber(context, output, entry->firstCluster);
+    UmicomDiskText(context, output, " attributes="); UmicomDiskMetadataHex(context, output, entry->attributes, 2U);
+    output(context, "\r\n", 2U);
+    static const char *const names[] = {"disk.file.read-only=", " hidden=", " system=", " directory=", " archive="};
+    static const UmicomU8 bits[] = {0x01U, 0x02U, 0x04U, 0x10U, 0x20U};
+    for (UmicomSize i = 0U; i < sizeof(bits); ++i) {
+        UmicomDiskText(context, output, names[i]);
+        UmicomDiskNumber(context, output, entry->attributes & bits[i] ? 1U : 0U);
+    }
+    UmicomDiskText(context, output, metadata->directoryEntryPresent ?
+        "\r\ndisk.file.directory-entry=present\r\n" : "\r\ndisk.file.directory-entry=synthetic-root\r\n");
+    UmicomDiskText(context, output, "disk.file.write-state=");
+    UmicomDiskText(context, output, UmicomDiskMetadataState(stamp->state));
+    UmicomDiskText(context, output, " raw-date="); UmicomDiskMetadataHex(context, output, stamp->rawDate, 4U);
+    UmicomDiskText(context, output, " raw-time="); UmicomDiskMetadataHex(context, output, stamp->rawTime, 4U);
+    UmicomDiskText(context, output, "\r\ndisk.file.write-time=");
+    if (stamp->state == UMICOM_FAT16_TIMESTAMP_VALID) {
+        UmicomDiskMetadataDecimal(context, output, stamp->value.year, 4U); output(context, "-", 1U);
+        UmicomDiskMetadataDecimal(context, output, stamp->value.month, 2U); output(context, "-", 1U);
+        UmicomDiskMetadataDecimal(context, output, stamp->value.day, 2U); output(context, "T", 1U);
+        UmicomDiskMetadataDecimal(context, output, stamp->value.hour, 2U); output(context, ":", 1U);
+        UmicomDiskMetadataDecimal(context, output, stamp->value.minute, 2U); output(context, ":", 1U);
+        UmicomDiskMetadataDecimal(context, output, stamp->value.second, 2U);
+    } else UmicomDiskText(context, output, UmicomDiskMetadataState(stamp->state));
+    output(context, "\r\n", 2U);
+}
+UmicomKernelDiskStatus UmicomKernelDiskMetadataInspect(UmicomSize slot,
+    UmicomSize partition, const char *path, void *context, UmicomKernelBlockOutput output)
+{
+    if (!path || !output || slot >= UMICOM_BLOCK_SLOT_LIMIT || partition >= UMICOM_DISK_PRIMARY_PARTITIONS ||
+        (UmicomAddress)path > ~(UmicomAddress)0 - UMICOM_FAT16_PATH_BYTES)
+        return UMICOM_DISK_INVALID_ARGUMENT;
+    if (umicomDiskBusy) return UMICOM_DISK_BUSY;
+    char selected[UMICOM_FAT16_PATH_BYTES];
+    UmicomDiskClear(selected, sizeof(selected));
+    UmicomSize length = 0U;
+    while (length < sizeof(selected) && path[length]) { selected[length] = path[length]; ++length; }
+    if (length == sizeof(selected)) return UMICOM_DISK_LIMIT;
+    if (!length || selected[0] != '/') return UMICOM_DISK_INVALID_ARGUMENT;
+    UmicomKernelFat16Metadata metadata;
+    UmicomKernelBlockInfo info;
+    UmicomDiskClear(&metadata, sizeof(metadata)); UmicomDiskClear(&info, sizeof(info));
+    umicomDiskBusy = UMICOM_TRUE;
+    umicomDiskMetadataReads = 0U; umicomDiskMetadataLimit = UMICOM_FALSE;
+    umicomDiskStarted = UmicomPlatformTimerRead(); umicomDiskClock = umicomDiskStarted;
+    UmicomKernelBlockStatus block = UmicomDiskMetadataOwnedClose();
+    const UmicomBoolean previousCloseFailed = block != UMICOM_BLOCK_OK;
+    if (block == UMICOM_BLOCK_OK) block = UmicomKernelBlockRetryClose();
+    if (block == UMICOM_BLOCK_OK) block = UmicomPlatformBlockDomainGet(&umicomDiskDomain);
+    if (block == UMICOM_BLOCK_OK)
+        block = UmicomKernelBlockOpen(umicomDiskDomain, slot, 10000000U, &umicomDiskHandle);
+    if (block == UMICOM_BLOCK_OK) block = UmicomKernelBlockProbe(umicomDiskDomain, slot, &info);
+    umicomDiskLastBlock = block;
+    UmicomKernelDiskStatus status = block == UMICOM_BLOCK_OK ? UMICOM_DISK_OK : UMICOM_DISK_IO_ERROR;
+    const UmicomKernelDiskReader reader = {info.sectors, UmicomDiskMetadataRead, &umicomDiskVolume};
+    if (status == UMICOM_DISK_OK) status = UmicomKernelFat16Open(&umicomDiskVolume, &reader, partition);
+    if (status == UMICOM_DISK_OK) status = UmicomKernelFat16MetadataRead(&umicomDiskVolume, selected, &metadata);
+    if (umicomDiskMetadataLimit) status = UMICOM_DISK_LIMIT;
+    if (status == UMICOM_DISK_OK && !UmicomDiskMetadataDeadline()) status = UMICOM_DISK_IO_ERROR;
+    const UmicomKernelBlockStatus closed = previousCloseFailed ? block : UmicomDiskMetadataOwnedClose();
+    if (status == UMICOM_DISK_OK && !UmicomDiskMetadataDeadline()) status = UMICOM_DISK_IO_ERROR;
+    const UmicomKernelDiskStatus result = closed == UMICOM_BLOCK_OK ? status : UMICOM_DISK_IO_ERROR;
+    /* The snapshot is useful only when the complete command succeeds. A reset
+     * or release error retains the handle and emits status without metadata. */
+    if (result == UMICOM_DISK_OK) UmicomDiskMetadataOutput(context, output, &metadata);
+    UmicomDiskText(context, output, "disk.inspect="); UmicomDiskText(context, output, UmicomKernelDiskStatusName(result));
+    UmicomDiskText(context, output, " block="); UmicomDiskText(context, output, UmicomKernelBlockStatusName(umicomDiskLastBlock));
+    UmicomDiskText(context, output, " close="); UmicomDiskText(context, output, UmicomKernelBlockStatusName(closed));
+    output(context, "\r\n", 2U);
+    UmicomDiskClear(&metadata, sizeof(metadata)); UmicomDiskClear(selected, sizeof(selected));
+    UmicomDiskClear(umicomDiskContent, sizeof(umicomDiskContent));
+    umicomDiskBusy = UMICOM_FALSE;
+    return result;
 }

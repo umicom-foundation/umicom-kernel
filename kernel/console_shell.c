@@ -548,6 +548,7 @@ UmicomKernelShellStatus UmicomKernelConsoleShellExecute(UmicomKernelConsoleShell
 #endif
 #ifdef UMICOM_KERNEL_DISK_INSPECTION
         UmicomShellText(shell, "partitions SLOT | fatinfo SLOT PART | fatls SLOT PART PATH | fatcat SLOT PART PATH | diskclose\r\n");
+        UmicomShellText(shell, "fatstat SLOT PART PATH (persisted attributes and write time; read-only)\r\n");
 #endif
 #ifdef UMICOM_KERNEL_READ_ONLY_BLOCK
         UmicomShellText(shell, "disks | readsector SLOT LBA | blockclose (read-only block inspection)\r\n");
