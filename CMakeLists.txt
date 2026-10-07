@@ -520,3 +520,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/NormalBoot.cmake")
 # Monitor live native services through explicit readiness and health reports.
 # One-shot boot jobs and every existing execution path remain available.
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/ManagedServices.cmake")
+
+# Capture a checked hardware inventory before introducing new device drivers.
+# Fixed-profile boot ownership and all existing implementations remain intact.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/HardwareDiscovery.cmake")

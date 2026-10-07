@@ -39,6 +39,9 @@
  *   MIT
  *---------------------------------------------------------------------------*/
 
+/* Read firmware descriptions without probing or binding devices. */
+#include "umicom/kernel/hardware_catalogue.h"
+
 /* Live native-service validation reuses the existing supervised task path. */
 #include "umicom/kernel/service_manager.h"
 
@@ -1446,6 +1449,9 @@ void UmicomKernelMain(UmicomU64 hartId, UmicomAddress deviceTreeAddress)
     /* Install the direct machine-mode trap vector while interrupts are disabled. */
     UmicomRiscvTrapInstall();
 
+    /* Capture immutable firmware evidence before later allocation tests run. */
+    UmicomKernelHardwareCapture(deviceTreeAddress);
+
     /* Publish the exact vector address placed into mtvec. */
     WriteHexRecord(
         "trap-vector",
@@ -1574,6 +1580,9 @@ void UmicomKernelMain(UmicomU64 hartId, UmicomAddress deviceTreeAddress)
 
     /* Live-service checks distinguish a readiness report from terminal success. */
     UmicomKernelManagedServicesValidateExecution();
+
+    /* Compare the copied inventory with this exact QEMU qualification profile. */
+    UmicomKernelHardwareValidateExecution();
 
 #ifdef UMICOM_KERNEL_INTERACTIVE_CONSOLE
     /* Only the explicitly named console image stays at a prompt. It returns

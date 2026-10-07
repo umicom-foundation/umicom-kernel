@@ -23,6 +23,10 @@
 /* Optional live-service domain; the original boot-job report is unchanged. */
 #include "umicom/kernel/service_console.h"
 #endif
+#ifdef UMICOM_KERNEL_HARDWARE_CATALOGUE
+/* Read a copied boot observation; commands never follow firmware addresses. */
+#include "umicom/kernel/hardware_catalogue.h"
+#endif
 #include "umicom/kernel/console_shell.h"
 #ifdef UMICOM_KERNEL_TERMINAL
 #include "umicom/kernel/console_terminal.h"
@@ -445,8 +449,18 @@ UmicomKernelShellStatus UmicomKernelConsoleShellExecute(UmicomKernelConsoleShell
     const UmicomKernelShellStatus serviceResult = UmicomKernelServiceConsoleCommand(shell, &command, &serviceHandled);
     if (serviceHandled) { shell->busy = UMICOM_FALSE; return serviceResult; }
 #endif
+#ifdef UMICOM_KERNEL_HARDWARE_CATALOGUE
+    if (UmicomShellEqual(name, "hardware") && command.count == 1U) {
+        UmicomKernelHardwareReport(shell->outputContext, shell->output);
+        shell->busy = UMICOM_FALSE;
+        return UMICOM_SHELL_OK;
+    }
+#endif
     UmicomBoolean poweroff = UMICOM_FALSE;
     if (UmicomShellEqual(name, "help") && command.count == 1U) {
+#ifdef UMICOM_KERNEL_HARDWARE_CATALOGUE
+        UmicomShellText(shell, "hardware (copied firmware inventory; no device probing)\r\n");
+#endif
 #ifdef UMICOM_KERNEL_SERVICE_CONSOLE
         UmicomShellText(shell, "daemons start [MODE] | daemons status | daemons restart INDEX | daemons stop\r\n");
 #endif

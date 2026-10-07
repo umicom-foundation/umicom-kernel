@@ -12,6 +12,8 @@
  * visible after the actual task images have been collected.
  * Sammy Hegab, Umicom Foundation. MIT licence.
  *---------------------------------------------------------------------------*/
+/* Inventory is observational; independent recovery still skips this path. */
+#include "umicom/kernel/hardware_catalogue.h"
 #include "umicom/kernel/startup.h"
 #include "umicom/kernel/boot_services.h"
 #include "umicom/kernel/console_shell.h"
@@ -185,6 +187,10 @@ _Noreturn void UmicomKernelNormalBoot(UmicomU64 hart, UmicomAddress deviceTree)
     if (UmicomKernelPhysicalMemorySnapshotRead(&beforeServices) != UMICOM_KERNEL_MEMORY_OK)
         UmicomStartupRecovery("boot-memory-accounting", UMICOM_FALSE);
     UmicomKernelConsoleWriteLine("boot.memory=reserved");
+
+    /* Copy the checked description without replacing the existing RAM/device
+     * policy. Unsupported inventory is visible through the hardware command. */
+    UmicomKernelHardwareCapture(deviceTree);
 
     /* Compiled startup definitions are trusted immutable inputs. These jobs
      * exercise the real structured launch client, with no file grants and EOF
