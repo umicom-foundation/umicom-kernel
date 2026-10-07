@@ -65,7 +65,18 @@ typedef enum UmicomKernelVfsStatus {
     UMICOM_VFS_CHANGED,
     UMICOM_VFS_EXHAUSTED,
     UMICOM_VFS_RELEASE_FAILED,
+    /* Preserve the original final spelling for source review. The active
+     * comma below appends backend outcomes without renumbering existing ABI
+     * values or changing the established VFS behaviour. */
+#if 0
     UMICOM_VFS_CORRUPT_STATE
+#endif
+    UMICOM_VFS_CORRUPT_STATE,
+    UMICOM_VFS_IO_ERROR,
+    UMICOM_VFS_READ_ONLY,
+    UMICOM_VFS_UNSUPPORTED,
+    UMICOM_VFS_INSPECTION_LIMIT,
+    UMICOM_VFS_CORRUPT_FILESYSTEM
 } UmicomKernelVfsStatus;
 typedef enum UmicomKernelVfsKind {
     UMICOM_VFS_FILE = 1,

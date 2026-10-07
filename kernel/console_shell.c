@@ -35,6 +35,10 @@
 #include "umicom/kernel/hardware_catalogue.h"
 #endif
 #include "umicom/kernel/console_shell.h"
+#ifdef UMICOM_KERNEL_DISK_FILESYSTEM
+/* This mounted domain does not replace the shell's writable RAMFS owner. */
+#include "umicom/kernel/disk_filesystem_console.h"
+#endif
 #ifdef UMICOM_KERNEL_TERMINAL
 #include "umicom/kernel/console_terminal.h"
 #endif
@@ -489,8 +493,17 @@ UmicomKernelShellStatus UmicomKernelConsoleShellExecute(UmicomKernelConsoleShell
     const UmicomKernelShellStatus diskResult = UmicomKernelDiskInspectionCommand(shell, &command, &diskHandled);
     if (diskHandled) { shell->busy = UMICOM_FALSE; return diskResult; }
 #endif
+#ifdef UMICOM_KERNEL_DISK_FILESYSTEM
+    UmicomBoolean filesystemHandled = UMICOM_FALSE;
+    const UmicomKernelShellStatus filesystemResult = UmicomKernelDiskFilesystemCommand(shell,
+        &command, &filesystemHandled);
+    if (filesystemHandled) { shell->busy = UMICOM_FALSE; return filesystemResult; }
+#endif
     UmicomBoolean poweroff = UMICOM_FALSE;
     if (UmicomShellEqual(name, "help") && command.count == 1U) {
+#ifdef UMICOM_KERNEL_DISK_FILESYSTEM
+        UmicomShellText(shell, "mountdisk SLOT PART | mountinfo | diskls PATH | diskcat PATH | unmountdisk\r\n");
+#endif
 #ifdef UMICOM_KERNEL_DISK_INSPECTION
         UmicomShellText(shell, "partitions SLOT | fatinfo SLOT PART | fatls SLOT PART PATH | fatcat SLOT PART PATH | diskclose\r\n");
 #endif
@@ -776,6 +789,14 @@ UmicomKernelShellStatus UmicomKernelConsoleShellClose(UmicomKernelConsoleShell *
     /* A timed-out transport may still own DMA pages. Retire it before the
      * console reports successful shutdown; preserve failures for retry. */
     if (UmicomKernelDiskInspectionClose() != UMICOM_BLOCK_OK) {
+        shell->busy = UMICOM_FALSE;
+        return UMICOM_SHELL_CLEANUP_FAILED;
+    }
+#endif
+#ifdef UMICOM_KERNEL_DISK_FILESYSTEM
+    /* Close this console's disk client before unmounting its separate domain.
+     * Pending device reset remains owned, and poweroff retries this same path. */
+    if (UmicomKernelDiskFilesystemConsoleClose(shell) != UMICOM_VFS_OK) {
         shell->busy = UMICOM_FALSE;
         return UMICOM_SHELL_CLEANUP_FAILED;
     }

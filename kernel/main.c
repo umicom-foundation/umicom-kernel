@@ -42,6 +42,8 @@
 /* Qualify and test read-only transport ownership after hardware discovery. */
 /* Separate disk-fixture entry; existing diagnostic and normal paths remain. */
 #include "umicom/kernel/disk_console.h"
+/* Filesystem-provider acceptance uses the same checked disk in its own image. */
+#include "umicom/kernel/disk_filesystem.h"
 #include "umicom/kernel/virtio_block.h"
 
 /* Read firmware descriptions without probing or binding devices. */
@@ -1423,6 +1425,11 @@ static void RunHardwareAddressTranslationTest(void)
 
 void UmicomKernelMain(UmicomU64 hartId, UmicomAddress deviceTreeAddress)
 {
+#ifdef UMICOM_KERNEL_DISK_FILESYSTEM_TEST
+    /* Keep descriptor/mount qualification independent of the previous raw and
+     * partition-only guest sequences, with a distinct readiness marker. */
+    UmicomKernelDiskFilesystemBoot(hartId, deviceTreeAddress);
+#endif
 #ifdef UMICOM_KERNEL_DISK_INSPECTION_TEST
     /* This explicitly selected image uses a different synthetic disk. It must
      * not weaken or relabel the older raw-sector acceptance sequence. */

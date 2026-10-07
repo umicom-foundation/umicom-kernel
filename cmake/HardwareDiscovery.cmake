@@ -3,6 +3,7 @@
 # Sammy Hegab, Umicom Foundation. MIT licence.
 target_sources(umicom-kernel PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/kernel/device_tree_reader.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/kernel/device_tree_firmware.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/kernel/hardware_catalogue.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/kernel/hardware_boot.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/kernel/hardware_validation.c")

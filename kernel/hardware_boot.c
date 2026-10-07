@@ -11,12 +11,19 @@
  *---------------------------------------------------------------------------*/
 #include "umicom/kernel/hardware_catalogue.h"
 #include "umicom/kernel/device_tree.h"
+#include "umicom/kernel/device_tree_firmware.h"
 #include "umicom/kernel/platform.h"
 
 static UmicomKernelDeviceTreeReader umicomHardwareReader;
 static UmicomKernelHardwareCatalogue umicomHardwareCatalogue;
 static UmicomKernelTreeStatus umicomHardwareStatus = UMICOM_TREE_NOT_FOUND;
 static UmicomBoolean umicomHardwareAttempted;
+
+/* Keep producer compatibility inside this one boot-capture owner. The input
+ * stays immutable, the temporary copy has the same bound as the strict reader,
+ * and no descriptor string is treated as proof of a producer's identity. */
+_Alignas(8) static UmicomU8 umicomHardwareFirmwareCopy[UMICOM_TREE_MAX_BYTES];
+static UmicomSize umicomHardwareCanonicalisedPropertyPaddingBytes;
 
 void UmicomKernelHardwareCapture(UmicomAddress address)
 {
@@ -31,12 +38,31 @@ void UmicomKernelHardwareCapture(UmicomAddress address)
         umicomHardwareStatus = UMICOM_TREE_OUTSIDE_BUFFER;
         return;
     }
+    /* The original direct-open path is retained for review. Actual QEMU/libfdt
+     * firmware can leave non-zero residue in property alignment padding. The
+     * explicit owned-copy adapter below normalises only those padding bytes,
+     * then calls this same strict reader with every original admission guard. */
+#if 0
     umicomHardwareStatus = UmicomKernelDeviceTreeOpen((const void *)address, tree.totalBytes, &umicomHardwareReader);
+#endif
+    umicomHardwareStatus = UmicomKernelDeviceTreeOpenFirmwareCopy(
+        (const void *)address, tree.totalBytes,
+        umicomHardwareFirmwareCopy, sizeof(umicomHardwareFirmwareCopy),
+        &umicomHardwareReader, &umicomHardwareCanonicalisedPropertyPaddingBytes);
+    const UmicomBoolean firmwareCopyOpened = umicomHardwareStatus == UMICOM_TREE_OK ?
+        UMICOM_TRUE : UMICOM_FALSE;
     if (umicomHardwareStatus == UMICOM_TREE_OK)
         umicomHardwareStatus = UmicomKernelHardwareCatalogueBuild(&umicomHardwareReader, &umicomHardwareCatalogue);
     /* No later command depends on the source blob or this temporary index. */
     volatile UmicomU8 *p = (volatile UmicomU8 *)&umicomHardwareReader;
     for (UmicomSize i = 0U; i < sizeof(umicomHardwareReader); ++i) p[i] = 0U;
+    /* CatalogueBuild copies every published observation. Once extraction has
+     * finished, wipe the temporary firmware bytes as well as the old index.
+     * On an unsuccessful open the adapter already wipes any copied extent. */
+    if (firmwareCopyOpened) {
+        volatile UmicomU8 *copy = umicomHardwareFirmwareCopy;
+        for (UmicomSize i = 0U; i < sizeof(umicomHardwareFirmwareCopy); ++i) copy[i] = 0U;
+    }
 }
 UmicomKernelTreeStatus UmicomKernelHardwareCaptureStatus(void)
 {
@@ -75,6 +101,8 @@ void UmicomKernelHardwareReport(void *context, UmicomKernelHardwareWrite write)
     UmicomHardwareText(context, write, UmicomKernelTreeStatusName(umicomHardwareStatus));
     UmicomHardwareText(context, write, "\r\n");
     const UmicomKernelHardwareCatalogue *c = UmicomKernelHardwareCatalogueRead();
+    UmicomHardwareRecord(context, write, "hardware.canonicalised-property-padding-bytes=",
+        umicomHardwareCanonicalisedPropertyPaddingBytes);
     if (!c) {
         UmicomHardwareText(context, write, "No complete hardware inventory is available. Existing fixed-profile drivers are unchanged.\r\n");
         return;

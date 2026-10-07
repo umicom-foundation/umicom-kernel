@@ -532,3 +532,11 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/ReadOnlyBlock.cmake")
 # Interpret bounded primary partitions and FAT16 files above read-only sectors.
 # The original raw-block fixture and the writable RAM filesystem stay separate.
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/DiskInspection.cmake")
+
+# Mount a checked read-only provider over the existing VFS descriptor service.
+# Transport ownership survives until clients and the root pin have retired.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/DiskFilesystem.cmake")
+
+# Preserve the linked Kernel entry while supporting QEMU firmware reset at RAM base.
+# Apply the same verified bridge to every Kernel-linked image after cloning.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/FirmwareEntry.cmake")

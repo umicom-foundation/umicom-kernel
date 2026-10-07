@@ -42,12 +42,30 @@ ENTRY(_start)
  */
 MEMORY
 {
+    /* QEMU's reset ROM enters machine firmware at the beginning of physical
+     * RAM. Give the tiny bridge its own RX page while retaining the original
+     * Kernel RAM origin, length, stack, and entry symbol below. The allocator
+     * already reserves the complete low 2 MiB gap through the Kernel image;
+     * describing this page does not make any of that reservation allocatable. */
+    FIRMWARE_ENTRY (rx) : ORIGIN = 0x80000000, LENGTH = 4K
+
     RAM (rwx) : ORIGIN = 0x80200000, LENGTH = 126M
 }
 
 /* Lay out each program section inside the RAM region. */
 SECTIONS
 {
+    /* The firmware bridge must be loaded at QEMU's reset destination even
+     * though ELF e_entry remains _start at the established Kernel origin.
+     * KEEP protects these externally reached instructions from --gc-sections.
+     * A distinct output section creates the small executable load segment. */
+    .firmware_entry ORIGIN(FIRMWARE_ENTRY) : ALIGN(4)
+    {
+        __umicom_firmware_entry_start = .;
+        KEEP(*(.text.umicom_firmware_entry))
+        __umicom_firmware_entry_end = .;
+    } > FIRMWARE_ENTRY
+
     /* Move the linker's current-address cursor to the beginning of RAM. */
     . = ORIGIN(RAM);
 
@@ -164,6 +182,29 @@ SECTIONS
         *(.eh_frame*)
     }
 }
+
+/* Refuse a missing, duplicated, enlarged, or displaced firmware bridge. These
+ * assertions protect the fixed two-instruction hand-off and its separate first
+ * page without changing the existing Kernel entry or memory-layout contract. */
+ASSERT(
+    ADDR(.firmware_entry) == ORIGIN(FIRMWARE_ENTRY) &&
+        UmicomKernelFirmwareEntry == ORIGIN(FIRMWARE_ENTRY),
+    "Umicom Kernel firmware bridge must begin at the QEMU RAM reset address"
+)
+ASSERT(
+    SIZEOF(.firmware_entry) == 8 &&
+        __umicom_firmware_entry_end <= ORIGIN(FIRMWARE_ENTRY) + LENGTH(FIRMWARE_ENTRY),
+    "Umicom Kernel firmware bridge must contain exactly two full-width instructions"
+)
+/* The original boot.S contains a relaxable alignment directive. Check its
+ * output-section origin here because older LLD releases evaluate assertions
+ * before removing that temporary alignment padding from the _start symbol.
+ * ENTRY(_start) and the symbol-relative firmware jump retain the real entry. */
+ASSERT(
+    ORIGIN(FIRMWARE_ENTRY) + LENGTH(FIRMWARE_ENTRY) <= ORIGIN(RAM) &&
+        ADDR(.text) == ORIGIN(RAM) && DEFINED(_start),
+    "Umicom Kernel firmware bridge must preserve the original Kernel entry and reserved gap"
+)
 
 /* Fail the link rather than silently allowing the image to exceed the RAM
  * region promised by this milestone's QEMU configuration. */

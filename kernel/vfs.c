@@ -467,6 +467,12 @@ const char *UmicomKernelVfsStatusName(UmicomKernelVfsStatus status)
         case UMICOM_VFS_EXHAUSTED: return "exhausted";
         case UMICOM_VFS_RELEASE_FAILED: return "release-failed";
         case UMICOM_VFS_CORRUPT_STATE: return "corrupt-state";
+        /* Backend media outcomes stay distinct from local owner corruption. */
+        case UMICOM_VFS_IO_ERROR: return "io-error";
+        case UMICOM_VFS_READ_ONLY: return "read-only";
+        case UMICOM_VFS_UNSUPPORTED: return "unsupported";
+        case UMICOM_VFS_INSPECTION_LIMIT: return "inspection-limit";
+        case UMICOM_VFS_CORRUPT_FILESYSTEM: return "corrupt-filesystem";
         default: return "unknown-status";
     }
 }

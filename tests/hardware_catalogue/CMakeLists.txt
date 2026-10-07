@@ -10,6 +10,7 @@ include(CTest)
 get_filename_component(UMICOM_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
 option(UMICOM_HARDWARE_SANITIZERS "Use address and undefined-behaviour sanitizers" ON)
 add_executable(umicom-hardware-tests device_tree_tests.c
+    "${UMICOM_ROOT}/kernel/device_tree_firmware.c"
     "${UMICOM_ROOT}/kernel/device_tree_reader.c"
     "${UMICOM_ROOT}/kernel/hardware_catalogue.c"
     "${UMICOM_ROOT}/kernel/hardware_boot.c"
@@ -45,4 +46,29 @@ foreach(UMICOM_HARDWARE_CASE IN LISTS UMICOM_HARDWARE_CASES)
     add_test(NAME hardware.${UMICOM_HARDWARE_CASE}
         COMMAND umicom-hardware-tests "${UMICOM_HARDWARE_CASE}")
     set_tests_properties(hardware.${UMICOM_HARDWARE_CASE} PROPERTIES TIMEOUT 30)
+endforeach()
+
+# The firmware boundary has its own tests; all strict-reader cases above remain
+# intact, including rejection of nonzero property and node-name padding.
+add_executable(umicom-firmware-copy-tests firmware_copy_tests.c
+    "${UMICOM_ROOT}/kernel/device_tree_firmware.c"
+    "${UMICOM_ROOT}/kernel/device_tree_reader.c")
+target_include_directories(umicom-firmware-copy-tests PRIVATE "${UMICOM_ROOT}/include")
+target_compile_options(umicom-firmware-copy-tests PRIVATE
+    -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror -fno-omit-frame-pointer)
+if(UMICOM_HARDWARE_SANITIZERS)
+    target_compile_options(umicom-firmware-copy-tests PRIVATE -fsanitize=address,undefined)
+    target_link_options(umicom-firmware-copy-tests PRIVATE -fsanitize=address,undefined)
+endif()
+set(UMICOM_FIRMWARE_COPY_CASES
+    clean_copy only_property_padding_changes owned_reader_lifetime property_data_preserved
+    unaligned_input_and_copy exact_capacity accessible_tail_not_copied every_truncated_prefix
+    null_and_pointer_overflow pairwise_ownership_overlap node_padding_remains_strict
+    final_validation_and_wipe failure_replaces_prior_reader bad_header_and_sizes structure_bounds
+    block_overlap malformed_tokens_and_names malformed_property_extent reservation_validation
+    blob_limit_and_maximum future_compatible_version)
+foreach(UMICOM_FIRMWARE_COPY_CASE IN LISTS UMICOM_FIRMWARE_COPY_CASES)
+    add_test(NAME firmware_copy.${UMICOM_FIRMWARE_COPY_CASE}
+        COMMAND umicom-firmware-copy-tests "${UMICOM_FIRMWARE_COPY_CASE}")
+    set_tests_properties(firmware_copy.${UMICOM_FIRMWARE_COPY_CASE} PROPERTIES TIMEOUT 30)
 endforeach()
