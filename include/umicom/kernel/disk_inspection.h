@@ -38,7 +38,13 @@ typedef enum UmicomKernelDiskStatus {
     UMICOM_DISK_FAT_MISMATCH,
     UMICOM_DISK_CHAIN_CYCLE,
     UMICOM_DISK_DIRTY,
+    /* Preserve the original final spelling while appending an explicit
+     * update-admission refusal without renumbering existing status values. */
+#if 0
     UMICOM_DISK_BUSY
+#endif
+    UMICOM_DISK_BUSY,
+    UMICOM_DISK_READ_ONLY
 } UmicomKernelDiskStatus;
 
 /* A successful callback fills exactly one sector. Its capacity is fixed by the

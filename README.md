@@ -152,3 +152,12 @@ Do not delete existing code, comments, experiments or superseded implementations
 - physical-hardware support is never inferred from QEMU success.
 
 Start with `docs/ARCHITECTURE.md`, `docs/DECISION_REGISTER.md`, `docs/ROADMAP.md` and `docs/PROMOTION_GATES.md`.
+
+## Checked updates to existing FAT16 file data
+
+The explicit trusted-console updater can change a bounded range within an
+existing file allocation and flush its separate writable lease. Whole-volume
+allocation checks precede mutation, and partial or uncertain writes retain
+their evidence. See [Existing FAT16 data updates](docs/FAT16_DATA_UPDATES.md)
+and [FAT16 update validation](docs/FAT16_UPDATE_VALIDATION.md) for the supported
+profile, failure semantics, disposable-disk tests and integration commands.

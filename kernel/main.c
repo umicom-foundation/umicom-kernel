@@ -45,6 +45,7 @@
 /* Filesystem-provider acceptance uses the same checked disk in its own image. */
 #include "umicom/kernel/disk_filesystem.h"
 #include "umicom/kernel/writable_block_validation.h"
+#include "umicom/kernel/fat16_update.h"
 #include "umicom/kernel/virtio_block.h"
 
 /* Read firmware descriptions without probing or binding devices. */
@@ -1426,6 +1427,10 @@ static void RunHardwareAddressTranslationTest(void)
 
 void UmicomKernelMain(UmicomU64 hartId, UmicomAddress deviceTreeAddress)
 {
+#if defined(UMICOM_KERNEL_FAT16_UPDATE_TEST) || defined(UMICOM_KERNEL_FAT16_UPDATE_READBACK_TEST)
+    /* These explicit images qualify file data updates on an owned raw copy. */
+    UmicomKernelFat16UpdateBoot(hartId, deviceTreeAddress);
+#endif
 #if defined(UMICOM_KERNEL_WRITABLE_BLOCK_TEST) || defined(UMICOM_KERNEL_BLOCK_WRITE_READBACK_TEST)
     /* Only these explicit images attach the disposable write/flush fixture.
      * Ordinary startup retains its read-only disk commands and admission. */

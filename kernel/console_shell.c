@@ -39,6 +39,10 @@
 /* This mounted domain does not replace the shell's writable RAMFS owner. */
 #include "umicom/kernel/disk_filesystem_console.h"
 #endif
+#ifdef UMICOM_KERNEL_FAT16_UPDATE
+/* Explicit bounded file updates have a separate exclusive transport lifetime. */
+#include "umicom/kernel/fat16_update_console.h"
+#endif
 #ifdef UMICOM_KERNEL_TERMINAL
 #include "umicom/kernel/console_terminal.h"
 #endif
@@ -499,8 +503,18 @@ UmicomKernelShellStatus UmicomKernelConsoleShellExecute(UmicomKernelConsoleShell
         &command, &filesystemHandled);
     if (filesystemHandled) { shell->busy = UMICOM_FALSE; return filesystemResult; }
 #endif
+#ifdef UMICOM_KERNEL_FAT16_UPDATE
+    UmicomBoolean updateHandled = UMICOM_FALSE;
+    const UmicomKernelShellStatus updateResult = UmicomKernelFat16UpdateCommand(shell,
+        &command, &updateHandled);
+    if (updateHandled) { shell->busy = UMICOM_FALSE; return updateResult; }
+#endif
     UmicomBoolean poweroff = UMICOM_FALSE;
     if (UmicomShellEqual(name, "help") && command.count == 1U) {
+#ifdef UMICOM_KERNEL_FAT16_UPDATE
+        UmicomShellText(shell, "fatwriteopen SLOT PART | fatwrite PATH OFFSET \"TEXT\" | fatflush | fatwriteinfo | fatwriteclose\r\n");
+        UmicomShellText(shell, "FAT updates preserve allocation and size. Flush explicitly before closing or powering off.\r\n");
+#endif
 #ifdef UMICOM_KERNEL_DISK_FILESYSTEM
         UmicomShellText(shell, "mountdisk SLOT PART | mountinfo | diskls PATH | diskcat PATH | unmountdisk\r\n");
 #endif
@@ -533,7 +547,12 @@ UmicomKernelShellStatus UmicomKernelConsoleShellExecute(UmicomKernelConsoleShell
             "write truncates an existing file. runrw grants all rights on this RAMFS.\r\n");
     } else if (UmicomShellEqual(name, "about") && command.count == 1U) {
         UmicomShellText(shell, "Umicom Kernel - trusted development console\r\n"
+#ifdef UMICOM_KERNEL_FAT16_UPDATE
+            "RAM-backed files, native programs and bounded FAT16 data updates; no login.\r\n");
+#else
+        /* Retain the original description for builds without this utility. */
             "RAM-backed files, foreground native programs; no login or persistent disk.\r\n");
+#endif
     } else if (UmicomShellEqual(name, "pwd") && command.count == 1U) {
         UmicomShellText(shell, "/\r\n"); /* There is no mutable working directory. */
     } else if (UmicomShellEqual(name, "status") && command.count == 1U) {
@@ -797,6 +816,14 @@ UmicomKernelShellStatus UmicomKernelConsoleShellClose(UmicomKernelConsoleShell *
     /* Close this console's disk client before unmounting its separate domain.
      * Pending device reset remains owned, and poweroff retries this same path. */
     if (UmicomKernelDiskFilesystemConsoleClose(shell) != UMICOM_VFS_OK) {
+        shell->busy = UMICOM_FALSE;
+        return UMICOM_SHELL_CLEANUP_FAILED;
+    }
+#endif
+#ifdef UMICOM_KERNEL_FAT16_UPDATE
+    /* Retain failed reset/release ownership for retry. Shutdown is cleanup;
+     * explicit fatflush is the caller's separate persistence operation. */
+    if (UmicomKernelFat16UpdateConsoleClose(shell) != UMICOM_FAT16_UPDATE_OK) {
         shell->busy = UMICOM_FALSE;
         return UMICOM_SHELL_CLEANUP_FAILED;
     }

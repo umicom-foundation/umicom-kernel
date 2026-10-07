@@ -92,7 +92,12 @@ void UmicomKernelConsoleShellRun(void)
 #endif
     UmicomKernelConsoleWriteLine("UMICOM_KERNEL_CONSOLE_READY");
     UmicomKernelConsoleWriteLine("Umicom Kernel development console. Type help.");
+    /* Preserve the original volatile-only description for review. The trusted
+     * explicit FAT16 utility now has its own write/flush persistence path. */
+#if 0
     UmicomKernelConsoleWriteLine("RAM-only data; no login, disk persistence or host filesystem access.");
+#endif
+    UmicomKernelConsoleWriteLine("RAMFS is volatile. Explicit FAT16 data updates use fatwrite and fatflush.");
     UmicomKernelConsoleShellPrompt(&umicomInteractiveShell);
     while (!umicomInteractiveShell.exitRequested) {
 #ifdef UMICOM_KERNEL_SERVICE_CONSOLE

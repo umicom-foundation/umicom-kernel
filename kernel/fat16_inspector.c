@@ -472,3 +472,337 @@ UmicomKernelDiskStatus UmicomKernelFat16Read(UmicomKernelFat16 *volume,
     }
     return UmicomFatFinish(volume, status);
 }
+
+/*-----------------------------------------------------------------------------
+ * Strict preparation for an existing-allocation data update.
+ *
+ * Keep the original read-only parser and its profile above intact. This
+ * additional read-only entry point reuses those byte/chain/name decoders,
+ * then proves the stronger allocation ownership required before a separate
+ * transport owner can safely overwrite file data. No write callback exists
+ * here, so a partially checked plan can never itself modify media.
+ *---------------------------------------------------------------------------*/
+#include "umicom/kernel/fat16_update_plan.h"
+
+static UmicomBoolean UmicomFatPlanSpan(const void *pointer, UmicomSize bytes)
+{
+    const UmicomAddress start = (UmicomAddress)pointer;
+    return pointer && bytes && bytes <= (UmicomU64)~(UmicomAddress)0U &&
+        start <= ~(UmicomAddress)0U - (UmicomAddress)bytes ? UMICOM_TRUE : UMICOM_FALSE;
+}
+static UmicomBoolean UmicomFatPlanOverlap(const void *left, UmicomSize leftBytes,
+    const void *right, UmicomSize rightBytes)
+{
+    const UmicomAddress a = (UmicomAddress)left, b = (UmicomAddress)right;
+    /* Extents were validated before this addition. Never form an overflowing
+     * end address while deciding whether caller storage belongs to an owner. */
+    return a < b + (UmicomAddress)rightBytes && b < a + (UmicomAddress)leftBytes ?
+        UMICOM_TRUE : UMICOM_FALSE;
+}
+static UmicomBoolean UmicomFatPlanZero(const void *pointer, UmicomSize bytes)
+{
+    const UmicomU8 *const source = (const UmicomU8 *)pointer;
+    for (UmicomSize i = 0U; i < bytes; ++i) if (source[i]) return UMICOM_FALSE;
+    return UMICOM_TRUE;
+}
+static UmicomKernelDiskStatus UmicomFatPlanArguments(UmicomKernelFat16 *volume,
+    const char *path, const void *input, UmicomSize bytes,
+    UmicomKernelFat16UpdateWorkspace *workspace, UmicomKernelFat16UpdatePlan *outPlan)
+{
+    if (!bytes || bytes > UMICOM_FAT16_UPDATE_BYTES ||
+        !UmicomFatPlanSpan(volume, sizeof(*volume)) ||
+        !UmicomFatPlanSpan(workspace, sizeof(*workspace)) ||
+        !UmicomFatPlanSpan(outPlan, sizeof(*outPlan)) ||
+        !UmicomFatPlanSpan(input, bytes) ||
+        !UmicomFatPlanSpan(path, UMICOM_FAT16_PATH_BYTES) ||
+        (UmicomAddress)volume % _Alignof(UmicomKernelFat16) ||
+        (UmicomAddress)workspace % _Alignof(UmicomKernelFat16UpdateWorkspace) ||
+        (UmicomAddress)outPlan % _Alignof(UmicomKernelFat16UpdatePlan))
+        return UMICOM_DISK_INVALID_ARGUMENT;
+    UmicomSize pathBytes = 0U;
+    while (pathBytes < UMICOM_FAT16_PATH_BYTES) {
+        /* Refuse each byte's ownership before reading it. A path pointing
+         * into an owner/result must not first scan that storage for a NUL. */
+        const char *const current = path + pathBytes;
+        if (UmicomFatPlanOverlap(current, 1U, volume, sizeof(*volume)) ||
+            UmicomFatPlanOverlap(current, 1U, workspace, sizeof(*workspace)) ||
+            UmicomFatPlanOverlap(current, 1U, outPlan, sizeof(*outPlan)) ||
+            UmicomFatPlanOverlap(current, 1U, input, bytes))
+            return UMICOM_DISK_INVALID_ARGUMENT;
+        if (!path[pathBytes]) break;
+        ++pathBytes;
+    }
+    if (pathBytes == UMICOM_FAT16_PATH_BYTES) return UMICOM_DISK_LIMIT;
+    ++pathBytes; /* The terminator belongs to the path's protected input span. */
+    const void *const pointers[] = {volume, workspace, outPlan, input, path};
+    const UmicomSize lengths[] = {sizeof(*volume), sizeof(*workspace), sizeof(*outPlan), bytes, pathBytes};
+    for (UmicomSize i = 0U; i < 5U; ++i)
+        for (UmicomSize j = i + 1U; j < 5U; ++j)
+            if (UmicomFatPlanOverlap(pointers[i], lengths[i], pointers[j], lengths[j]))
+                return UMICOM_DISK_INVALID_ARGUMENT;
+    if (workspace->self && workspace->self != workspace) return UMICOM_DISK_BAD_STATE;
+    if (workspace->busy) return UMICOM_DISK_BUSY;
+    if (!workspace->self && !UmicomFatPlanZero(workspace, sizeof(*workspace)))
+        return UMICOM_DISK_BAD_STATE;
+    return UMICOM_DISK_OK;
+}
+static UmicomKernelDiskStatus UmicomFatPlanGeometry(const UmicomKernelFat16 *volume)
+{
+    /* The inspector already checked this geometry at Open. Recheck the small
+     * arithmetic invariants before using public owner fields as divisors or
+     * bitmap indices, so accidental owner damage cannot become an unsafe plan. */
+    const UmicomKernelFat16Info *const info = &volume->info;
+    if (!volume->reader.read || !volume->reader.sectors || !info->firstSector ||
+        !info->volumeSectors || !volume->partitionSectors ||
+        info->firstSector >= volume->reader.sectors ||
+        volume->partitionSectors > volume->reader.sectors - info->firstSector ||
+        info->volumeSectors > volume->partitionSectors ||
+        !info->sectorsPerCluster || info->sectorsPerCluster > 64U ||
+        (info->sectorsPerCluster & (info->sectorsPerCluster - 1U)) ||
+        !info->sectorsPerFat || !info->rootEntries || info->rootEntries % 16U ||
+        info->rootEntries > UMICOM_FAT16_SCAN_ENTRIES ||
+        info->clusters < 4085U || info->clusters + 1U >= 0xfff0U ||
+        !volume->fatStart || volume->fatStart >= info->volumeSectors)
+        return UMICOM_DISK_BAD_STATE;
+    if (info->sectorsPerFat > UMICOM_FAT16_UPDATE_FAT_SECTORS) return UMICOM_DISK_LIMIT;
+    if ((UmicomU64)info->sectorsPerFat * 2U > info->volumeSectors - volume->fatStart)
+        return UMICOM_DISK_BAD_STATE;
+    const UmicomU64 root = volume->fatStart + (UmicomU64)info->sectorsPerFat * 2U;
+    if (root >= info->volumeSectors || volume->rootStart != root ||
+        (UmicomU64)info->rootEntries / 16U >= info->volumeSectors - root)
+        return UMICOM_DISK_BAD_STATE;
+    const UmicomU64 data = root + (UmicomU64)info->rootEntries / 16U;
+    if (volume->dataStart != data ||
+        (info->volumeSectors - data) / info->sectorsPerCluster != info->clusters ||
+        ((UmicomU64)info->clusters + 2U) * 2U >
+            (UmicomU64)info->sectorsPerFat * UMICOM_DISK_SECTOR_BYTES)
+        return UMICOM_DISK_BAD_STATE;
+    return UMICOM_DISK_OK;
+}
+static UmicomBoolean UmicomFatPlanOwned(const UmicomKernelFat16UpdateWorkspace *workspace,
+    UmicomU16 cluster)
+{
+    return workspace->owned[cluster / 8U] & (UmicomU8)(1U << (cluster % 8U)) ?
+        UMICOM_TRUE : UMICOM_FALSE;
+}
+static UmicomKernelDiskStatus UmicomFatPlanOwnChain(UmicomKernelFat16 *volume,
+    UmicomKernelFat16UpdateWorkspace *workspace, const UmicomKernelFat16Entry *entry)
+{
+    UmicomSize count = 0U;
+    const UmicomU64 clusterBytes = (UmicomU64)volume->info.sectorsPerCluster * UMICOM_DISK_SECTOR_BYTES;
+    const UmicomU64 required = ((UmicomU64)entry->bytes + clusterBytes - 1U) / clusterBytes;
+    UmicomKernelDiskStatus status = UmicomFatChain(volume, entry->firstCluster,
+        entry->directory ? UMICOM_FALSE : UMICOM_TRUE, required, workspace->chain, &count);
+    if (status != UMICOM_DISK_OK) return status;
+    for (UmicomSize i = 0U; i < count; ++i) {
+        const UmicomU16 cluster = workspace->chain[i];
+        if (UmicomFatPlanOwned(workspace, cluster)) return UMICOM_DISK_CORRUPT;
+        workspace->owned[cluster / 8U] |= (UmicomU8)(1U << (cluster % 8U));
+    }
+    return UMICOM_DISK_OK;
+}
+static UmicomKernelDiskStatus UmicomFatPlanDirectory(UmicomKernelFat16 *volume,
+    UmicomKernelFat16UpdateWorkspace *workspace, UmicomU16 first, UmicomU16 parent)
+{
+    UmicomSize count = 0U;
+    UmicomU64 entries = volume->info.rootEntries;
+    if (first) {
+        const UmicomKernelDiskStatus status = UmicomFatChain(volume, first,
+            UMICOM_FALSE, 0U, workspace->chain, &count);
+        if (status != UMICOM_DISK_OK) return status;
+        entries = (UmicomU64)count * volume->info.sectorsPerCluster * 16U;
+    }
+    if (entries > UMICOM_FAT16_SCAN_ENTRIES) return UMICOM_DISK_LIMIT;
+    UmicomKernelDiskStatus status = UmicomFatDirectoryRead(volume, first);
+    if (status != UMICOM_DISK_OK) return status;
+    if (volume->directoryStage.longNameRecords) return UMICOM_DISK_UNSUPPORTED_FILESYSTEM;
+    /* Reuse the original complete short-entry decoder, then examine only the
+     * metadata it deliberately skips. Reads below do not overwrite its staged
+     * listing. This avoids a second implementation of normal FAT names/files. */
+    UmicomSize labels = 0U;
+    for (UmicomU64 i = 0U; i < entries; ++i) {
+        if (i % 16U == 0U) {
+            UmicomU64 sector = volume->rootStart + i / 16U;
+            if (first) {
+                const UmicomU64 index = i / (16U * volume->info.sectorsPerCluster);
+                if (index >= count) return UMICOM_DISK_CORRUPT;
+                sector = volume->dataStart + ((UmicomU64)workspace->chain[index] - 2U) *
+                    volume->info.sectorsPerCluster + (i / 16U) % volume->info.sectorsPerCluster;
+            }
+            status = UmicomFatReadSector(volume, sector, volume->dataSector);
+            if (status != UMICOM_DISK_OK) return status;
+        }
+        const UmicomU8 *const raw = volume->dataSector + (i % 16U) * 32U;
+        if (first && i < 2U) {
+            /* Dot records are references, not additional owners. Requiring
+             * their canonical positions lets this profile reject missing,
+             * duplicate and wrong-parent records without following them. */
+            const UmicomSize dots = i == 0U ? 1U : 2U;
+            for (UmicomSize j = 0U; j < dots; ++j) if (raw[j] != '.') return UMICOM_DISK_CORRUPT;
+            for (UmicomSize j = dots; j < 11U; ++j) if (raw[j] != ' ') return UMICOM_DISK_CORRUPT;
+            if (raw[11] != 0x10U || UmicomFat16Word(raw + 20U) || UmicomFat32Word(raw + 28U) ||
+                UmicomFat16Word(raw + 26U) != (i == 0U ? first : parent))
+                return UMICOM_DISK_CORRUPT;
+            continue;
+        }
+        if (!raw[0]) break;
+        if (raw[0] == 0xe5U) continue;
+        if (raw[0] == '.') return UMICOM_DISK_CORRUPT;
+        if (raw[11] == 0x0fU) return UMICOM_DISK_UNSUPPORTED_FILESYSTEM;
+        if (raw[11] & 0x08U) {
+            if (first || labels || raw[11] != 0x08U || UmicomFat16Word(raw + 20U) ||
+                UmicomFat16Word(raw + 26U) || UmicomFat32Word(raw + 28U))
+                return UMICOM_DISK_CORRUPT;
+            ++labels;
+        }
+    }
+    return UMICOM_DISK_OK;
+}
+static UmicomKernelDiskStatus UmicomFatPlanNamespace(UmicomKernelFat16 *volume,
+    UmicomKernelFat16UpdateWorkspace *workspace)
+{
+    workspace->directoryCount = 1U; /* The zero-cluster queue entry is the fixed root. */
+    workspace->objects = 1U;
+    while (workspace->nextDirectory < workspace->directoryCount) {
+        const UmicomKernelFat16UpdateDirectory *const directory =
+            &workspace->directories[workspace->nextDirectory];
+        const UmicomU16 first = directory->firstCluster;
+        const UmicomU16 parent = directory->parentCluster;
+        const UmicomSize depth = directory->depth;
+        ++workspace->nextDirectory;
+        UmicomKernelDiskStatus status = UmicomFatPlanDirectory(volume, workspace, first, parent);
+        if (status != UMICOM_DISK_OK) return status;
+        for (UmicomSize i = 0U; i < volume->directoryStage.count; ++i) {
+            const UmicomKernelFat16Entry *const entry = &volume->directoryStage.entries[i];
+            if (workspace->objects >= UMICOM_FAT16_UPDATE_OBJECT_LIMIT || depth >= UMICOM_FAT16_DEPTH_LIMIT)
+                return UMICOM_DISK_LIMIT;
+            ++workspace->objects;
+            status = UmicomFatPlanOwnChain(volume, workspace, entry);
+            if (status != UMICOM_DISK_OK) return status;
+            if (entry->directory) {
+                if (workspace->directoryCount >= UMICOM_FAT16_UPDATE_DIRECTORY_LIMIT)
+                    return UMICOM_DISK_LIMIT;
+                UmicomKernelFat16UpdateDirectory *const next =
+                    &workspace->directories[workspace->directoryCount];
+                next->firstCluster = entry->firstCluster;
+                next->parentCluster = first;
+                next->depth = depth + 1U;
+                ++workspace->directoryCount;
+            }
+        }
+    }
+    return UMICOM_DISK_OK;
+}
+static UmicomKernelDiskStatus UmicomFatPlanAllocation(UmicomKernelFat16 *volume,
+    const UmicomKernelFat16UpdateWorkspace *workspace)
+{
+    /* A reachable walk alone misses an orphan chain pointing into a live file.
+     * Classify every usable FAT entry against the ownership bitmap. Compare
+     * whole declared copies, but do not interpret padding as extra clusters. */
+    for (UmicomU64 sector = 0U; sector < volume->info.sectorsPerFat; ++sector) {
+        UmicomKernelDiskStatus status = UmicomFatReadSector(volume,
+            volume->fatStart + sector, volume->fatSector);
+        if (status != UMICOM_DISK_OK) return status;
+        status = UmicomFatReadSector(volume,
+            volume->fatStart + volume->info.sectorsPerFat + sector, volume->mirrorSector);
+        if (status != UMICOM_DISK_OK) return status;
+        if (!UmicomFatEqual(volume->fatSector, volume->mirrorSector, UMICOM_DISK_SECTOR_BYTES))
+            return UMICOM_DISK_FAT_MISMATCH;
+        if (sector == 0U) {
+            const UmicomU16 media = UmicomFat16Word(volume->fatSector);
+            const UmicomU16 flags = UmicomFat16Word(volume->fatSector + 2U);
+            if ((media & 0xff00U) != 0xff00U ||
+                ((media & 0xffU) != 0xf0U && (media & 0xffU) < 0xf8U) ||
+                (flags & 0x3fffU) != 0x3fffU) return UMICOM_DISK_CORRUPT;
+            if ((flags & 0xc000U) != 0xc000U) return UMICOM_DISK_DIRTY;
+        }
+        for (UmicomSize i = 0U; i < 256U; ++i) {
+            const UmicomU64 cluster = sector * 256U + i;
+            if (cluster < 2U || cluster > (UmicomU64)volume->info.clusters + 1U) continue;
+            const UmicomU16 next = UmicomFat16Word(volume->fatSector + i * 2U);
+            const UmicomBoolean owned = UmicomFatPlanOwned(workspace, (UmicomU16)cluster);
+            if (!next) {
+                if (owned) return UMICOM_DISK_CORRUPT;
+                continue;
+            }
+            if (next == 0xfff7U) return UMICOM_DISK_UNSUPPORTED_FILESYSTEM;
+            if (next < 0xfff8U && (next < 2U || next >= 0xfff0U ||
+                next > volume->info.clusters + 1U)) return UMICOM_DISK_CORRUPT;
+            if (!owned) return UMICOM_DISK_CORRUPT;
+        }
+    }
+    /* The streaming comparison reused the FAT cache buffers with another
+     * sector. Invalidate the original single-sector cache before returning. */
+    volume->fatCached = UMICOM_FALSE;
+    return UMICOM_DISK_OK;
+}
+static UmicomKernelDiskStatus UmicomFatPlanSectors(UmicomKernelFat16 *volume,
+    UmicomKernelFat16UpdateWorkspace *workspace, UmicomU64 offset, UmicomSize bytes)
+{
+    const UmicomU64 clusterBytes = (UmicomU64)volume->info.sectorsPerCluster * UMICOM_DISK_SECTOR_BYTES;
+    UmicomSize copied = 0U;
+    while (copied < bytes) {
+        if (workspace->stage.count >= UMICOM_FAT16_UPDATE_SECTOR_LIMIT) return UMICOM_DISK_LIMIT;
+        const UmicomU64 position = offset + copied;
+        const UmicomU64 index = position / clusterBytes;
+        if (index >= workspace->targetClusters) return UMICOM_DISK_CORRUPT;
+        const UmicomU16 cluster = workspace->targetChain[index];
+        if (cluster < 2U || cluster > volume->info.clusters + 1U ||
+            !UmicomFatPlanOwned(workspace, cluster)) return UMICOM_DISK_CORRUPT;
+        const UmicomU64 relative = volume->dataStart + ((UmicomU64)cluster - 2U) *
+            volume->info.sectorsPerCluster + (position % clusterBytes) / UMICOM_DISK_SECTOR_BYTES;
+        if (relative < volume->dataStart || relative >= volume->info.volumeSectors ||
+            relative >= volume->partitionSectors) return UMICOM_DISK_RANGE;
+        UmicomKernelFat16UpdateSector *const sector = &workspace->stage.sectors[workspace->stage.count];
+        sector->sector = volume->info.firstSector + relative;
+        sector->inputOffset = copied;
+        sector->offset = position % UMICOM_DISK_SECTOR_BYTES;
+        sector->bytes = UMICOM_DISK_SECTOR_BYTES - sector->offset;
+        if (sector->bytes > bytes - copied) sector->bytes = bytes - copied;
+        const UmicomKernelDiskStatus status = UmicomFatReadSector(volume, relative, sector->data);
+        if (status != UMICOM_DISK_OK) return status;
+        UmicomFatCopy(sector->data + sector->offset, workspace->input + copied, sector->bytes);
+        copied += sector->bytes;
+        ++workspace->stage.count;
+    }
+    workspace->stage.offset = offset;
+    workspace->stage.bytes = bytes;
+    return UMICOM_DISK_OK;
+}
+UmicomKernelDiskStatus UmicomKernelFat16PlanUpdate(UmicomKernelFat16 *volume,
+    const char *path, UmicomU64 offset, const void *input, UmicomSize bytes,
+    UmicomKernelFat16UpdateWorkspace *workspace, UmicomKernelFat16UpdatePlan *outPlan)
+{
+    UmicomKernelDiskStatus status = UmicomFatPlanArguments(volume, path, input, bytes, workspace, outPlan);
+    if (status != UMICOM_DISK_OK) return status;
+    status = UmicomFatBegin(volume);
+    if (status != UMICOM_DISK_OK) return status;
+    UmicomFatClear(workspace, sizeof(*workspace));
+    workspace->self = workspace;
+    workspace->busy = UMICOM_TRUE;
+    UmicomFatCopy(workspace->input, input, bytes);
+    status = UmicomFatPlanGeometry(volume);
+    if (status == UMICOM_DISK_OK) status = UmicomFatLookup(volume, path, &workspace->stage.entry);
+    if (status == UMICOM_DISK_OK && workspace->stage.entry.directory) status = UMICOM_DISK_IS_DIRECTORY;
+    if (status == UMICOM_DISK_OK && (workspace->stage.entry.attributes & 0x01U)) status = UMICOM_DISK_READ_ONLY;
+    if (status == UMICOM_DISK_OK && !(workspace->stage.entry.attributes & 0x20U))
+        status = UMICOM_DISK_UNSUPPORTED_FILESYSTEM;
+    if (status == UMICOM_DISK_OK && (offset > workspace->stage.entry.bytes ||
+        bytes > (UmicomU64)workspace->stage.entry.bytes - offset)) status = UMICOM_DISK_RANGE;
+    if (status == UMICOM_DISK_OK) {
+        const UmicomU64 clusterBytes = (UmicomU64)volume->info.sectorsPerCluster * UMICOM_DISK_SECTOR_BYTES;
+        const UmicomU64 required = ((UmicomU64)workspace->stage.entry.bytes + clusterBytes - 1U) / clusterBytes;
+        status = UmicomFatChain(volume, workspace->stage.entry.firstCluster, UMICOM_TRUE,
+            required, workspace->targetChain, &workspace->targetClusters);
+    }
+    if (status == UMICOM_DISK_OK) status = UmicomFatPlanNamespace(volume, workspace);
+    if (status == UMICOM_DISK_OK) status = UmicomFatPlanAllocation(volume, workspace);
+    if (status == UMICOM_DISK_OK) status = UmicomFatPlanSectors(volume, workspace, offset, bytes);
+    if (status == UMICOM_DISK_OK) UmicomFatCopy(outPlan, &workspace->stage, sizeof(*outPlan));
+    /* Errors publish no partial plan. Scrub caller input and staged media
+     * before releasing the guard, including after a failed final sector read. */
+    UmicomFatClear(workspace, sizeof(*workspace));
+    workspace->self = workspace;
+    volume->fatCached = UMICOM_FALSE;
+    return UmicomFatFinish(volume, status);
+}

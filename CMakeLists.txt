@@ -541,6 +541,10 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/DiskFilesystem.cmake")
 # A fresh read-only guest checks its bytes after the writer closes the backend.
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/WritableBlock.cmake")
 
+# Update existing file data through a separately qualified exclusive FAT16 lease.
+# Whole-disk comparison and a new read-only guest verify the disposable result.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/Fat16Update.cmake")
+
 # Preserve the linked Kernel entry while supporting QEMU firmware reset at RAM base.
 # Apply the same verified bridge to every Kernel-linked image after cloning.
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/FirmwareEntry.cmake")

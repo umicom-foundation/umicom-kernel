@@ -90,6 +90,7 @@ const char *UmicomKernelDiskStatusName(UmicomKernelDiskStatus status)
     case UMICOM_DISK_CHAIN_CYCLE: return "cluster-cycle";
     case UMICOM_DISK_DIRTY: return "unclean-volume";
     case UMICOM_DISK_BUSY: return "busy";
+    case UMICOM_DISK_READ_ONLY: return "read-only";
     }
     return "unknown-status";
 }
