@@ -1342,3 +1342,300 @@ UmicomKernelFat16UpdateStatus UmicomKernelFat16FileCommitAppend(
     return UmicomFileCommitStageOperation(owner, path, 0U, input, bytes, time,
         outResult, UMICOM_TRUE);
 }
+
+/*-----------------------------------------------------------------------------
+ * Metadata-only short-name rename.
+ *
+ * Keep the data committers' nonempty data plans and evidence requirements
+ * intact. A separate outer owner shares their transport and dirty-header
+ * helpers, but has its own directory-only Stage and Finish. No zero-length
+ * synthetic data update or vacuous data verification grants clean publication.
+ *---------------------------------------------------------------------------*/
+#include "umicom/kernel/fat16_rename_commit.h"
+
+static UmicomBoolean UmicomRenameIndependent(const UmicomKernelFat16RenameCommitter *owner,
+    UmicomAddress address, UmicomSize bytes)
+{
+    return UmicomUpdateDomainIndependent(owner->commit.updater.domain, address, bytes) &&
+        !UmicomUpdateOverlap(address, bytes, (UmicomAddress)owner, sizeof(*owner));
+}
+static UmicomKernelFat16UpdateStatus UmicomRenameLive(UmicomKernelFat16RenameCommitter *owner,
+    UmicomKernelFat16CommitState expected)
+{
+    if (!owner || (UmicomAddress)owner % alignof(UmicomKernelFat16RenameCommitter) ||
+        !UmicomUpdateSpan((UmicomAddress)owner, sizeof(*owner)))
+        return UMICOM_FAT16_UPDATE_INVALID_ARGUMENT;
+    if (owner->self != owner) return UMICOM_FAT16_UPDATE_BAD_STATE;
+    if (owner->busy || owner->renameWorkspace.busy) return UMICOM_FAT16_UPDATE_BUSY;
+    const UmicomKernelFat16UpdateStatus status = UmicomCommitLive(&owner->commit, expected);
+    if (status != UMICOM_FAT16_UPDATE_OK) return status;
+    return UmicomUpdateDomainIndependent(owner->commit.updater.domain,
+        (UmicomAddress)owner, sizeof(*owner)) ? UMICOM_FAT16_UPDATE_OK : UMICOM_FAT16_UPDATE_BAD_STATE;
+}
+static UmicomKernelFat16UpdateStatus UmicomRenameResultBuffer(
+    UmicomKernelFat16RenameCommitter *owner, UmicomKernelFat16RenameResult *outResult)
+{
+    return outResult && !((UmicomAddress)outResult % alignof(UmicomKernelFat16RenameResult)) &&
+        UmicomRenameIndependent(owner, (UmicomAddress)outResult, sizeof(*outResult)) ?
+        UMICOM_FAT16_UPDATE_OK : UMICOM_FAT16_UPDATE_INVALID_ARGUMENT;
+}
+static UmicomBoolean UmicomRenameStringBuffer(const UmicomKernelFat16RenameCommitter *owner,
+    const char *text, UmicomSize limit, const UmicomKernelFat16RenameResult *outResult,
+    UmicomSize *outBytes)
+{
+    if (!text) return UMICOM_FALSE;
+    const UmicomAddress address = (UmicomAddress)text;
+    for (UmicomSize i = 0U; i < limit; ++i) {
+        /* Even an unterminated string starting just before an output or DMA
+         * object is refused before the first protected byte is dereferenced. */
+        if (address > ~(UmicomAddress)0U - i ||
+            !UmicomRenameIndependent(owner, address + i, 1U) ||
+            UmicomUpdateOverlap(address + i, 1U, (UmicomAddress)outResult, sizeof(*outResult)))
+            return UMICOM_FALSE;
+        if (!text[i]) { *outBytes = i + 1U; return UMICOM_TRUE; }
+    }
+    return UMICOM_FALSE;
+}
+static UmicomKernelFat16UpdateStatus UmicomRenameBuffers(UmicomKernelFat16RenameCommitter *owner,
+    const char *path, const char *newName, UmicomKernelFat16RenameResult *outResult)
+{
+    if (UmicomRenameResultBuffer(owner, outResult) != UMICOM_FAT16_UPDATE_OK)
+        return UMICOM_FAT16_UPDATE_INVALID_ARGUMENT;
+    UmicomSize pathBytes = 0U, nameBytes = 0U;
+    if (!UmicomRenameStringBuffer(owner, path, UMICOM_FAT16_PATH_BYTES, outResult, &pathBytes) ||
+        !UmicomRenameStringBuffer(owner, newName, 13U, outResult, &nameBytes) ||
+        UmicomUpdateOverlap((UmicomAddress)path, pathBytes, (UmicomAddress)newName, nameBytes))
+        return UMICOM_FAT16_UPDATE_INVALID_ARGUMENT;
+    return UMICOM_FAT16_UPDATE_OK;
+}
+static UmicomKernelFat16UpdateStatus UmicomRenameEnter(UmicomKernelFat16RenameCommitter *owner)
+{
+    owner->busy = UMICOM_TRUE;
+    const UmicomKernelFat16UpdateStatus status = UmicomCommitEnter(&owner->commit);
+    if (status != UMICOM_FAT16_UPDATE_OK) owner->busy = UMICOM_FALSE;
+    return status;
+}
+static UmicomKernelFat16UpdateStatus UmicomRenamePublish(UmicomKernelFat16RenameCommitter *owner,
+    UmicomKernelFat16RenameResult *result, UmicomKernelFat16RenameResult *outResult,
+    UmicomKernelFat16UpdateStatus status)
+{
+    UmicomKernelFat16Updater *const base = &owner->commit.updater;
+    result->commit.status = status;
+    result->commit.diskStatus = base->lastDiskStatus;
+    result->commit.blockStatus = base->lastBlockStatus;
+    result->commit.needsFlush = base->needsFlush;
+    result->commit.writeUncertain = base->writeUncertain;
+    base->lastStatus = status;
+    UmicomUpdateCopy(&owner->commit.lastResult, &result->commit, sizeof(result->commit));
+    UmicomUpdateCopy(&owner->lastResult, result, sizeof(*result));
+    UmicomUpdateCopy(outResult, result, sizeof(*result));
+    base->busy = UMICOM_FALSE;
+    owner->commit.busy = UMICOM_FALSE;
+    owner->busy = UMICOM_FALSE;
+    return status;
+}
+UmicomKernelFat16UpdateStatus UmicomKernelFat16RenameOpen(
+    UmicomKernelFat16RenameCommitter *owner, UmicomKernelBlockDomain *domain,
+    UmicomSize slot, UmicomSize partition, UmicomU64 timeoutTicks)
+{
+    if (!owner || (UmicomAddress)owner % alignof(UmicomKernelFat16RenameCommitter) ||
+        !UmicomUpdateSpan((UmicomAddress)owner, sizeof(*owner)))
+        return UMICOM_FAT16_UPDATE_INVALID_ARGUMENT;
+    if (!UmicomUpdateDomainValid(domain)) return UMICOM_FAT16_UPDATE_BAD_STATE;
+    if (!UmicomUpdateDomainIndependent(domain, (UmicomAddress)owner, sizeof(*owner)))
+        return UMICOM_FAT16_UPDATE_INVALID_ARGUMENT;
+    if (owner->busy || owner->commit.busy || owner->commit.updater.busy ||
+        owner->commit.updater.volume.busy || owner->commit.updater.workspace.busy ||
+        owner->renameWorkspace.busy || domain->busy) return UMICOM_FAT16_UPDATE_BUSY;
+    if ((!owner->self && !UmicomUpdateZero(owner, sizeof(*owner))) ||
+        (owner->self && owner->self != owner) || owner->commit.state != UMICOM_FAT16_COMMIT_UNUSED)
+        return UMICOM_FAT16_UPDATE_BAD_STATE;
+    owner->busy = UMICOM_TRUE;
+    owner->self = owner;
+    const UmicomKernelFat16UpdateStatus status = UmicomKernelFat16CommitOpen(&owner->commit,
+        domain, slot, partition, timeoutTicks);
+    owner->busy = UMICOM_FALSE;
+    return status;
+}
+static UmicomKernelFat16UpdateStatus UmicomRenamePlan(UmicomKernelFat16RenameCommitter *owner,
+    const char *path, const char *newName, UmicomKernelFat16RenameResult *result)
+{
+    UmicomKernelFat16Committer *const commit = &owner->commit;
+    UmicomKernelFat16Updater *const base = &commit->updater;
+    const UmicomKernelDiskReader reader = {base->sectors, UmicomUpdateReadSector, base};
+    base->lastDiskStatus = UmicomKernelFat16Open(&base->volume, &reader, base->partition);
+    UmicomKernelFat16UpdateStatus status = UmicomUpdateFromDisk(base, base->lastDiskStatus);
+    if (status == UMICOM_FAT16_UPDATE_OK) {
+        base->lastDiskStatus = UmicomKernelFat16PlanRename(&base->volume, path, newName,
+            &base->workspace, &owner->renameWorkspace, &owner->renamePlan);
+        status = UmicomUpdateFromDisk(base, base->lastDiskStatus);
+    }
+    if (status == UMICOM_FAT16_UPDATE_OK) {
+        const UmicomKernelFat16RenamePlan *const plan = &owner->renamePlan;
+        UmicomUpdateCopy(&result->originalEntry, &plan->originalEntry, sizeof(result->originalEntry));
+        UmicomUpdateCopy(result->updatedName, plan->updatedName, sizeof(result->updatedName));
+        result->directorySector = plan->directorySector;
+        result->entryOffset = plan->entryOffset;
+        result->directoryPlanned = UMICOM_TRUE;
+        commit->headerSectors[0] = base->volume.info.firstSector + base->volume.fatStart;
+        commit->headerSectors[1] = commit->headerSectors[0] + base->volume.info.sectorsPerFat;
+        status = UmicomCommitRead(commit, commit->headerSectors[0], commit->cleanHeader);
+    }
+    if (status == UMICOM_FAT16_UPDATE_OK)
+        status = UmicomCommitVerify(commit, commit->headerSectors[1], commit->cleanHeader);
+    if (status == UMICOM_FAT16_UPDATE_OK) {
+        if (commit->cleanHeader[2] != 0xffU || commit->cleanHeader[3] != 0xffU) {
+            base->lastDiskStatus = UMICOM_DISK_DIRTY;
+            status = UMICOM_FAT16_UPDATE_FILESYSTEM_ERROR;
+        } else {
+            UmicomUpdateCopy(commit->dirtyHeader, commit->cleanHeader, sizeof(commit->dirtyHeader));
+            commit->dirtyHeader[3] &= (UmicomU8)~(UMICOM_FAT16_CLEAN_MASK >> 8U);
+        }
+    }
+    /* The immutable inspector lifetime ends before either dirty-header WRITE. */
+    return UmicomUpdateInspectorClose(base, status);
+}
+UmicomKernelFat16UpdateStatus UmicomKernelFat16RenameStage(
+    UmicomKernelFat16RenameCommitter *owner, const char *path, const char *newName,
+    UmicomKernelFat16RenameResult *outResult)
+{
+    UmicomKernelFat16UpdateStatus status = UmicomRenameLive(owner, UMICOM_FAT16_COMMIT_READY);
+    if (status != UMICOM_FAT16_UPDATE_OK) return status;
+    status = UmicomRenameBuffers(owner, path, newName, outResult);
+    if (status != UMICOM_FAT16_UPDATE_OK) return status;
+    status = UmicomRenameEnter(owner);
+    if (status != UMICOM_FAT16_UPDATE_OK) return status;
+    UmicomKernelFat16Committer *const commit = &owner->commit;
+    UmicomKernelFat16Updater *const base = &commit->updater;
+    UmicomKernelFat16RenameResult result;
+    UmicomUpdateClear(&result, sizeof(result));
+    result.commit.phase = UMICOM_FAT16_COMMIT_PREFLIGHT;
+    result.commit.dataOutcome = UMICOM_FAT16_UPDATE_NOT_SUBMITTED;
+    UmicomUpdateClear(&base->plan, sizeof(base->plan));
+    UmicomUpdateClear(&owner->renamePlan, sizeof(owner->renamePlan));
+    UmicomUpdateBeginIo(base);
+    status = UmicomRenamePlan(owner, path, newName, &result);
+    /* Two dirty-header reads and one complete directory read remain. Reserve
+     * them while clean; a predictable read limit must not dirty valid media. */
+    if (status == UMICOM_FAT16_UPDATE_OK && base->operationReads > UMICOM_FAT16_IO_LIMIT - 3U) {
+        base->lastDiskStatus = UMICOM_DISK_LIMIT;
+        status = UMICOM_FAT16_UPDATE_INSPECTION_LIMIT;
+    }
+    if (status == UMICOM_FAT16_UPDATE_OK)
+        status = UmicomCommitWriteSector(commit, &result.commit, UMICOM_FAT16_COMMIT_DIRTY_MIRROR,
+            commit->headerSectors[1], commit->dirtyHeader, 0);
+    if (status == UMICOM_FAT16_UPDATE_OK)
+        status = UmicomCommitFlush(commit, &result.commit, UMICOM_FAT16_COMMIT_DIRTY_MIRROR_FLUSH);
+    if (status == UMICOM_FAT16_UPDATE_OK)
+        status = UmicomCommitWriteSector(commit, &result.commit, UMICOM_FAT16_COMMIT_DIRTY_PRIMARY,
+            commit->headerSectors[0], commit->dirtyHeader, 0);
+    if (status == UMICOM_FAT16_UPDATE_OK)
+        status = UmicomCommitFlush(commit, &result.commit, UMICOM_FAT16_COMMIT_DIRTY_PRIMARY_FLUSH);
+    if (status == UMICOM_FAT16_UPDATE_OK) {
+        result.commit.phase = UMICOM_FAT16_COMMIT_DIRTY_VERIFY;
+        status = UmicomCommitVerifyHeaders(commit, commit->dirtyHeader);
+        if (status == UMICOM_FAT16_UPDATE_OK) result.commit.dirtyVerified = UMICOM_TRUE;
+    }
+    if (status == UMICOM_FAT16_UPDATE_OK) {
+        const UmicomSize beforeSubmitted = result.commit.submittedMetadataSectors;
+        const UmicomSize beforeCompleted = result.commit.completedMetadataSectors;
+        status = UmicomCommitWriteSector(commit, &result.commit, UMICOM_FAT16_COMMIT_DIRECTORY_WRITE,
+            owner->renamePlan.directorySector, owner->renamePlan.data, 0);
+        result.directorySubmitted = result.commit.submittedMetadataSectors > beforeSubmitted;
+        result.directoryCompleted = result.commit.completedMetadataSectors > beforeCompleted;
+    }
+    if (status == UMICOM_FAT16_UPDATE_OK) {
+        const UmicomSize beforeFlushes = result.commit.completedFlushes;
+        status = UmicomCommitFlush(commit, &result.commit, UMICOM_FAT16_COMMIT_DIRECTORY_FLUSH);
+        if (result.commit.completedFlushes > beforeFlushes) result.directoryDurable = UMICOM_TRUE;
+    }
+    if (status == UMICOM_FAT16_UPDATE_OK) {
+        result.commit.phase = UMICOM_FAT16_COMMIT_DIRECTORY_VERIFY;
+        status = UmicomCommitVerify(commit, owner->renamePlan.directorySector, owner->renamePlan.data);
+        if (status == UMICOM_FAT16_UPDATE_OK) result.directoryVerified = UMICOM_TRUE;
+    }
+    if (status == UMICOM_FAT16_UPDATE_OK && !UmicomUpdateClock(base))
+        status = UmicomUpdateFromBlock(base->lastBlockStatus);
+    commit->state = status == UMICOM_FAT16_UPDATE_OK ? UMICOM_FAT16_COMMIT_STAGED :
+        result.commit.mediaTouched ? UMICOM_FAT16_COMMIT_FAILED : UMICOM_FAT16_COMMIT_READY;
+    if (commit->state == UMICOM_FAT16_COMMIT_READY)
+        UmicomUpdateClear(&owner->renamePlan, sizeof(owner->renamePlan));
+    return UmicomRenamePublish(owner, &result, outResult, status);
+}
+UmicomKernelFat16UpdateStatus UmicomKernelFat16RenameFinish(
+    UmicomKernelFat16RenameCommitter *owner, UmicomKernelFat16RenameResult *outResult)
+{
+    UmicomKernelFat16UpdateStatus status = UmicomRenameLive(owner, UMICOM_FAT16_COMMIT_STAGED);
+    if (status != UMICOM_FAT16_UPDATE_OK) return status;
+    status = UmicomRenameResultBuffer(owner, outResult);
+    if (status != UMICOM_FAT16_UPDATE_OK) return status;
+    UmicomKernelFat16Committer *const commit = &owner->commit;
+    UmicomKernelFat16Updater *const base = &commit->updater;
+    const UmicomKernelFat16RenameResult *const previous = &owner->lastResult;
+    if (!previous->directoryPlanned || !previous->directorySubmitted || !previous->directoryCompleted ||
+        !previous->directoryDurable || !previous->directoryVerified ||
+        !previous->commit.dirtyDurable || !previous->commit.dirtyVerified ||
+        previous->commit.offset || previous->commit.requestedBytes || previous->commit.confirmedBytes ||
+        previous->commit.submittedBytes || previous->commit.submittedDataSectors ||
+        previous->commit.completedDataSectors || previous->commit.dataDurable || previous->commit.dataVerified ||
+        previous->commit.dataOutcome != UMICOM_FAT16_UPDATE_NOT_SUBMITTED ||
+        base->needsFlush || base->writeUncertain || !UmicomUpdateZero(&base->plan, sizeof(base->plan)))
+        return UMICOM_FAT16_UPDATE_BAD_STATE;
+    status = UmicomRenameEnter(owner);
+    if (status != UMICOM_FAT16_UPDATE_OK) return status;
+    UmicomKernelFat16RenameResult result;
+    UmicomUpdateCopy(&result, previous, sizeof(result));
+    UmicomUpdateBeginIo(base);
+    result.commit.phase = UMICOM_FAT16_COMMIT_FINISH_VERIFY;
+    status = UmicomCommitVerifyHeaders(commit, commit->dirtyHeader);
+    if (status == UMICOM_FAT16_UPDATE_OK)
+        status = UmicomCommitVerify(commit, owner->renamePlan.directorySector, owner->renamePlan.data);
+    if (status == UMICOM_FAT16_UPDATE_OK)
+        status = UmicomCommitWriteSector(commit, &result.commit, UMICOM_FAT16_COMMIT_CLEAN_MIRROR,
+            commit->headerSectors[1], commit->cleanHeader, 0);
+    if (status == UMICOM_FAT16_UPDATE_OK)
+        status = UmicomCommitFlush(commit, &result.commit, UMICOM_FAT16_COMMIT_CLEAN_MIRROR_FLUSH);
+    if (status == UMICOM_FAT16_UPDATE_OK)
+        status = UmicomCommitWriteSector(commit, &result.commit, UMICOM_FAT16_COMMIT_CLEAN_PRIMARY,
+            commit->headerSectors[0], commit->cleanHeader, 0);
+    if (status == UMICOM_FAT16_UPDATE_OK)
+        status = UmicomCommitFlush(commit, &result.commit, UMICOM_FAT16_COMMIT_CLEAN_PRIMARY_FLUSH);
+    if (status == UMICOM_FAT16_UPDATE_OK) {
+        result.commit.phase = UMICOM_FAT16_COMMIT_CLEAN_VERIFY;
+        status = UmicomCommitVerifyHeaders(commit, commit->cleanHeader);
+        if (status == UMICOM_FAT16_UPDATE_OK) result.commit.cleanVerified = UMICOM_TRUE;
+    }
+    if (status == UMICOM_FAT16_UPDATE_OK && !UmicomUpdateClock(base))
+        status = UmicomUpdateFromBlock(base->lastBlockStatus);
+    if (status == UMICOM_FAT16_UPDATE_OK) {
+        result.commit.phase = UMICOM_FAT16_COMMIT_COMPLETE;
+        result.commit.commitAccepted = UMICOM_TRUE;
+        commit->state = UMICOM_FAT16_COMMIT_COMMITTED;
+    } else commit->state = UMICOM_FAT16_COMMIT_FAILED;
+    return UmicomRenamePublish(owner, &result, outResult, status);
+}
+UmicomKernelFat16UpdateStatus UmicomKernelFat16RenameClose(UmicomKernelFat16RenameCommitter *owner)
+{
+    if (!owner || (UmicomAddress)owner % alignof(UmicomKernelFat16RenameCommitter) ||
+        !UmicomUpdateSpan((UmicomAddress)owner, sizeof(*owner)))
+        return UMICOM_FAT16_UPDATE_INVALID_ARGUMENT;
+    if (owner->busy || owner->commit.busy || owner->commit.updater.busy ||
+        owner->commit.updater.volume.busy || owner->commit.updater.workspace.busy ||
+        owner->renameWorkspace.busy) return UMICOM_FAT16_UPDATE_BUSY;
+    if (!owner->self) return UmicomUpdateZero(owner, sizeof(*owner)) ?
+        UMICOM_FAT16_UPDATE_OK : UMICOM_FAT16_UPDATE_BAD_STATE;
+    if (owner->self != owner) return UMICOM_FAT16_UPDATE_BAD_STATE;
+    if (owner->commit.state != UMICOM_FAT16_COMMIT_UNUSED && owner->commit.state != UMICOM_FAT16_COMMIT_CLOSED &&
+        (!UmicomUpdateDomainValid(owner->commit.updater.domain) ||
+         !UmicomUpdateDomainIndependent(owner->commit.updater.domain, (UmicomAddress)owner, sizeof(*owner))))
+        return UMICOM_FAT16_UPDATE_BAD_STATE;
+    owner->busy = UMICOM_TRUE;
+    const UmicomKernelFat16UpdateStatus status = UmicomKernelFat16CommitClose(&owner->commit);
+    if (status == UMICOM_FAT16_UPDATE_OK) {
+        UmicomUpdateClear(&owner->renamePlan, sizeof(owner->renamePlan));
+        UmicomUpdateClear(&owner->renameWorkspace, sizeof(owner->renameWorkspace));
+        owner->renameWorkspace.self = &owner->renameWorkspace;
+    }
+    owner->busy = UMICOM_FALSE;
+    return status;
+}

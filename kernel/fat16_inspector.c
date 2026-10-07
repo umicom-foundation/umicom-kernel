@@ -1335,3 +1335,215 @@ UmicomKernelDiskStatus UmicomKernelFat16PlanFileAppend(
     volume->fatCached = UMICOM_FALSE;
     return UmicomFatFinish(volume, status);
 }
+
+/*-----------------------------------------------------------------------------
+ * Same-parent short-name rename preparation.
+ *
+ * Namespace changes still require the writer's complete ownership proof, even
+ * though no data or FAT link changes. A dedicated value plan avoids inventing
+ * a file-data operation merely to transport one checked directory sector.
+ *---------------------------------------------------------------------------*/
+#include "umicom/kernel/fat16_rename.h"
+
+static UmicomKernelDiskStatus UmicomFatRenameArguments(UmicomKernelFat16 *volume,
+    const char *path, const char *newName, UmicomKernelFat16UpdateWorkspace *workspace,
+    UmicomKernelFat16RenameWorkspace *renameWorkspace, UmicomKernelFat16RenamePlan *outPlan,
+    UmicomSize *outPathBytes, UmicomSize *outNameBytes)
+{
+    if (!UmicomFatPlanSpan(volume, sizeof(*volume)) ||
+        !UmicomFatPlanSpan(workspace, sizeof(*workspace)) ||
+        !UmicomFatPlanSpan(renameWorkspace, sizeof(*renameWorkspace)) ||
+        !UmicomFatPlanSpan(outPlan, sizeof(*outPlan)) ||
+        !UmicomFatPlanSpan(path, UMICOM_FAT16_PATH_BYTES) ||
+        !UmicomFatPlanSpan(newName, 13U) ||
+        (UmicomAddress)volume % _Alignof(UmicomKernelFat16) ||
+        (UmicomAddress)workspace % _Alignof(UmicomKernelFat16UpdateWorkspace) ||
+        (UmicomAddress)renameWorkspace % _Alignof(UmicomKernelFat16RenameWorkspace) ||
+        (UmicomAddress)outPlan % _Alignof(UmicomKernelFat16RenamePlan))
+        return UMICOM_DISK_INVALID_ARGUMENT;
+    const void *const pointers[] = {volume, workspace, renameWorkspace, outPlan};
+    const UmicomSize lengths[] = {sizeof(*volume), sizeof(*workspace),
+        sizeof(*renameWorkspace), sizeof(*outPlan)};
+    for (UmicomSize i = 0U; i < 4U; ++i)
+        for (UmicomSize j = i + 1U; j < 4U; ++j)
+            if (UmicomFatPlanOverlap(pointers[i], lengths[i], pointers[j], lengths[j]))
+                return UMICOM_DISK_INVALID_ARGUMENT;
+    UmicomSize pathBytes = 0U;
+    while (pathBytes < UMICOM_FAT16_PATH_BYTES) {
+        for (UmicomSize i = 0U; i < 4U; ++i)
+            if (UmicomFatPlanOverlap(path + pathBytes, 1U, pointers[i], lengths[i]))
+                return UMICOM_DISK_INVALID_ARGUMENT;
+        /* Protect the replacement's start before discovering its full extent.
+         * The second scan then checks against this complete terminated path. */
+        if (UmicomFatPlanOverlap(path + pathBytes, 1U, newName, 1U))
+            return UMICOM_DISK_INVALID_ARGUMENT;
+        if (!path[pathBytes]) break;
+        ++pathBytes;
+    }
+    if (pathBytes == UMICOM_FAT16_PATH_BYTES) return UMICOM_DISK_LIMIT;
+    ++pathBytes;
+    UmicomSize nameBytes = 0U;
+    while (nameBytes < 13U) {
+        for (UmicomSize i = 0U; i < 4U; ++i)
+            if (UmicomFatPlanOverlap(newName + nameBytes, 1U, pointers[i], lengths[i]))
+                return UMICOM_DISK_INVALID_ARGUMENT;
+        if (UmicomFatPlanOverlap(newName + nameBytes, 1U, path, pathBytes))
+            return UMICOM_DISK_INVALID_ARGUMENT;
+        if (!newName[nameBytes]) break;
+        ++nameBytes;
+    }
+    if (nameBytes == 13U) return UMICOM_DISK_INVALID_ARGUMENT;
+    ++nameBytes;
+    if ((workspace->self && workspace->self != workspace) ||
+        (renameWorkspace->self && renameWorkspace->self != renameWorkspace))
+        return UMICOM_DISK_BAD_STATE;
+    if (workspace->busy || renameWorkspace->busy) return UMICOM_DISK_BUSY;
+    if ((!workspace->self && !UmicomFatPlanZero(workspace, sizeof(*workspace))) ||
+        (!renameWorkspace->self && !UmicomFatPlanZero(renameWorkspace, sizeof(*renameWorkspace))))
+        return UMICOM_DISK_BAD_STATE;
+    *outPathBytes = pathBytes;
+    *outNameBytes = nameBytes;
+    return UMICOM_DISK_OK;
+}
+
+static UmicomKernelDiskStatus UmicomFatRenameName(const char *newName,
+    UmicomSize nameBytes, char *canonical, UmicomU8 *raw)
+{
+    char path[14];
+    char names[UMICOM_FAT16_DEPTH_LIMIT][13];
+    UmicomFatClear(path, sizeof(path));
+    UmicomFatClear(names, sizeof(names));
+    path[0] = '/';
+    UmicomFatCopy(path + 1U, newName, nameBytes);
+    UmicomSize depth = 0U;
+    const UmicomKernelDiskStatus status = UmicomFatPath(path, names, &depth);
+    if (status != UMICOM_DISK_OK || depth != 1U) return UMICOM_DISK_INVALID_ARGUMENT;
+    UmicomFatCopy(canonical, names[0], 13U);
+    for (UmicomSize i = 0U; i < 11U; ++i) raw[i] = ' ';
+    UmicomSize position = 0U;
+    for (UmicomSize i = 0U; canonical[i]; ++i) {
+        if (canonical[i] == '.') position = 8U;
+        else raw[position++] = (UmicomU8)canonical[i];
+    }
+    return UMICOM_DISK_OK;
+}
+
+static UmicomKernelDiskStatus UmicomFatRenameDirectorySector(UmicomKernelFat16 *volume,
+    UmicomKernelFat16UpdateWorkspace *workspace, UmicomU16 parent,
+    const UmicomU8 *newRawName, UmicomKernelFat16RenamePlan *stage)
+{
+    UmicomSize count = 0U;
+    UmicomU64 entries = volume->info.rootEntries;
+    if (parent) {
+        const UmicomKernelDiskStatus status = UmicomFatChain(volume, parent,
+            UMICOM_FALSE, 0U, workspace->chain, &count);
+        if (status != UMICOM_DISK_OK) return status;
+        entries = (UmicomU64)count * volume->info.sectorsPerCluster * 16U;
+    }
+    if (entries > UMICOM_FAT16_SCAN_ENTRIES) return UMICOM_DISK_LIMIT;
+    UmicomU64 relative = 0U;
+    for (UmicomU64 i = 0U; i < entries; ++i) {
+        if (i % 16U == 0U) {
+            relative = volume->rootStart + i / 16U;
+            if (parent) {
+                const UmicomU64 index = i / (16U * volume->info.sectorsPerCluster);
+                if (index >= count) return UMICOM_DISK_CORRUPT;
+                relative = volume->dataStart + ((UmicomU64)workspace->chain[index] - 2U) *
+                    volume->info.sectorsPerCluster + (i / 16U) % volume->info.sectorsPerCluster;
+            }
+            const UmicomKernelDiskStatus status = UmicomFatReadSector(volume, relative, volume->dataSector);
+            if (status != UMICOM_DISK_OK) return status;
+        }
+        const UmicomU8 *const raw = volume->dataSector + (i % 16U) * 32U;
+        if (!raw[0]) break;
+        if (raw[0] == 0xe5U || raw[0] == '.' || (raw[11] & 0x08U)) continue;
+        char name[13];
+        UmicomFatClear(name, sizeof(name));
+        const UmicomKernelDiskStatus status = UmicomFatDecodeName(raw, name);
+        if (status != UMICOM_DISK_OK) return status;
+        if (!UmicomFatStringEqual(name, stage->originalEntry.name)) continue;
+        /* Lookup and the namespace proof checked the whole parent. Re-identify
+         * the selected record physically before retaining its complete sector;
+         * preserve its calendar and attributes even when ARCHIVE is clear. */
+        if (raw[11] != stage->originalEntry.attributes || (raw[12] & ~0x18U) ||
+            UmicomFat16Word(raw + 20U) ||
+            UmicomFat16Word(raw + 26U) != stage->originalEntry.firstCluster ||
+            UmicomFat32Word(raw + 28U) != stage->originalEntry.bytes)
+            return UMICOM_DISK_CORRUPT;
+        stage->directorySector = volume->info.firstSector + relative;
+        stage->entryOffset = (i % 16U) * 32U;
+        UmicomFatCopy(stage->original, volume->dataSector, sizeof(stage->original));
+        UmicomFatCopy(stage->data, stage->original, sizeof(stage->data));
+        UmicomU8 *const target = stage->data + stage->entryOffset;
+        UmicomFatCopy(target, newRawName, 11U);
+        target[12] &= (UmicomU8)~0x18U;
+        return UMICOM_DISK_OK;
+    }
+    return UMICOM_DISK_CORRUPT;
+}
+
+UmicomKernelDiskStatus UmicomKernelFat16PlanRename(UmicomKernelFat16 *volume,
+    const char *path, const char *newName, UmicomKernelFat16UpdateWorkspace *workspace,
+    UmicomKernelFat16RenameWorkspace *renameWorkspace, UmicomKernelFat16RenamePlan *outPlan)
+{
+    UmicomSize pathBytes = 0U, nameBytes = 0U;
+    UmicomKernelDiskStatus status = UmicomFatRenameArguments(volume, path, newName,
+        workspace, renameWorkspace, outPlan, &pathBytes, &nameBytes);
+    if (status != UMICOM_DISK_OK) return status;
+    char canonical[13];
+    UmicomU8 rawName[11];
+    UmicomFatClear(canonical, sizeof(canonical));
+    UmicomFatClear(rawName, sizeof(rawName));
+    status = UmicomFatRenameName(newName, nameBytes, canonical, rawName);
+    if (status != UMICOM_DISK_OK) return status;
+    status = UmicomFatBegin(volume);
+    if (status != UMICOM_DISK_OK) return status;
+    UmicomFatClear(workspace, sizeof(*workspace));
+    workspace->self = workspace;
+    workspace->busy = UMICOM_TRUE;
+    UmicomFatClear(renameWorkspace, sizeof(*renameWorkspace));
+    renameWorkspace->self = renameWorkspace;
+    renameWorkspace->busy = UMICOM_TRUE;
+    /* All input values are owned snapshots before any reader callback. */
+    UmicomFatCopy(renameWorkspace->path, path, pathBytes);
+    UmicomFatCopy(renameWorkspace->newName, canonical, sizeof(canonical));
+    UmicomFatCopy(renameWorkspace->stage.updatedName, canonical, sizeof(canonical));
+    UmicomKernelFat16Entry *const entry = &renameWorkspace->stage.originalEntry;
+    UmicomU16 parent = 0U;
+    status = UmicomFatPlanGeometry(volume);
+    if (status == UMICOM_DISK_OK)
+        status = UmicomFatFileLookup(volume, renameWorkspace->path, entry, &parent);
+    if (status == UMICOM_DISK_OK && entry->directory) status = UMICOM_DISK_IS_DIRECTORY;
+    if (status == UMICOM_DISK_OK && (entry->attributes & 0x01U)) status = UMICOM_DISK_READ_ONLY;
+    if (status == UMICOM_DISK_OK) {
+        /* The final lookup leaves the complete source parent in this staging
+         * listing. Include the source itself: case-only renames are explicit
+         * collisions, never a no-op which acquires mutation authority. */
+        for (UmicomSize i = 0U; i < volume->directoryStage.count; ++i) {
+            if (UmicomFatStringEqual(volume->directoryStage.entries[i].name,
+                renameWorkspace->newName)) {
+                status = UMICOM_DISK_EXISTS;
+                break;
+            }
+        }
+    }
+    if (status == UMICOM_DISK_OK) {
+        const UmicomU64 clusterBytes = (UmicomU64)volume->info.sectorsPerCluster * UMICOM_DISK_SECTOR_BYTES;
+        const UmicomU64 required = ((UmicomU64)entry->bytes + clusterBytes - 1U) / clusterBytes;
+        status = UmicomFatChain(volume, entry->firstCluster, UMICOM_TRUE, required,
+            workspace->targetChain, &workspace->targetClusters);
+    }
+    if (status == UMICOM_DISK_OK) status = UmicomFatPlanNamespace(volume, workspace);
+    if (status == UMICOM_DISK_OK) status = UmicomFatPlanAllocation(volume, workspace);
+    if (status == UMICOM_DISK_OK) status = UmicomFatRenameDirectorySector(volume,
+        workspace, parent, rawName, &renameWorkspace->stage);
+    if (status == UMICOM_DISK_OK) UmicomFatCopy(outPlan, &renameWorkspace->stage, sizeof(*outPlan));
+    UmicomFatClear(canonical, sizeof(canonical));
+    UmicomFatClear(rawName, sizeof(rawName));
+    UmicomFatClear(workspace, sizeof(*workspace));
+    workspace->self = workspace;
+    UmicomFatClear(renameWorkspace, sizeof(*renameWorkspace));
+    renameWorkspace->self = renameWorkspace;
+    volume->fatCached = UMICOM_FALSE;
+    return UmicomFatFinish(volume, status);
+}

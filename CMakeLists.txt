@@ -561,6 +561,10 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/Fat16Metadata.cmake")
 # EOF and metadata in fresh complete and deliberately interrupted lifetimes.
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/Fat16Append.cmake")
 
+# Rename one short alias inside its current parent while preserving all file
+# data and metadata; fresh readers qualify complete and unfinished results.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/Fat16Rename.cmake")
+
 # Preserve the linked Kernel entry while supporting QEMU firmware reset at RAM base.
 # Apply the same verified bridge to every Kernel-linked image after cloning.
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/FirmwareEntry.cmake")

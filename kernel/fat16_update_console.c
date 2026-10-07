@@ -531,9 +531,18 @@ static UmicomKernelFat16UpdateStatus UmicomFatFileCommitClose(UmicomKernelConsol
     }
     return status;
 }
+static UmicomKernelFat16UpdateStatus UmicomFatRenameConsoleClose(UmicomKernelConsoleShell *shell);
+static UmicomBoolean UmicomFatRenameShellMatches(const UmicomKernelConsoleShell *shell);
+static UmicomKernelShellStatus UmicomFatRenameCommand(UmicomKernelConsoleShell *shell,
+    const UmicomKernelShellCommand *command, UmicomBoolean *handled);
 UmicomKernelFat16UpdateStatus UmicomKernelFat16FileCommitConsoleClose(UmicomKernelConsoleShell *shell)
 {
     if (!shell || !shell->output) return UMICOM_FAT16_UPDATE_INVALID_ARGUMENT;
+    if (umicomFatFileCommitConsoleBusy) return UMICOM_FAT16_UPDATE_BUSY;
+    /* The shared shell shutdown releases every private file-mutation owner.
+     * Each Close remains resource-only; an unfinished rename stays dirty. */
+    const UmicomKernelFat16UpdateStatus renameStatus = UmicomFatRenameConsoleClose(shell);
+    if (renameStatus != UMICOM_FAT16_UPDATE_OK) return renameStatus;
     if (!umicomFatFileCommitConsole) return UMICOM_FAT16_UPDATE_OK;
     if (umicomFatFileCommitConsole != shell) return UMICOM_FAT16_UPDATE_BAD_STATE;
     if (umicomFatFileCommitConsoleBusy) return UMICOM_FAT16_UPDATE_BUSY;
@@ -551,6 +560,9 @@ UmicomKernelShellStatus UmicomKernelFat16FileCommitCommand(UmicomKernelConsoleSh
     *handled = UMICOM_FALSE;
     if (!command->count) return UMICOM_SHELL_OK;
     const char *const name = command->bytes + command->offsets[0];
+    UmicomBoolean renameHandled = UMICOM_FALSE;
+    const UmicomKernelShellStatus renameStatus = UmicomFatRenameCommand(shell, command, &renameHandled);
+    if (renameHandled) { *handled = UMICOM_TRUE; return renameStatus; }
     if (UmicomFatConsoleEqual(name, "fatfileappend")) {
         *handled = UMICOM_TRUE;
         return UmicomFatFileAppendCommand(shell, command);
@@ -565,6 +577,7 @@ UmicomKernelShellStatus UmicomKernelFat16FileCommitCommand(UmicomKernelConsoleSh
     *handled = UMICOM_TRUE;
     if (command->count != (open ? 3U : calendar ? 2U : stage ? 4U : 1U)) return UMICOM_SHELL_INVALID_ARGUMENT;
     if (umicomFatFileCommitConsoleBusy) return UMICOM_SHELL_BUSY;
+    if (!UmicomFatRenameShellMatches(shell)) return UMICOM_SHELL_BAD_STATE;
     if (umicomFatFileCommitConsole && umicomFatFileCommitConsole != shell) return UMICOM_SHELL_BAD_STATE;
     umicomFatFileCommitConsoleBusy = UMICOM_TRUE;
     UmicomKernelFat16UpdateStatus status = UMICOM_FAT16_UPDATE_OK;
@@ -660,6 +673,156 @@ UmicomKernelShellStatus UmicomKernelFat16FileCommitCommand(UmicomKernelConsoleSh
     return status == UMICOM_FAT16_UPDATE_OK ? UMICOM_SHELL_OK : UMICOM_SHELL_IO_ERROR;
 }
 
+/*-----------------------------------------------------------------------------
+ * Dedicated metadata-only rename commands.
+ *
+ * The original file-command dispatcher owns the shared shell guard, including
+ * output callbacks. A separate rename lifetime carries no calendar or data
+ * update state and uses its own explicit Finish. Keeping these helpers in the
+ * established provider translation unit preserves every live-shell link path.
+ *---------------------------------------------------------------------------*/
+#include "umicom/kernel/fat16_rename_commit.h"
+
+static UmicomKernelFat16RenameCommitter umicomFatRenameConsoleCommitter;
+static UmicomKernelConsoleShell *umicomFatRenameConsole;
+
+static UmicomBoolean UmicomFatRenameShellMatches(const UmicomKernelConsoleShell *shell)
+{
+    /* Shared shutdown must never encounter two different shell identities.
+     * Owners remain distinct, but both mutation families bind to one console. */
+    return !umicomFatRenameConsole || umicomFatRenameConsole == shell;
+}
+static void UmicomFatRenameReport(UmicomKernelConsoleShell *shell, const char *operation,
+    UmicomKernelFat16UpdateStatus status)
+{
+    const UmicomKernelFat16Updater *const base = &umicomFatRenameConsoleCommitter.commit.updater;
+    UmicomFatConsoleText(shell, operation); UmicomFatConsoleText(shell, "=");
+    UmicomFatConsoleText(shell, UmicomKernelFat16UpdateStatusName(status));
+    UmicomFatConsoleText(shell, " last-cleanup=");
+    UmicomFatConsoleText(shell, UmicomKernelBlockStatusName(base->lastCleanupStatus));
+    UmicomFatConsoleText(shell, " last-disk=");
+    UmicomFatConsoleText(shell, UmicomKernelDiskStatusName(base->lastDiskStatus));
+    UmicomFatConsoleText(shell, " last-block=");
+    UmicomFatConsoleText(shell, UmicomKernelBlockStatusName(base->lastBlockStatus));
+    UmicomFatConsoleText(shell, "\r\nfat.rename-state=");
+    UmicomFatConsoleText(shell, UmicomKernelFat16CommitStateName(umicomFatRenameConsoleCommitter.commit.state));
+    UmicomFatCommitField(shell, " slot=", base->slot);
+    UmicomFatCommitField(shell, " partition=", base->partition);
+    UmicomFatCommitField(shell, " needs-flush=", base->needsFlush ? 1U : 0U);
+    UmicomFatCommitField(shell, " write-uncertain=", base->writeUncertain ? 1U : 0U);
+    UmicomFatConsoleText(shell, "\r\n");
+}
+static void UmicomFatRenameResult(UmicomKernelConsoleShell *shell, const char *label,
+    const UmicomKernelFat16RenameResult *result)
+{
+    UmicomFatCommitResult(shell, label, &result->commit);
+    UmicomFatCommitField(shell, "fat.rename.directory-planned=", result->directoryPlanned ? 1U : 0U);
+    if (result->directoryPlanned) {
+        UmicomFatCommitField(shell, " sector=", result->directorySector);
+        UmicomFatCommitField(shell, " entry-offset=", result->entryOffset);
+        UmicomFatConsoleText(shell, "\r\nfat.rename.original-name=");
+        UmicomFatConsoleText(shell, result->originalEntry.name);
+        UmicomFatConsoleText(shell, " updated-name=");
+        UmicomFatConsoleText(shell, result->updatedName);
+        UmicomFatCommitField(shell, " file-bytes=", result->originalEntry.bytes);
+        UmicomFatCommitField(shell, " attributes=", result->originalEntry.attributes);
+    }
+    UmicomFatConsoleText(shell, "\r\nfat.rename.directory-observed");
+    UmicomFatCommitField(shell, " submitted=", result->directorySubmitted ? 1U : 0U);
+    UmicomFatCommitField(shell, " completed=", result->directoryCompleted ? 1U : 0U);
+    UmicomFatCommitField(shell, " durable=", result->directoryDurable ? 1U : 0U);
+    UmicomFatCommitField(shell, " verified=", result->directoryVerified ? 1U : 0U);
+    UmicomFatConsoleText(shell, "\r\n");
+}
+static UmicomKernelFat16UpdateStatus UmicomFatRenameClose(UmicomKernelConsoleShell *shell)
+{
+    const UmicomKernelFat16UpdateStatus status = UmicomKernelFat16RenameClose(&umicomFatRenameConsoleCommitter);
+    if (status == UMICOM_FAT16_UPDATE_OK && umicomFatRenameConsoleCommitter.lastResult.commit.mediaTouched &&
+        !umicomFatRenameConsoleCommitter.lastResult.commit.commitAccepted)
+        UmicomFatConsoleText(shell, "fat.rename.close=resources-released; rename not accepted; no flush or flag repair submitted\r\n");
+    return status;
+}
+static UmicomKernelFat16UpdateStatus UmicomFatRenameConsoleClose(UmicomKernelConsoleShell *shell)
+{
+    if (!umicomFatRenameConsole) return UMICOM_FAT16_UPDATE_OK;
+    if (umicomFatRenameConsole != shell) return UMICOM_FAT16_UPDATE_BAD_STATE;
+    if (umicomFatFileCommitConsoleBusy) return UMICOM_FAT16_UPDATE_BUSY;
+    umicomFatFileCommitConsoleBusy = UMICOM_TRUE;
+    const UmicomKernelFat16UpdateStatus status = UmicomFatRenameClose(shell);
+    umicomFatFileCommitConsoleBusy = UMICOM_FALSE;
+    return status;
+}
+static UmicomKernelShellStatus UmicomFatRenameCommand(UmicomKernelConsoleShell *shell,
+    const UmicomKernelShellCommand *command, UmicomBoolean *handled)
+{
+    const char *const name = command->bytes + command->offsets[0];
+    const UmicomBoolean open = UmicomFatConsoleEqual(name, "fatrenameopen");
+    const UmicomBoolean stage = UmicomFatConsoleEqual(name, "fatrenamestage");
+    const UmicomBoolean finish = UmicomFatConsoleEqual(name, "fatrenamecommit");
+    const UmicomBoolean info = UmicomFatConsoleEqual(name, "fatrenameinfo");
+    const UmicomBoolean close = UmicomFatConsoleEqual(name, "fatrenameclose");
+    *handled = open || stage || finish || info || close;
+    if (!*handled) return UMICOM_SHELL_OK;
+    if (command->count != (open || stage ? 3U : 1U)) return UMICOM_SHELL_INVALID_ARGUMENT;
+    if (umicomFatFileCommitConsoleBusy) return UMICOM_SHELL_BUSY;
+    if (umicomFatFileCommitConsole && umicomFatFileCommitConsole != shell) return UMICOM_SHELL_BAD_STATE;
+    if (umicomFatRenameConsole && umicomFatRenameConsole != shell) return UMICOM_SHELL_BAD_STATE;
+    umicomFatFileCommitConsoleBusy = UMICOM_TRUE;
+    UmicomKernelFat16UpdateStatus status = UMICOM_FAT16_UPDATE_OK;
+    if (open) {
+        UmicomU64 slot = 0U, partition = 0U;
+        if (!UmicomKernelShellUnsigned(command->bytes + command->offsets[1], &slot) ||
+            !UmicomKernelShellUnsigned(command->bytes + command->offsets[2], &partition) ||
+            slot >= UMICOM_BLOCK_SLOT_LIMIT || partition >= UMICOM_DISK_PRIMARY_PARTITIONS) {
+            umicomFatFileCommitConsoleBusy = UMICOM_FALSE;
+            return UMICOM_SHELL_INVALID_ARGUMENT;
+        }
+        UmicomKernelBlockDomain *domain = (UmicomKernelBlockDomain *)0;
+        const UmicomKernelBlockStatus block = UmicomPlatformBlockDomainGet(&domain);
+        if (block != UMICOM_BLOCK_OK) {
+            UmicomFatConsoleText(shell, "fat.rename.transport=");
+            UmicomFatConsoleText(shell, UmicomKernelBlockStatusName(block));
+            UmicomFatConsoleText(shell, "\r\n");
+            status = UMICOM_FAT16_UPDATE_TRANSPORT_ERROR;
+        } else {
+            umicomFatRenameConsole = shell;
+            status = UmicomKernelFat16RenameOpen(&umicomFatRenameConsoleCommitter,
+                domain, slot, partition, 10000000U);
+        }
+        UmicomFatRenameReport(shell, "fat.rename.open", status);
+        if (status == UMICOM_FAT16_UPDATE_OK)
+            UmicomFatConsoleText(shell, "Use fatrenamestage PATH NEWNAME, then fatrenamecommit. Names stay in the same directory; attributes, timestamps and file data are preserved.\r\n");
+    } else if (stage || finish) {
+        UmicomKernelFat16RenameResult result;
+        UmicomFatConsoleClear(&result, sizeof(result));
+        result.commit.requestedBytes = ~(UmicomSize)0U;
+        if (stage)
+            status = UmicomKernelFat16RenameStage(&umicomFatRenameConsoleCommitter,
+                command->bytes + command->offsets[1], command->bytes + command->offsets[2], &result);
+        else status = UmicomKernelFat16RenameFinish(&umicomFatRenameConsoleCommitter, &result);
+        UmicomFatRenameReport(shell, stage ? "fat.rename.stage" : "fat.rename.finish", status);
+        if (result.commit.requestedBytes != ~(UmicomSize)0U)
+            UmicomFatRenameResult(shell, "fat.rename.result", &result);
+        else {
+            UmicomFatConsoleText(shell, "fat.rename.result=not-admitted; previous evidence retained\r\n");
+            if (umicomFatRenameConsoleCommitter.lastResult.commit.phase != UMICOM_FAT16_COMMIT_NONE)
+                UmicomFatRenameResult(shell, "fat.rename.previous-result", &umicomFatRenameConsoleCommitter.lastResult);
+        }
+        if (stage && status == UMICOM_FAT16_UPDATE_OK)
+            UmicomFatConsoleText(shell, "The new short name was flushed and verified. The volume remains dirty until fatrenamecommit succeeds.\r\n");
+        UmicomFatConsoleClear(&result, sizeof(result));
+    } else if (close) {
+        status = UmicomFatRenameClose(shell);
+        UmicomFatRenameReport(shell, "fat.rename.release", status);
+    } else {
+        UmicomFatRenameReport(shell, "fat.rename.status", umicomFatRenameConsoleCommitter.commit.updater.lastStatus);
+        if (umicomFatRenameConsoleCommitter.lastResult.commit.phase != UMICOM_FAT16_COMMIT_NONE)
+            UmicomFatRenameResult(shell, "fat.rename.last-result", &umicomFatRenameConsoleCommitter.lastResult);
+    }
+    umicomFatFileCommitConsoleBusy = UMICOM_FALSE;
+    return status == UMICOM_FAT16_UPDATE_OK ? UMICOM_SHELL_OK : UMICOM_SHELL_IO_ERROR;
+}
+
 /* Append belongs to the same single-use file-commit console lifetime. Keeping
  * the explicit calendar, Finish and Close commands avoids a second writable
  * owner or an implicit clean publication after adding file bytes. */
@@ -669,6 +832,7 @@ static UmicomKernelShellStatus UmicomFatFileAppendCommand(UmicomKernelConsoleShe
 {
     if (command->count != 3U) return UMICOM_SHELL_INVALID_ARGUMENT;
     if (umicomFatFileCommitConsoleBusy) return UMICOM_SHELL_BUSY;
+    if (!UmicomFatRenameShellMatches(shell)) return UMICOM_SHELL_BAD_STATE;
     if (umicomFatFileCommitConsole && umicomFatFileCommitConsole != shell)
         return UMICOM_SHELL_BAD_STATE;
     umicomFatFileCommitConsoleBusy = UMICOM_TRUE;
