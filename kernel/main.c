@@ -44,6 +44,7 @@
 #include "umicom/kernel/disk_console.h"
 /* Filesystem-provider acceptance uses the same checked disk in its own image. */
 #include "umicom/kernel/disk_filesystem.h"
+#include "umicom/kernel/writable_block_validation.h"
 #include "umicom/kernel/virtio_block.h"
 
 /* Read firmware descriptions without probing or binding devices. */
@@ -1425,6 +1426,11 @@ static void RunHardwareAddressTranslationTest(void)
 
 void UmicomKernelMain(UmicomU64 hartId, UmicomAddress deviceTreeAddress)
 {
+#if defined(UMICOM_KERNEL_WRITABLE_BLOCK_TEST) || defined(UMICOM_KERNEL_BLOCK_WRITE_READBACK_TEST)
+    /* Only these explicit images attach the disposable write/flush fixture.
+     * Ordinary startup retains its read-only disk commands and admission. */
+    UmicomKernelWritableBlockBoot(hartId, deviceTreeAddress);
+#endif
 #ifdef UMICOM_KERNEL_DISK_FILESYSTEM_TEST
     /* Keep descriptor/mount qualification independent of the previous raw and
      * partition-only guest sequences, with a distinct readiness marker. */

@@ -43,6 +43,10 @@ typedef struct BlockModel {
     UmicomBoolean backwardClock, pending, reenter, partialData, stickAfterDriver;
     UmicomBoolean observedReadOnlyRequest, observedSafeRelease;
     UmicomU32 reentryResult;
+    /* Zero-default extension points preserve this original read-only model.
+     * A separate writable suite supplies its own media completion only. */
+    UmicomU32 expectedDriverLow;
+    void (*completeRequest)(void);
 } BlockModel;
 static BlockModel model;
 
@@ -78,6 +82,7 @@ static UmicomU32 Offset(UmicomAddress address)
 }
 static void Complete(void)
 {
+    if (model.completeRequest) { model.completeRequest(); return; }
     CHECK(model.desc && model.avail && model.used);
     const UmicomU64 *headerDescriptor = (const UmicomU64 *)model.desc;
     const UmicomAddress header = (UmicomAddress)headerDescriptor[0];
@@ -196,7 +201,11 @@ static void WriteRegister(void *context, UmicomAddress address, UmicomU32 value)
     case UMICOM_VIRTIO_QUEUE_NOTIFY:
         CHECK(value == 0U && model.registers[UMICOM_VIRTIO_STATUS / 4U] == 15U);
         CHECK(model.registers[UMICOM_VIRTIO_QUEUE_READY / 4U] == 1U);
+        if (model.expectedDriverLow) {
+            CHECK(model.driverLow == model.expectedDriverLow && model.driverHigh == 1U);
+        } else {
         CHECK(model.driverLow == UMICOM_VIRTIO_READ_ONLY && model.driverHigh == 1U);
+        }
         CHECK(model.barriers >= model.lastNotifyBarrier + 2U);
         model.lastNotifyBarrier = model.barriers;
         ++model.notifications;

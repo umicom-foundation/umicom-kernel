@@ -3,6 +3,8 @@
  * Only modern split queues and read requests are implemented. Spec references
  * and the supported subset are recorded in docs/READ_ONLY_VIRTIO_BLOCK.md.
  * Author: Sammy Hegab, Umicom Foundation. Licence: MIT. */
+/* The retained introduction documents the original subset. Explicit writable
+ * admission additionally implements WRITE and FLUSH with the same split queue. */
 #ifndef UMICOM_KERNEL_VIRTIO_BLOCK_PROTOCOL_H
 #define UMICOM_KERNEL_VIRTIO_BLOCK_PROTOCOL_H
 #define UMICOM_VIRTIO_MAGIC 0x74726976U
@@ -40,11 +42,14 @@
 #define UMICOM_VIRTIO_NEEDS_RESET 64U
 #define UMICOM_VIRTIO_FAILED 128U
 #define UMICOM_VIRTIO_READ_ONLY (1U << 5U)
+#define UMICOM_VIRTIO_FEATURE_FLUSH (1U << 9U)
 #define UMICOM_VIRTIO_FEATURE_MODERN_HIGH 1U /* VIRTIO_F_VERSION_1 is feature bit 32. */
 #define UMICOM_VIRTIO_RUNNING_STATUS 15U
 #define UMICOM_VIRTIO_DESCRIPTOR_NEXT 1U
 #define UMICOM_VIRTIO_DESCRIPTOR_WRITE 2U
 #define UMICOM_VIRTIO_REQUEST_READ 0U
+#define UMICOM_VIRTIO_REQUEST_WRITE 1U
+#define UMICOM_VIRTIO_REQUEST_FLUSH 4U
 #define UMICOM_VIRTIO_RESULT_OK 0U
 #define UMICOM_VIRTIO_RESULT_IO_ERROR 1U
 #define UMICOM_VIRTIO_RESULT_UNSUPPORTED 2U

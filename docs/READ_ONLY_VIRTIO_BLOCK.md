@@ -2,6 +2,11 @@
 
 Author: Sammy Hegab, Umicom Foundation. Licence: MIT.
 
+This guide preserves the original read-only delivery and its admission rules.
+The separately admitted writable interface is documented in
+[Writable VirtIO block leases and explicit flush](WRITABLE_VIRTIO_BLOCK.md).
+Existing read-only callers continue to use the contract described here.
+
 ## What storage capability is being added
 
 The hardware catalogue describes possible devices. A block driver goes further:

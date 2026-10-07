@@ -537,6 +537,10 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/DiskInspection.cmake")
 # Transport ownership survives until clients and the root pin have retired.
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/DiskFilesystem.cmake")
 
+# Qualify explicit writable admission only on a disposable synthetic disk copy.
+# A fresh read-only guest checks its bytes after the writer closes the backend.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/WritableBlock.cmake")
+
 # Preserve the linked Kernel entry while supporting QEMU firmware reset at RAM base.
 # Apply the same verified bridge to every Kernel-linked image after cloning.
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/FirmwareEntry.cmake")

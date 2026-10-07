@@ -13,6 +13,9 @@
  * and release. A malicious DMA-capable device is outside this no-IOMMU model.
  * Author: Sammy Hegab, Umicom Foundation. Licence: MIT.
  *---------------------------------------------------------------------------*/
+/* The retained introduction describes the original read-only entry points.
+ * The explicit writable admission below shares their transport, queue and
+ * cleanup algorithms; it does not confer write authority on existing callers. */
 #include "umicom/kernel/virtio_block.h"
 #include "umicom/kernel/virtio_block_protocol.h"
 #include "umicom/kernel/physical_memory.h"
@@ -24,6 +27,14 @@ static void UmicomBlockClear(UmicomAddress address, UmicomSize bytes)
 {
     volatile UmicomU8 *target = (volatile UmicomU8 *)address;
     for (UmicomSize i = 0U; i < bytes; ++i) target[i] = 0U;
+}
+static void UmicomBlockCopy(UmicomAddress destination, UmicomAddress source, UmicomSize bytes)
+{
+    /* Volatile byte accesses keep freestanding aggregate copies independent of
+     * compiler-emitted memcpy and also describe the owned DMA staging buffer. */
+    volatile UmicomU8 *target = (volatile UmicomU8 *)destination;
+    const volatile UmicomU8 *input = (const volatile UmicomU8 *)source;
+    for (UmicomSize i = 0U; i < bytes; ++i) target[i] = input[i];
 }
 static UmicomBoolean UmicomBlockZero(const void *address, UmicomSize bytes)
 {
@@ -39,13 +50,54 @@ static UmicomBoolean UmicomBlockOverlap(UmicomAddress first, UmicomSize firstByt
     if (!firstBytes || !secondBytes) return UMICOM_FALSE;
     return first <= second ? second - first < firstBytes : first - second < secondBytes;
 }
+static UmicomBoolean UmicomBlockIndependent(const UmicomKernelBlockDomain *d,
+    UmicomAddress address, UmicomSize bytes)
+{
+    /* The entered domain has a bounded slot count. Check every retained page,
+     * including another device's pages after a failed reset or frame release. */
+    if (!bytes) return UMICOM_TRUE;
+    if (!address || address > ~(UmicomAddress)0U - bytes ||
+        UmicomBlockOverlap(address, bytes, (UmicomAddress)d, sizeof(*d))) return UMICOM_FALSE;
+    for (UmicomSize i = 0U; i < d->count; ++i) {
+        const UmicomKernelBlockSlot *s = &d->slots[i];
+        if ((s->queueFrame && UmicomBlockOverlap(address, bytes, s->queueFrame, UMICOM_KERNEL_PAGE_SIZE)) ||
+            (s->dataFrame && UmicomBlockOverlap(address, bytes, s->dataFrame, UMICOM_KERNEL_PAGE_SIZE)))
+            return UMICOM_FALSE;
+    }
+    return UMICOM_TRUE;
+}
+static UmicomKernelBlockStatus UmicomBlockMutationPrepare(UmicomKernelBlockDomain *d,
+    const void *input, UmicomSize inputBytes, UmicomKernelBlockMutationOutcome *outOutcome)
+{
+    const UmicomAddress outcome = (UmicomAddress)outOutcome;
+    const UmicomAddress source = (UmicomAddress)input;
+    if (!outOutcome || outcome % alignof(UmicomKernelBlockMutationOutcome) ||
+        !UmicomBlockIndependent(d, outcome, sizeof(*outOutcome)) ||
+        !UmicomBlockIndependent(d, source, inputBytes) ||
+        UmicomBlockOverlap(outcome, sizeof(*outOutcome), source, inputBytes))
+        return UMICOM_BLOCK_INVALID_ARGUMENT;
+    /* Ownership failures above must not modify a source byte, an owner member,
+     * or a page which a device may still access. Ordinary request refusals can
+     * now safely report that this attempt has not exposed a descriptor chain. */
+    *outOutcome = UMICOM_BLOCK_NOT_SUBMITTED;
+    return UMICOM_BLOCK_OK;
+}
 static UmicomKernelBlockStatus UmicomBlockEnter(UmicomKernelBlockDomain *domain)
 {
     if (!domain || domain->self != domain || !domain->ready ||
         !domain->count || domain->count > UMICOM_BLOCK_SLOT_LIMIT) return UMICOM_BLOCK_BAD_STATE;
     if (domain->busy) return UMICOM_BLOCK_BUSY;
+    /* Establish the guard before invoking even the admission-policy callback.
+     * Retain the original ordering below for the source-preservation record. */
+    domain->busy = UMICOM_TRUE;
+#if 0
     if (!domain->operations.allowed(domain->operations.context)) return UMICOM_BLOCK_UNSAFE_CONTEXT;
     domain->busy = UMICOM_TRUE;
+#endif
+    if (!domain->operations.allowed(domain->operations.context)) {
+        domain->busy = UMICOM_FALSE;
+        return UMICOM_BLOCK_UNSAFE_CONTEXT;
+    }
     return UMICOM_BLOCK_OK;
 }
 static UmicomKernelBlockStatus UmicomBlockLeave(UmicomKernelBlockDomain *domain, UmicomKernelBlockStatus status)
@@ -204,7 +256,13 @@ UmicomKernelBlockStatus UmicomKernelBlockProbe(UmicomKernelBlockDomain *d,
     if (status != UMICOM_BLOCK_OK) return status;
     if (index >= d->count) return UmicomBlockLeave(d, UMICOM_BLOCK_INVALID_ARGUMENT);
     const UmicomKernelBlockSlot *s = &d->slots[index];
+    /* Appended diagnostics enlarge this aggregate: explicitly clear/copy it
+     * so an unoptimised freestanding build does not acquire a libc dependency. */
+#if 0
     UmicomKernelBlockInfo info = {0};
+#endif
+    UmicomKernelBlockInfo info;
+    UmicomBlockClear((UmicomAddress)&info, sizeof(info));
     info.base = s->transport.base;
     info.state = s->state;
     info.lastError = s->lastError;
@@ -212,8 +270,14 @@ UmicomKernelBlockStatus UmicomKernelBlockProbe(UmicomKernelBlockDomain *d,
     info.requests = s->requests;
     info.heldFrames = (s->queueFrame ? 1U : 0U) + (s->dataFrame ? 1U : 0U);
     info.deviceMayAccessMemory = s->exposed;
+    info.writable = s->writable;
+    info.needsFlush = s->needsFlush;
+    info.writeUncertain = s->writeUncertain;
     status = UmicomBlockIdentify(d, s, &info);
+#if 0 /* The explicit byte copy preserves the original complete publication. */
     *outInfo = info; /* Even an empty or unsupported slot has useful observations. */
+#endif
+    UmicomBlockCopy((UmicomAddress)outInfo, (UmicomAddress)&info, sizeof(info));
     return UmicomBlockLeave(d, status);
 }
 static UmicomKernelBlockStatus UmicomBlockCapacity(UmicomKernelBlockDomain *d, UmicomKernelBlockSlot *s)
@@ -236,19 +300,34 @@ static void UmicomBlockAddressRegister(UmicomKernelBlockDomain *d, UmicomKernelB
     UmicomBlockWriteRegister(d, s, lowRegister, (UmicomU32)address);
     UmicomBlockWriteRegister(d, s, lowRegister + 4U, (UmicomU32)((UmicomU64)address >> 32U));
 }
+/* Both public admissions use this one setup/rollback algorithm. Preserve the
+ * original signature here; its public wrapper below selects the old RO gate. */
+#if 0
 UmicomKernelBlockStatus UmicomKernelBlockOpen(UmicomKernelBlockDomain *d,
     UmicomSize index, UmicomU64 timeoutTicks, UmicomKernelBlockHandle *outHandle)
+#endif
+static UmicomKernelBlockStatus UmicomBlockOpenMode(UmicomKernelBlockDomain *d,
+    UmicomSize index, UmicomU64 timeoutTicks, UmicomKernelBlockHandle *outHandle, UmicomBoolean writable)
 {
     if (!outHandle || !timeoutTicks || timeoutTicks > UMICOM_BLOCK_MAX_TIMEOUT_TICKS)
         return UMICOM_BLOCK_INVALID_ARGUMENT;
     UmicomKernelBlockStatus status = UmicomBlockEnter(d);
     if (status != UMICOM_BLOCK_OK) return status;
+    /* A writable lease publishes cleanup debt into this object before MMIO
+     * writes. Its result must not overwrite an owner or another live DMA page. */
+    if (writable && ((UmicomAddress)outHandle % alignof(UmicomKernelBlockHandle) ||
+        !UmicomBlockIndependent(d, (UmicomAddress)outHandle, sizeof(*outHandle)) || *outHandle))
+        return UmicomBlockLeave(d, UMICOM_BLOCK_INVALID_ARGUMENT);
     if (index >= d->count) return UmicomBlockLeave(d, UMICOM_BLOCK_INVALID_ARGUMENT);
     UmicomKernelBlockSlot *s = &d->slots[index];
     if (s->claimed) return UmicomBlockLeave(d, UMICOM_BLOCK_BUSY);
     if (s->state != UMICOM_BLOCK_AVAILABLE || s->generation == 0xffffffffU)
         return UmicomBlockLeave(d, UMICOM_BLOCK_BAD_STATE);
+#if 0 /* Explicit clearing keeps the enlarged observation aggregate freestanding. */
     UmicomKernelBlockInfo info = {0};
+#endif
+    UmicomKernelBlockInfo info;
+    UmicomBlockClear((UmicomAddress)&info, sizeof(info));
     status = UmicomBlockIdentify(d, s, &info);
     if (status != UMICOM_BLOCK_OK) return UmicomBlockLeave(d, status);
     if (UmicomBlockReadRegister(d, s, UMICOM_VIRTIO_STATUS) != 0U)
@@ -261,6 +340,9 @@ UmicomKernelBlockStatus UmicomKernelBlockOpen(UmicomKernelBlockDomain *d,
     s->lastError = UMICOM_BLOCK_OK;
     s->timeoutTicks = timeoutTicks;
     s->requests = 0U;
+    s->writable = writable;
+    s->needsFlush = UMICOM_FALSE;
+    s->writeUncertain = UMICOM_FALSE;
     *outHandle = UmicomBlockToken(s, index);
     status = UmicomBlockReset(d, s);
     if (status != UMICOM_BLOCK_OK) return UmicomBlockOpenError(d, s, status, outHandle);
@@ -273,13 +355,28 @@ UmicomKernelBlockStatus UmicomKernelBlockOpen(UmicomKernelBlockDomain *d,
     const UmicomU32 highFeatures = UmicomBlockReadRegister(d, s, UMICOM_VIRTIO_DEVICE_FEATURES);
     if (!(highFeatures & UMICOM_VIRTIO_FEATURE_MODERN_HIGH))
         return UmicomBlockOpenError(d, s, UMICOM_BLOCK_REQUIRED_FEATURE, outHandle);
+    /* These original two lines remain the complete read-only feature gate.
+     * The other branch is reachable only through explicit writer admission. */
+    if (!writable) {
     if (!(lowFeatures & UMICOM_VIRTIO_READ_ONLY))
         return UmicomBlockOpenError(d, s, UMICOM_BLOCK_WRITABLE_DEVICE, outHandle);
+    } else {
+        if (lowFeatures & UMICOM_VIRTIO_READ_ONLY)
+            return UmicomBlockOpenError(d, s, UMICOM_BLOCK_READ_ONLY, outHandle);
+        if (!(lowFeatures & UMICOM_VIRTIO_FEATURE_FLUSH))
+            return UmicomBlockOpenError(d, s, UMICOM_BLOCK_REQUIRED_FEATURE, outHandle);
+    }
     /* Accept exactly what is implemented: modern semantics and a read-only
      * backend. Packed rings, indirect descriptors, EVENT_IDX, IOMMUs and live
      * resize are not silently enabled simply because a device offers them. */
     UmicomBlockWriteRegister(d, s, UMICOM_VIRTIO_DRIVER_FEATURES_SELECT, 0U);
+    /* The existing accepted mask remains exact for read-only admission. A
+     * writer accepts FLUSH instead, and makes no cache-configuration writes. */
+    if (!writable) {
     UmicomBlockWriteRegister(d, s, UMICOM_VIRTIO_DRIVER_FEATURES, UMICOM_VIRTIO_READ_ONLY);
+    } else {
+        UmicomBlockWriteRegister(d, s, UMICOM_VIRTIO_DRIVER_FEATURES, UMICOM_VIRTIO_FEATURE_FLUSH);
+    }
     UmicomBlockWriteRegister(d, s, UMICOM_VIRTIO_DRIVER_FEATURES_SELECT, 1U);
     UmicomBlockWriteRegister(d, s, UMICOM_VIRTIO_DRIVER_FEATURES, UMICOM_VIRTIO_FEATURE_MODERN_HIGH);
     UmicomBlockWriteRegister(d, s, UMICOM_VIRTIO_STATUS, 11U);
@@ -315,6 +412,16 @@ UmicomKernelBlockStatus UmicomKernelBlockOpen(UmicomKernelBlockDomain *d,
     s->state = UMICOM_BLOCK_READY;
     return UmicomBlockLeave(d, UMICOM_BLOCK_OK);
 }
+UmicomKernelBlockStatus UmicomKernelBlockOpen(UmicomKernelBlockDomain *d,
+    UmicomSize index, UmicomU64 timeoutTicks, UmicomKernelBlockHandle *outHandle)
+{
+    return UmicomBlockOpenMode(d, index, timeoutTicks, outHandle, UMICOM_FALSE);
+}
+UmicomKernelBlockStatus UmicomKernelBlockOpenWritable(UmicomKernelBlockDomain *d,
+    UmicomSize index, UmicomU64 timeoutTicks, UmicomKernelBlockHandle *outHandle)
+{
+    return UmicomBlockOpenMode(d, index, timeoutTicks, outHandle, UMICOM_TRUE);
+}
 static void UmicomBlockDescriptor(UmicomAddress queue, UmicomSize index, UmicomAddress address,
     UmicomU32 bytes, UmicomU16 flags, UmicomU16 next)
 {
@@ -336,6 +443,9 @@ static UmicomKernelBlockStatus UmicomBlockLive(UmicomKernelBlockDomain *d, Umico
 static UmicomKernelBlockStatus UmicomBlockReadError(UmicomKernelBlockDomain *d, UmicomKernelBlockSlot *s,
     UmicomKernelBlockStatus cause)
 {
+    /* The shared request path also uses this original reset/fault algorithm
+     * for WRITE and FLUSH. Publication already made their outcome conservative;
+     * reset cannot turn an unconfirmed mutation into a successful one. */
     s->lastError = cause;
     s->state = UMICOM_BLOCK_FAULTED;
     /* Stop DMA promptly but retain the lease and pages for explicit Close.
@@ -343,19 +453,45 @@ static UmicomKernelBlockStatus UmicomBlockReadError(UmicomKernelBlockDomain *d, 
     const UmicomKernelBlockStatus reset = UmicomBlockReset(d, s);
     return UmicomBlockLeave(d, reset == UMICOM_BLOCK_OK ? cause : reset);
 }
+/* Retain the original public signature before extending its one request
+ * algorithm. The Read wrapper supplies mutable output; Write supplies borrowed
+ * const input in the same staging position and never executes the copy-out. */
+#if 0
 UmicomKernelBlockStatus UmicomKernelBlockRead(UmicomKernelBlockDomain *d,
     UmicomKernelBlockHandle handle, UmicomU64 firstSector, UmicomSize sectors, void *output, UmicomSize capacity)
+#endif
+static UmicomKernelBlockStatus UmicomBlockRequest(UmicomKernelBlockDomain *d,
+    UmicomKernelBlockHandle handle, UmicomU64 firstSector, UmicomSize sectors, const void *output, UmicomSize capacity,
+    UmicomU32 requestType, UmicomKernelBlockMutationOutcome *outOutcome)
 {
+    if (requestType == UMICOM_VIRTIO_REQUEST_READ) {
     if (!output || !sectors || sectors > UMICOM_BLOCK_MAX_SECTORS) return UMICOM_BLOCK_INVALID_ARGUMENT;
+    }
     const UmicomSize bytes = sectors * UMICOM_BLOCK_SECTOR_BYTES;
+    if (requestType == UMICOM_VIRTIO_REQUEST_READ) {
     if (capacity < bytes || (UmicomAddress)output > ~(UmicomAddress)0U - bytes) return UMICOM_BLOCK_RANGE;
+    }
     UmicomKernelBlockStatus status = UmicomBlockEnter(d);
     if (status != UMICOM_BLOCK_OK) return status;
+    if (requestType != UMICOM_VIRTIO_REQUEST_READ) {
+        status = UmicomBlockMutationPrepare(d, output, capacity, outOutcome);
+        if (status != UMICOM_BLOCK_OK) return UmicomBlockLeave(d, status);
+        if (requestType == UMICOM_VIRTIO_REQUEST_WRITE) {
+            if (!output || !sectors || sectors > UMICOM_BLOCK_MAX_SECTORS)
+                return UmicomBlockLeave(d, UMICOM_BLOCK_INVALID_ARGUMENT);
+            if (capacity < bytes) return UmicomBlockLeave(d, UMICOM_BLOCK_RANGE);
+        }
+    }
     UmicomKernelBlockSlot *s = UmicomBlockFind(d, handle);
     if (!s) return UmicomBlockLeave(d, UMICOM_BLOCK_INVALID_HANDLE);
     if (s->state != UMICOM_BLOCK_READY) return UmicomBlockLeave(d, UMICOM_BLOCK_BAD_STATE);
+    if (requestType != UMICOM_VIRTIO_REQUEST_READ && !s->writable)
+        return UmicomBlockLeave(d, UMICOM_BLOCK_READ_ONLY);
+    const UmicomBoolean priorWriteUncertain = s->writeUncertain;
+    if (requestType != UMICOM_VIRTIO_REQUEST_FLUSH) {
     if (firstSector >= s->sectors || sectors > s->sectors - firstSector)
         return UmicomBlockLeave(d, UMICOM_BLOCK_RANGE);
+    }
     if (UmicomBlockOverlap((UmicomAddress)output, bytes, (UmicomAddress)d, sizeof(*d)) ||
         UmicomBlockOverlap((UmicomAddress)output, bytes, s->queueFrame, UMICOM_KERNEL_PAGE_SIZE) ||
         UmicomBlockOverlap((UmicomAddress)output, bytes, s->dataFrame, UMICOM_KERNEL_PAGE_SIZE))
@@ -378,24 +514,68 @@ UmicomKernelBlockStatus UmicomKernelBlockRead(UmicomKernelBlockDomain *d,
     /* Only one chain is outstanding. Clearing the entire bounce page prevents
      * an incomplete device response from disclosing data from the last request. */
     UmicomBlockClear(s->dataFrame, UMICOM_KERNEL_PAGE_SIZE);
+    if (requestType == UMICOM_VIRTIO_REQUEST_WRITE) {
+        /* Snapshot the complete bounded source before publishing any queue
+         * entry. Caller memory remains exclusively a CPU staging source. */
+        UmicomBlockCopy(s->dataFrame, (UmicomAddress)output, bytes);
+    }
     const UmicomAddress header = s->queueFrame + UMICOM_VIRTIO_HEADER_OFFSET;
+    if (requestType == UMICOM_VIRTIO_REQUEST_READ) {
     *(volatile UmicomU32 *)header = UMICOM_VIRTIO_REQUEST_READ;
+    } else {
+        *(volatile UmicomU32 *)header = requestType;
+    }
     *(volatile UmicomU32 *)(header + 4U) = 0U;
     *(volatile UmicomU64 *)(header + 8U) = firstSector;
     *(volatile UmicomU8 *)(s->queueFrame + UMICOM_VIRTIO_RESULT_OFFSET) = 0xffU;
     UmicomBlockDescriptor(s->queueFrame, 0U, header, 16U, UMICOM_VIRTIO_DESCRIPTOR_NEXT, 1U);
+    if (requestType == UMICOM_VIRTIO_REQUEST_FLUSH) {
+        /* FLUSH has sector zero and no data descriptor. Only the one-byte
+         * status is writable by the device, immediately after the header. */
+        UmicomBlockDescriptor(s->queueFrame, 1U, s->queueFrame + UMICOM_VIRTIO_RESULT_OFFSET,
+            1U, UMICOM_VIRTIO_DESCRIPTOR_WRITE, 0U);
+    } else {
+        if (requestType == UMICOM_VIRTIO_REQUEST_READ) {
     UmicomBlockDescriptor(s->queueFrame, 1U, s->dataFrame, (UmicomU32)bytes,
         UMICOM_VIRTIO_DESCRIPTOR_NEXT | UMICOM_VIRTIO_DESCRIPTOR_WRITE, 2U);
+        } else {
+            /* WRITE's data is device-readable. Giving it DESC_WRITE would
+             * reverse the transfer direction and invalidate used-length checks. */
+            UmicomBlockDescriptor(s->queueFrame, 1U, s->dataFrame, (UmicomU32)bytes,
+                UMICOM_VIRTIO_DESCRIPTOR_NEXT, 2U);
+        }
     UmicomBlockDescriptor(s->queueFrame, 2U, s->queueFrame + UMICOM_VIRTIO_RESULT_OFFSET,
         1U, UMICOM_VIRTIO_DESCRIPTOR_WRITE, 0U);
+    }
     const UmicomAddress available = s->queueFrame + UMICOM_VIRTIO_AVAIL_OFFSET;
     *(volatile UmicomU16 *)(available + 4U + 2U * (s->availableIndex % UMICOM_BLOCK_QUEUE_SIZE)) = 0U;
+    UmicomU64 mutationStart = 0U;
+    UmicomU64 lastMutationClock = 0U;
+    if (requestType != UMICOM_VIRTIO_REQUEST_READ) {
+        /* Include publication and notification in a mutation's deadline. The
+         * original READ starts after notify below; keep its established timing.
+         * A device may complete immediately, so the final check is still needed. */
+        mutationStart = d->operations.clock(d->operations.context);
+        lastMutationClock = mutationStart;
+        /* A device may poll the available index without waiting for a notify.
+         * Establish the conservative result before that ownership transfer,
+         * and before the barrier which orders it ahead of index publication. */
+        *outOutcome = UMICOM_BLOCK_SUBMITTED_UNCONFIRMED;
+        if (requestType == UMICOM_VIRTIO_REQUEST_WRITE) {
+            s->needsFlush = UMICOM_TRUE;
+            s->writeUncertain = UMICOM_TRUE;
+        }
+    }
     UmicomBlockBarrier(d); /* Descriptors and available entry precede the index. */
     s->availableIndex = (UmicomU16)(s->availableIndex + 1U);
     *(volatile UmicomU16 *)(available + 2U) = s->availableIndex;
     UmicomBlockBarrier(d); /* The published index precedes the doorbell. */
     UmicomBlockWriteRegister(d, s, UMICOM_VIRTIO_QUEUE_NOTIFY, 0U);
+#if 0 /* READ retains this timing; mutations include their publication above. */
     const UmicomU64 start = d->operations.clock(d->operations.context);
+#endif
+    const UmicomU64 start = requestType == UMICOM_VIRTIO_REQUEST_READ ?
+        d->operations.clock(d->operations.context) : mutationStart;
     UmicomBoolean completed = UMICOM_FALSE;
     for (UmicomSize poll = 0U; poll < UMICOM_BLOCK_POLL_LIMIT; ++poll) {
         const UmicomU16 observed = *usedIndex;
@@ -409,6 +589,10 @@ UmicomKernelBlockStatus UmicomKernelBlockRead(UmicomKernelBlockDomain *d,
         if (status != UMICOM_BLOCK_OK) return UmicomBlockReadError(d, s, status);
         const UmicomU64 now = d->operations.clock(d->operations.context);
         if (now < start) return UmicomBlockReadError(d, s, UMICOM_BLOCK_CLOCK_ERROR);
+        if (requestType != UMICOM_VIRTIO_REQUEST_READ) {
+            if (now < lastMutationClock) return UmicomBlockReadError(d, s, UMICOM_BLOCK_CLOCK_ERROR);
+            lastMutationClock = now;
+        }
         if (now - start >= s->timeoutTicks) return UmicomBlockReadError(d, s, UMICOM_BLOCK_TIMEOUT);
     }
     if (!completed) return UmicomBlockReadError(d, s, UMICOM_BLOCK_TIMEOUT);
@@ -418,29 +602,72 @@ UmicomKernelBlockStatus UmicomKernelBlockRead(UmicomKernelBlockDomain *d,
     const UmicomU32 id = *(volatile UmicomU32 *)used;
     const UmicomU32 length = *(volatile UmicomU32 *)(used + 4U);
     const UmicomU8 result = *(volatile UmicomU8 *)(s->queueFrame + UMICOM_VIRTIO_RESULT_OFFSET);
+    /* A WRITE or FLUSH completion can report only its writable status byte.
+     * Preserve the original READ bound and use that same validation structure. */
+    const UmicomSize writableBytes = requestType == UMICOM_VIRTIO_REQUEST_READ ? bytes + 1U : 1U;
+#if 0
     if (id != 0U || !length || length > bytes + 1U || result > UMICOM_VIRTIO_RESULT_UNSUPPORTED)
+#endif
+    if (id != 0U || !length || length > writableBytes || result > UMICOM_VIRTIO_RESULT_UNSUPPORTED)
         return UmicomBlockReadError(d, s, UMICOM_BLOCK_MALFORMED_COMPLETION);
     status = UmicomBlockLive(d, s);
     if (status != UMICOM_BLOCK_OK) return UmicomBlockReadError(d, s, status);
     /* A valid error completion returns no caller data, but the consumed chain
      * can be reused. Success requires the full payload plus status to be used. */
+#if 0 /* The accepted writable length depends on the request's DMA direction. */
     if (result == UMICOM_VIRTIO_RESULT_OK && length != bytes + 1U)
+#endif
+    if (result == UMICOM_VIRTIO_RESULT_OK && length != writableBytes)
         return UmicomBlockReadError(d, s, UMICOM_BLOCK_MALFORMED_COMPLETION);
     s->usedIndex = (UmicomU16)(s->usedIndex + 1U);
     if (s->requests != ~(UmicomU64)0U) ++s->requests;
     const UmicomU32 pending = UmicomBlockReadRegister(d, s, UMICOM_VIRTIO_INTERRUPT_STATUS);
     if (pending & ~1U) return UmicomBlockReadError(d, s, UMICOM_BLOCK_CONFIG_CHANGED);
     if (pending & 1U) UmicomBlockWriteRegister(d, s, UMICOM_VIRTIO_INTERRUPT_ACK, 1U);
+    if (requestType != UMICOM_VIRTIO_REQUEST_READ) {
+        /* A visible completion can bypass the poll loop's clock observations.
+         * Check both successful and error completions before publishing their
+         * result or clearing dirty state. A late or regressed observation still
+         * leaves the mutation unconfirmed and uses the ordinary retained reset. */
+        const UmicomU64 now = d->operations.clock(d->operations.context);
+        if (now < lastMutationClock) return UmicomBlockReadError(d, s, UMICOM_BLOCK_CLOCK_ERROR);
+        if (now - start >= s->timeoutTicks) return UmicomBlockReadError(d, s, UMICOM_BLOCK_TIMEOUT);
+    }
     status = result == UMICOM_VIRTIO_RESULT_OK ? UMICOM_BLOCK_OK :
         (result == UMICOM_VIRTIO_RESULT_IO_ERROR ? UMICOM_BLOCK_IO_ERROR : UMICOM_BLOCK_UNSUPPORTED_REQUEST);
     if (status == UMICOM_BLOCK_OK) {
+        if (requestType == UMICOM_VIRTIO_REQUEST_READ) {
         UmicomU8 *const destination = (UmicomU8 *)output;
         const volatile UmicomU8 *const source = (const volatile UmicomU8 *)s->dataFrame;
         for (UmicomSize i = 0U; i < bytes; ++i) destination[i] = source[i];
+        } else {
+            /* Only a fully checked success discharges this call's uncertainty.
+             * Earlier uncertain writes remain uncertain even after a later
+             * successful write or flush; cleanup never edits these diagnostics. */
+            if (requestType == UMICOM_VIRTIO_REQUEST_WRITE) s->writeUncertain = priorWriteUncertain;
+            else s->needsFlush = UMICOM_FALSE;
+            *outOutcome = UMICOM_BLOCK_COMPLETED;
+        }
     }
     UmicomBlockClear(s->dataFrame, UMICOM_KERNEL_PAGE_SIZE);
     s->lastError = status;
     return UmicomBlockLeave(d, status);
+}
+UmicomKernelBlockStatus UmicomKernelBlockRead(UmicomKernelBlockDomain *d,
+    UmicomKernelBlockHandle handle, UmicomU64 firstSector, UmicomSize sectors, void *output, UmicomSize capacity)
+{
+    return UmicomBlockRequest(d, handle, firstSector, sectors, output, capacity, UMICOM_VIRTIO_REQUEST_READ, 0);
+}
+UmicomKernelBlockStatus UmicomKernelBlockWrite(UmicomKernelBlockDomain *d,
+    UmicomKernelBlockHandle handle, UmicomU64 firstSector, UmicomSize sectors,
+    const void *input, UmicomSize bytes, UmicomKernelBlockMutationOutcome *outOutcome)
+{
+    return UmicomBlockRequest(d, handle, firstSector, sectors, input, bytes, UMICOM_VIRTIO_REQUEST_WRITE, outOutcome);
+}
+UmicomKernelBlockStatus UmicomKernelBlockFlush(UmicomKernelBlockDomain *d,
+    UmicomKernelBlockHandle handle, UmicomKernelBlockMutationOutcome *outOutcome)
+{
+    return UmicomBlockRequest(d, handle, 0U, 0U, 0, 0U, UMICOM_VIRTIO_REQUEST_FLUSH, outOutcome);
 }
 UmicomKernelBlockStatus UmicomKernelBlockClose(UmicomKernelBlockDomain *d, UmicomKernelBlockHandle handle)
 {
@@ -459,7 +686,10 @@ const char *UmicomKernelBlockStatusName(UmicomKernelBlockStatus status)
         "features-refused", "queue-unavailable", "configuration-unstable", "configuration-changed", "out-of-memory",
         "range", "timeout", "clock-error", "device-error", "io-error", "unsupported-request", "malformed-completion",
         "invalid-handle", "reset-pending-memory-retained", "frame-release-failed", "corrupt-owner", "no-catalogue",
+#if 0 /* Retain the original final spelling while appending the new status. */
         "unqualified-platform"
+#endif
+        "unqualified-platform", "read-only"
     };
     return (UmicomSize)status < sizeof(names) / sizeof(names[0]) ? names[status] : "unknown-block-status";
 }

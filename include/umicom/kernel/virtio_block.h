@@ -16,6 +16,10 @@
  *
  * Author: Sammy Hegab, Umicom Foundation. Licence: MIT.
  *---------------------------------------------------------------------------*/
+/* The original read-only admission contract remains available unchanged.
+ * OpenWritable is a separate, explicit authority to issue bounded writes and
+ * flushes. This is a trusted Kernel API; no filesystem mount gains write rights
+ * merely because the driver now implements the additional request types. */
 #ifndef UMICOM_KERNEL_VIRTIO_BLOCK_H
 #define UMICOM_KERNEL_VIRTIO_BLOCK_H
 #include "umicom/kernel/types.h"
@@ -58,7 +62,13 @@ typedef enum UmicomKernelBlockStatus {
     UMICOM_BLOCK_RELEASE_FAILED,
     UMICOM_BLOCK_CORRUPT_OWNER,
     UMICOM_BLOCK_NO_CATALOGUE,
+    /* Preserve the original final enum spelling while appending its successor;
+     * every previously published numeric status keeps the same value. */
+#if 0
     UMICOM_BLOCK_UNQUALIFIED_PLATFORM
+#endif
+    UMICOM_BLOCK_UNQUALIFIED_PLATFORM,
+    UMICOM_BLOCK_READ_ONLY
 } UmicomKernelBlockStatus;
 
 typedef enum UmicomKernelBlockState {
@@ -69,6 +79,17 @@ typedef enum UmicomKernelBlockState {
     UMICOM_BLOCK_CLOSING,
     UMICOM_BLOCK_RETIRED
 } UmicomKernelBlockState;
+
+/* Submission and success are different observations for a mutation. Once the
+ * available index exposes a WRITE, even an error can follow a partial change.
+ * COMPLETED means a fully validated successful device completion. For WRITE
+ * it does not mean durable storage: that also requires a later successful
+ * FLUSH and a backend which actually provides persistent storage. */
+typedef enum UmicomKernelBlockMutationOutcome {
+    UMICOM_BLOCK_NOT_SUBMITTED,
+    UMICOM_BLOCK_SUBMITTED_UNCONFIRMED,
+    UMICOM_BLOCK_COMPLETED
+} UmicomKernelBlockMutationOutcome;
 
 typedef UmicomU64 UmicomKernelBlockHandle;
 typedef struct UmicomKernelBlockTransport {
@@ -106,6 +127,11 @@ typedef struct UmicomKernelBlockSlot {
     UmicomBoolean claimed;
     UmicomBoolean exposed; /* Device may still access queues: reset must precede free. */
     UmicomBoolean stopped; /* Set only after observing Status == 0 after reset. */
+    /* Appended Kernel-owned metadata requires all users to rebuild together;
+     * the original member order and handle/status numeric contracts remain. */
+    UmicomBoolean writable; /* Fixed by admission, never upgraded on a live lease. */
+    UmicomBoolean needsFlush; /* At least one WRITE was exposed since the last successful FLUSH. */
+    UmicomBoolean writeUncertain; /* A submitted WRITE lacked a validated success; sticky for this lease. */
 } UmicomKernelBlockSlot;
 
 typedef struct UmicomKernelBlockDomain {
@@ -128,6 +154,9 @@ typedef struct UmicomKernelBlockInfo {
     UmicomU64 requests;
     UmicomSize heldFrames;
     UmicomBoolean deviceMayAccessMemory;
+    UmicomBoolean writable;
+    UmicomBoolean needsFlush;
+    UmicomBoolean writeUncertain;
 } UmicomKernelBlockInfo;
 
 /* Initialise from a trusted, non-overlapping transport list and zero-filled
@@ -147,15 +176,52 @@ UmicomKernelBlockStatus UmicomKernelBlockProbe(UmicomKernelBlockDomain *domain,
  * Device status already nonzero is refused without resetting another driver. */
 UmicomKernelBlockStatus UmicomKernelBlockOpen(UmicomKernelBlockDomain *domain,
     UmicomSize index, UmicomU64 timeoutTicks, UmicomKernelBlockHandle *outHandle);
+/* Writable admission requires a writable modern backend offering FLUSH. It
+ * negotiates only VERSION_1 and FLUSH, with the same timeout, ownership and
+ * retryable cleanup contract as Open. It never upgrades another live lease.
+ * A writable lease may also call Read. Existing Open still refuses writable
+ * hardware, and WRITE/FLUSH on a read-only lease fail without a submission. */
+UmicomKernelBlockStatus UmicomKernelBlockOpenWritable(UmicomKernelBlockDomain *domain,
+    UmicomSize index, UmicomU64 timeoutTicks, UmicomKernelBlockHandle *outHandle);
+/* The following retained comment describes the original read-only interface;
+ * the additional operations below require the separate writable admission. */
 /* Read one through eight complete 512-byte sectors. On every non-OK result,
  * the caller's output is unchanged. There is no WRITE/FLUSH/DISCARD command.
  * The trusted output buffer must remain valid throughout the synchronous call. */
 UmicomKernelBlockStatus UmicomKernelBlockRead(UmicomKernelBlockDomain *domain,
     UmicomKernelBlockHandle handle, UmicomU64 firstSector, UmicomSize sectors,
     void *output, UmicomSize capacity);
+/* Write one through eight complete sectors from stable trusted input storage.
+ * bytes is its accessible extent and must cover sectors * 512. The entire
+ * declared input span and the outcome object must be disjoint from the owner,
+ * every retained DMA frame, and each other. The driver stages the data into
+ * its own bounce frame and never submits the caller's storage to the device.
+ *
+ * outOutcome is mandatory, aligned and independent. Invalid output ownership
+ * leaves it untouched. Once the call is admitted with well-owned storage it is
+ * NOT_SUBMITTED until the available index is about to expose the request, then
+ * SUBMITTED_UNCONFIRMED until every completion check succeeds. No failed write
+ * is retried. Failure after submission does not promise unchanged media.
+ * Mutation timing starts before publication, and a final monotonic/deadline
+ * observation is required even when the device has already completed the call.
+ * A valid device error completion leaves the queue usable for an explicit
+ * FLUSH; transport/protocol failures fault and reset it using ordinary cleanup.
+ * Keep the returned outcome when closing: cleanup cannot resolve uncertainty. */
+UmicomKernelBlockStatus UmicomKernelBlockWrite(UmicomKernelBlockDomain *domain,
+    UmicomKernelBlockHandle handle, UmicomU64 firstSector, UmicomSize sectors,
+    const void *input, UmicomSize bytes, UmicomKernelBlockMutationOutcome *outOutcome);
+/* Flush has no data payload and orders after the prior synchronous request.
+ * A successful completion clears needsFlush, but never turns an uncertain
+ * WRITE into a known successful WRITE. The same mandatory output-ownership
+ * and submission-outcome rules apply, including when there is nothing dirty. */
+UmicomKernelBlockStatus UmicomKernelBlockFlush(UmicomKernelBlockDomain *domain,
+    UmicomKernelBlockHandle handle, UmicomKernelBlockMutationOutcome *outOutcome);
 /* Close resets before scrubbing/releasing DMA pages. Failed reset retains the
  * lease and every potentially exposed page; failed frame release is retryable.
  * Successfully closed handles cannot refer to a subsequent owner of the slot. */
+/* Close never submits FLUSH, including for a dirty or uncertain writable lease.
+ * Its success proves resource release, not durability. Diagnostic writer flags
+ * remain observable until the next admission; reset is not a persistence ack. */
 UmicomKernelBlockStatus UmicomKernelBlockClose(UmicomKernelBlockDomain *domain,
     UmicomKernelBlockHandle handle);
 const char *UmicomKernelBlockStatusName(UmicomKernelBlockStatus status);

@@ -39,7 +39,14 @@ void UmicomKernelBlockReport(void *context, UmicomKernelBlockOutput output)
     UmicomBlockText(context, output, "\r\n");
     if (status != UMICOM_BLOCK_OK) return;
     for (UmicomSize i = 0U; i < domain->count; ++i) {
+        /* The enlarged diagnostic record can make aggregate zeroing call a
+         * hosted memset. Retain that initializer and clear explicitly instead. */
+#if 0
         UmicomKernelBlockInfo info = {0};
+#endif
+        UmicomKernelBlockInfo info;
+        volatile UmicomU8 *const infoBytes = (volatile UmicomU8 *)&info;
+        for (UmicomSize byte = 0U; byte < sizeof(info); ++byte) infoBytes[byte] = 0U;
         const UmicomKernelBlockStatus probed = UmicomKernelBlockProbe(domain, i, &info);
         UmicomBlockText(context, output, "block.slot="); UmicomBlockNumber(context, output, i, UMICOM_FALSE);
         UmicomBlockText(context, output, " base="); UmicomBlockNumber(context, output, info.base, UMICOM_TRUE);
