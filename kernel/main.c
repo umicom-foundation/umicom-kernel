@@ -39,6 +39,9 @@
  *   MIT
  *---------------------------------------------------------------------------*/
 
+/* Qualify and test read-only transport ownership after hardware discovery. */
+#include "umicom/kernel/virtio_block.h"
+
 /* Read firmware descriptions without probing or binding devices. */
 #include "umicom/kernel/hardware_catalogue.h"
 
@@ -1583,6 +1586,10 @@ void UmicomKernelMain(UmicomU64 hartId, UmicomAddress deviceTreeAddress)
 
     /* Compare the copied inventory with this exact QEMU qualification profile. */
     UmicomKernelHardwareValidateExecution();
+
+    /* Absence is a distinct result; only the attached synthetic disk test may
+     * publish actual read-path acceptance. No disk-write command is issued. */
+    UmicomKernelBlockValidateExecution();
 
 #ifdef UMICOM_KERNEL_INTERACTIVE_CONSOLE
     /* Only the explicitly named console image stays at a prompt. It returns

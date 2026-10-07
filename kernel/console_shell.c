@@ -19,6 +19,10 @@
  * AUTHOR AND ORGANISATION: Sammy Hegab, Umicom Foundation
  * LICENCE: MIT
  *---------------------------------------------------------------------------*/
+#ifdef UMICOM_KERNEL_READ_ONLY_BLOCK
+/* Disk inspection is separate from the RAM filesystem and uses no raw addresses. */
+#include "umicom/kernel/virtio_block.h"
+#endif
 #ifdef UMICOM_KERNEL_SERVICE_CONSOLE
 /* Optional live-service domain; the original boot-job report is unchanged. */
 #include "umicom/kernel/service_console.h"
@@ -456,8 +460,31 @@ UmicomKernelShellStatus UmicomKernelConsoleShellExecute(UmicomKernelConsoleShell
         return UMICOM_SHELL_OK;
     }
 #endif
+#ifdef UMICOM_KERNEL_READ_ONLY_BLOCK
+    if (UmicomShellEqual(name, "disks") && command.count == 1U) {
+        UmicomKernelBlockReport(shell->outputContext, shell->output);
+        shell->busy = UMICOM_FALSE;
+        return UMICOM_SHELL_OK;
+    }
+    if ((UmicomShellEqual(name, "readsector") && command.count == 3U) ||
+        (UmicomShellEqual(name, "blockclose") && command.count == 1U)) {
+        UmicomU64 slot = 0U, sector = 0U;
+        UmicomKernelBlockStatus block = UMICOM_BLOCK_INVALID_ARGUMENT;
+        if (command.count == 1U) block = UmicomKernelBlockRetryClose();
+        else if (UmicomKernelShellUnsigned(path, &slot) && UmicomKernelShellUnsigned(text, &sector))
+            block = UmicomKernelBlockInspectSector(slot, sector, shell->outputContext, shell->output);
+        UmicomShellText(shell, "block.status=");
+        UmicomShellText(shell, UmicomKernelBlockStatusName(block));
+        UmicomShellText(shell, "\r\n");
+        shell->busy = UMICOM_FALSE;
+        return block == UMICOM_BLOCK_OK ? UMICOM_SHELL_OK : UMICOM_SHELL_IO_ERROR;
+    }
+#endif
     UmicomBoolean poweroff = UMICOM_FALSE;
     if (UmicomShellEqual(name, "help") && command.count == 1U) {
+#ifdef UMICOM_KERNEL_READ_ONLY_BLOCK
+        UmicomShellText(shell, "disks | readsector SLOT LBA | blockclose (read-only block inspection)\r\n");
+#endif
 #ifdef UMICOM_KERNEL_HARDWARE_CATALOGUE
         UmicomShellText(shell, "hardware (copied firmware inventory; no device probing)\r\n");
 #endif
@@ -689,6 +716,13 @@ UmicomKernelShellStatus UmicomKernelConsoleShellClose(UmicomKernelConsoleShell *
     if (shell->state == UMICOM_VFS_POISONED || !UmicomKernelObjectCacheAccessAllowed()) return UMICOM_SHELL_UNSAFE;
     shell->busy = UMICOM_TRUE;
     shell->state = UMICOM_VFS_CLOSING;
+#ifdef UMICOM_KERNEL_READ_ONLY_BLOCK
+    /* Retry device reset before losing the console's retained DMA ownership. */
+    if (UmicomKernelBlockRetryClose() != UMICOM_BLOCK_OK) {
+        shell->busy = UMICOM_FALSE;
+        return UMICOM_SHELL_CLEANUP_FAILED;
+    }
+#endif
     if (shell->supervisor.initialised) {
         UmicomKernelSupervisionStatus status = UmicomKernelProcessSupervisorBeginShutdown(&shell->supervisor);
         if (status != UMICOM_SUPERVISION_OK) { shell->busy = UMICOM_FALSE; return UmicomShellProcessError(shell, status); }

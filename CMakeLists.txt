@@ -524,3 +524,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/ManagedServices.cmake")
 # Capture a checked hardware inventory before introducing new device drivers.
 # Fixed-profile boot ownership and all existing implementations remain intact.
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/HardwareDiscovery.cmake")
+
+# Own qualified device transports and read synthetic disk sectors without writes.
+# The RAM filesystem and recovery path remain independent of block-device access.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/ReadOnlyBlock.cmake")
