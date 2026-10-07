@@ -1015,6 +1015,16 @@ static UmicomKernelFat16UpdateStatus UmicomFileCommitPlan(UmicomKernelFat16FileC
     }
     return UmicomUpdateInspectorClose(base, status);
 }
+/*-----------------------------------------------------------------------------
+ * SUPERSEDED IMPLEMENTATION — RETAINED FOR ENGINEERING REVIEW
+ *
+ * The original fixed-range Stage is retained verbatim below. Its active entry
+ * now shares one protocol with append, defined after the common Close path.
+ * Their read-only planners differ; barrier ordering, result publication and
+ * failure ownership have one active implementation. No sentinel offset changes
+ * the original Stage contract or turns an invalid overwrite into an append.
+ *---------------------------------------------------------------------------*/
+#if 0
 UmicomKernelFat16UpdateStatus UmicomKernelFat16FileCommitStage(
     UmicomKernelFat16FileCommitter *owner, const char *path, UmicomU64 offset,
     const void *input, UmicomSize bytes, const UmicomKernelFat16FileTime *time,
@@ -1098,6 +1108,7 @@ UmicomKernelFat16UpdateStatus UmicomKernelFat16FileCommitStage(
     }
     return UmicomFileCommitPublish(owner, &result, outResult, status);
 }
+#endif
 UmicomKernelFat16UpdateStatus UmicomKernelFat16FileCommitFinish(
     UmicomKernelFat16FileCommitter *owner, UmicomKernelFat16FileCommitResult *outResult)
 {
@@ -1173,4 +1184,161 @@ UmicomKernelFat16UpdateStatus UmicomKernelFat16FileCommitClose(UmicomKernelFat16
     }
     owner->busy = UMICOM_FALSE;
     return status;
+}
+
+/*-----------------------------------------------------------------------------
+ * Existing-allocation append uses the original file-commit owner and Finish.
+ * Planning also changes the selected size word; all data, directory and clean
+ * publication barriers below are shared with the fixed-range overwrite path.
+ *---------------------------------------------------------------------------*/
+#include "umicom/kernel/fat16_file_append.h"
+static UmicomKernelFat16UpdateStatus UmicomFileCommitAppendPlan(UmicomKernelFat16FileCommitter *owner,
+    const char *path, const void *input, UmicomSize bytes,
+    const UmicomKernelFat16FileTime *time, UmicomKernelFat16FileCommitResult *result)
+{
+    UmicomKernelFat16Committer *const commit = &owner->commit;
+    UmicomKernelFat16Updater *const base = &commit->updater;
+    const UmicomKernelDiskReader reader = {base->sectors, UmicomUpdateReadSector, base};
+    base->lastDiskStatus = UmicomKernelFat16Open(&base->volume, &reader, base->partition);
+    UmicomKernelFat16UpdateStatus status = UmicomUpdateFromDisk(base, base->lastDiskStatus);
+    if (status == UMICOM_FAT16_UPDATE_OK) {
+        base->lastDiskStatus = UmicomKernelFat16PlanFileAppend(&base->volume, path,
+            input, bytes, time, &base->workspace, &owner->fileWorkspace, &base->plan, &owner->filePlan);
+        status = UmicomUpdateFromDisk(base, base->lastDiskStatus);
+    }
+    if (status == UMICOM_FAT16_UPDATE_OK) {
+        /* The append planner derives EOF from the original checked entry.
+         * Only a successful plan makes this an observed file-size boundary. */
+        result->commit.offset = base->plan.offset;
+        result->directorySector = owner->filePlan.directorySector;
+        result->entryOffset = owner->filePlan.entryOffset;
+        UmicomUpdateCopy(&result->requestedTime, &owner->filePlan.requestedTime, sizeof(result->requestedTime));
+        UmicomUpdateCopy(&result->encodedTime, &owner->filePlan.encodedTime, sizeof(result->encodedTime));
+        result->originalAttributes = owner->filePlan.original[owner->filePlan.entryOffset + 11U];
+        result->updatedAttributes = owner->filePlan.data[owner->filePlan.entryOffset + 11U];
+        result->directoryPlanned = UMICOM_TRUE;
+        commit->headerSectors[0] = base->volume.info.firstSector + base->volume.fatStart;
+        commit->headerSectors[1] = commit->headerSectors[0] + base->volume.info.sectorsPerFat;
+        status = UmicomCommitRead(commit, commit->headerSectors[0], commit->cleanHeader);
+    }
+    if (status == UMICOM_FAT16_UPDATE_OK)
+        status = UmicomCommitVerify(commit, commit->headerSectors[1], commit->cleanHeader);
+    if (status == UMICOM_FAT16_UPDATE_OK) {
+        if (commit->cleanHeader[2] != 0xffU || commit->cleanHeader[3] != 0xffU) {
+            base->lastDiskStatus = UMICOM_DISK_DIRTY;
+            status = UMICOM_FAT16_UPDATE_FILESYSTEM_ERROR;
+        } else {
+            UmicomUpdateCopy(commit->dirtyHeader, commit->cleanHeader, sizeof(commit->dirtyHeader));
+            commit->dirtyHeader[3] &= (UmicomU8)~(UMICOM_FAT16_CLEAN_MASK >> 8U);
+        }
+    }
+    return UmicomUpdateInspectorClose(base, status);
+}
+
+static UmicomKernelFat16UpdateStatus UmicomFileCommitStageOperation(
+    UmicomKernelFat16FileCommitter *owner, const char *path, UmicomU64 offset,
+    const void *input, UmicomSize bytes, const UmicomKernelFat16FileTime *time,
+    UmicomKernelFat16FileCommitResult *outResult, UmicomBoolean append)
+{
+    UmicomKernelFat16UpdateStatus status = UmicomFileCommitLive(owner, UMICOM_FAT16_COMMIT_READY);
+    if (status != UMICOM_FAT16_UPDATE_OK) return status;
+    status = UmicomFileCommitBuffers(owner, path, input, bytes, time, outResult);
+    if (status != UMICOM_FAT16_UPDATE_OK) return status;
+    status = UmicomFileCommitEnter(owner);
+    if (status != UMICOM_FAT16_UPDATE_OK) return status;
+    UmicomKernelFat16FileCommitResult result;
+    UmicomUpdateClear(&result, sizeof(result));
+    result.commit.phase = UMICOM_FAT16_COMMIT_PREFLIGHT;
+    result.commit.offset = offset;
+    result.commit.requestedBytes = bytes;
+    UmicomKernelFat16Committer *const commit = &owner->commit;
+    UmicomKernelFat16Updater *const base = &commit->updater;
+    UmicomUpdateBeginIo(base);
+    if (append)
+        status = UmicomFileCommitAppendPlan(owner, path, input, bytes, time, &result);
+    else
+        status = UmicomFileCommitPlan(owner, path, offset, input, bytes, time, &result);
+    /* Reserve all predictable post-mutation reads while the volume is clean:
+     * two dirty FAT headers, each data sector and the directory sector. */
+    if (status == UMICOM_FAT16_UPDATE_OK &&
+        base->operationReads > UMICOM_FAT16_IO_LIMIT - (3U + base->plan.count)) {
+        base->lastDiskStatus = UMICOM_DISK_LIMIT;
+        status = UMICOM_FAT16_UPDATE_INSPECTION_LIMIT;
+    }
+    if (status == UMICOM_FAT16_UPDATE_OK)
+        status = UmicomCommitWriteSector(commit, &result.commit, UMICOM_FAT16_COMMIT_DIRTY_MIRROR,
+            commit->headerSectors[1], commit->dirtyHeader, 0);
+    if (status == UMICOM_FAT16_UPDATE_OK)
+        status = UmicomCommitFlush(commit, &result.commit, UMICOM_FAT16_COMMIT_DIRTY_MIRROR_FLUSH);
+    if (status == UMICOM_FAT16_UPDATE_OK)
+        status = UmicomCommitWriteSector(commit, &result.commit, UMICOM_FAT16_COMMIT_DIRTY_PRIMARY,
+            commit->headerSectors[0], commit->dirtyHeader, 0);
+    if (status == UMICOM_FAT16_UPDATE_OK)
+        status = UmicomCommitFlush(commit, &result.commit, UMICOM_FAT16_COMMIT_DIRTY_PRIMARY_FLUSH);
+    if (status == UMICOM_FAT16_UPDATE_OK) {
+        result.commit.phase = UMICOM_FAT16_COMMIT_DIRTY_VERIFY;
+        status = UmicomCommitVerifyHeaders(commit, commit->dirtyHeader);
+        if (status == UMICOM_FAT16_UPDATE_OK) result.commit.dirtyVerified = UMICOM_TRUE;
+    }
+    for (UmicomSize i = 0U; status == UMICOM_FAT16_UPDATE_OK && i < base->plan.count; ++i) {
+        const UmicomKernelFat16UpdateSector *const sector = &base->plan.sectors[i];
+        status = UmicomCommitWriteSector(commit, &result.commit, UMICOM_FAT16_COMMIT_DATA_WRITE,
+            sector->sector, sector->data, sector);
+    }
+    if (status == UMICOM_FAT16_UPDATE_OK)
+        status = UmicomCommitFlush(commit, &result.commit, UMICOM_FAT16_COMMIT_DATA_FLUSH);
+    if (status == UMICOM_FAT16_UPDATE_OK) {
+        result.commit.phase = UMICOM_FAT16_COMMIT_DATA_VERIFY;
+        status = UmicomCommitVerifyData(commit);
+        if (status == UMICOM_FAT16_UPDATE_OK) result.commit.dataVerified = UMICOM_TRUE;
+    }
+    if (status == UMICOM_FAT16_UPDATE_OK) {
+        const UmicomSize submitted = result.commit.submittedMetadataSectors;
+        const UmicomSize completed = result.commit.completedMetadataSectors;
+        status = UmicomCommitWriteSector(commit, &result.commit, UMICOM_FAT16_COMMIT_DIRECTORY_WRITE,
+            owner->filePlan.directorySector, owner->filePlan.data, 0);
+        result.directorySubmitted = result.commit.submittedMetadataSectors > submitted;
+        result.directoryCompleted = result.commit.completedMetadataSectors > completed;
+    }
+    if (status == UMICOM_FAT16_UPDATE_OK) {
+        const UmicomSize completed = result.commit.completedFlushes;
+        status = UmicomCommitFlush(commit, &result.commit, UMICOM_FAT16_COMMIT_DIRECTORY_FLUSH);
+        /* Preserve a successful barrier even if its final deadline check fails. */
+        result.directoryDurable = result.commit.completedFlushes > completed;
+    }
+    if (status == UMICOM_FAT16_UPDATE_OK) {
+        result.commit.phase = UMICOM_FAT16_COMMIT_DIRECTORY_VERIFY;
+        status = UmicomCommitVerify(commit, owner->filePlan.directorySector, owner->filePlan.data);
+        if (status == UMICOM_FAT16_UPDATE_OK) result.directoryVerified = UMICOM_TRUE;
+    }
+    if (status == UMICOM_FAT16_UPDATE_OK && !UmicomUpdateClock(base))
+        status = UmicomUpdateFromBlock(base->lastBlockStatus);
+    if (status == UMICOM_FAT16_UPDATE_OK) commit->state = UMICOM_FAT16_COMMIT_STAGED;
+    else if (result.commit.mediaTouched) commit->state = UMICOM_FAT16_COMMIT_FAILED;
+    else {
+        UmicomUpdateClear(&base->plan, sizeof(base->plan));
+        UmicomUpdateClear(&owner->filePlan, sizeof(owner->filePlan));
+    }
+    return UmicomFileCommitPublish(owner, &result, outResult, status);
+}
+
+UmicomKernelFat16UpdateStatus UmicomKernelFat16FileCommitStage(
+    UmicomKernelFat16FileCommitter *owner, const char *path, UmicomU64 offset,
+    const void *input, UmicomSize bytes, const UmicomKernelFat16FileTime *time,
+    UmicomKernelFat16FileCommitResult *outResult)
+{
+    return UmicomFileCommitStageOperation(owner, path, offset, input, bytes, time,
+        outResult, UMICOM_FALSE);
+}
+
+UmicomKernelFat16UpdateStatus UmicomKernelFat16FileCommitAppend(
+    UmicomKernelFat16FileCommitter *owner, const char *path,
+    const void *input, UmicomSize bytes, const UmicomKernelFat16FileTime *time,
+    UmicomKernelFat16FileCommitResult *outResult)
+{
+    /* Zero is only an initial diagnostic value, not an observed EOF. A true
+     * directoryPlanned result qualifies the offset derived by the planner;
+     * the caller cannot select an append offset. */
+    return UmicomFileCommitStageOperation(owner, path, 0U, input, bytes, time,
+        outResult, UMICOM_TRUE);
 }

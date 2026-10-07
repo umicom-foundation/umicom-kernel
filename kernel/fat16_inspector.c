@@ -1244,3 +1244,94 @@ UmicomKernelDiskStatus UmicomKernelFat16MetadataRead(UmicomKernelFat16 *volume,
     volume->fatCached = UMICOM_FALSE;
     return UmicomFatFinish(volume, status);
 }
+
+/*-----------------------------------------------------------------------------
+ * Existing-allocation append preparation.
+ *
+ * Appending within the current final cluster leaves the exact chain length
+ * unchanged. Prove the original namespace and allocation before staging the
+ * enlarged directory size, and reuse the checked sector planner at the old
+ * EOF. Every prior byte and all unused slack outside the payload are retained.
+ * No allocation, transport mutation or clean publication happens here.
+ *---------------------------------------------------------------------------*/
+#include "umicom/kernel/fat16_file_append.h"
+
+UmicomKernelDiskStatus UmicomKernelFat16PlanFileAppend(
+    UmicomKernelFat16 *volume, const char *path, const void *input,
+    UmicomSize bytes, const UmicomKernelFat16FileTime *time,
+    UmicomKernelFat16UpdateWorkspace *workspace,
+    UmicomKernelFat16FileUpdateWorkspace *fileWorkspace,
+    UmicomKernelFat16UpdatePlan *outDataPlan,
+    UmicomKernelFat16FileUpdatePlan *outFilePlan)
+{
+    UmicomSize pathBytes = 0U;
+    UmicomKernelDiskStatus status = UmicomFatFileArguments(volume, path, input,
+        bytes, time, workspace, fileWorkspace, outDataPlan, outFilePlan, &pathBytes);
+    if (status != UMICOM_DISK_OK) return status;
+    UmicomKernelFat16FileTimeEncoding encoded;
+    status = UmicomFatFileTimeFields(time, &encoded);
+    if (status != UMICOM_DISK_OK) return status;
+    status = UmicomFatBegin(volume);
+    if (status != UMICOM_DISK_OK) return status;
+    UmicomFatClear(workspace, sizeof(*workspace));
+    workspace->self = workspace;
+    workspace->busy = UMICOM_TRUE;
+    UmicomFatClear(fileWorkspace, sizeof(*fileWorkspace));
+    fileWorkspace->self = fileWorkspace;
+    fileWorkspace->busy = UMICOM_TRUE;
+    /* Callback-visible work begins only after these value snapshots. */
+    UmicomFatCopy(workspace->input, input, bytes);
+    UmicomFatCopy(fileWorkspace->path, path, pathBytes);
+    UmicomFatCopy(&fileWorkspace->stage.requestedTime, time, sizeof(*time));
+    UmicomFatCopy(&fileWorkspace->stage.encodedTime, &encoded, sizeof(encoded));
+    UmicomU16 parent = 0U;
+    UmicomU64 oldBytes = 0U;
+    UmicomU64 newBytes = 0U;
+    status = UmicomFatPlanGeometry(volume);
+    if (status == UMICOM_DISK_OK) status = UmicomFatFileLookup(volume,
+        fileWorkspace->path, &workspace->stage.entry, &parent);
+    if (status == UMICOM_DISK_OK && workspace->stage.entry.directory)
+        status = UMICOM_DISK_IS_DIRECTORY;
+    if (status == UMICOM_DISK_OK && (workspace->stage.entry.attributes & 0x01U))
+        status = UMICOM_DISK_READ_ONLY;
+    if (status == UMICOM_DISK_OK) {
+        oldBytes = workspace->stage.entry.bytes;
+        const UmicomU64 clusterBytes = (UmicomU64)volume->info.sectorsPerCluster *
+            UMICOM_DISK_SECTOR_BYTES;
+        const UmicomU64 required = (oldBytes + clusterBytes - 1U) / clusterBytes;
+        const UmicomU64 allocatedBytes = required * clusterBytes;
+        newBytes = oldBytes + bytes;
+        /* Geometry bounds clusterBytes and the entry size is U32. These U64
+         * calculations cannot wrap. A boundary EOF has no final-cluster slack;
+         * a valid empty file has no allocated cluster to admit an append. */
+        if (!oldBytes || !workspace->stage.entry.firstCluster ||
+            newBytes > 0xffffffffU || newBytes > allocatedBytes)
+            status = UMICOM_DISK_RANGE;
+        else status = UmicomFatChain(volume, workspace->stage.entry.firstCluster,
+            UMICOM_TRUE, required, workspace->targetChain, &workspace->targetClusters);
+    }
+    if (status == UMICOM_DISK_OK) status = UmicomFatPlanNamespace(volume, workspace);
+    if (status == UMICOM_DISK_OK) status = UmicomFatPlanAllocation(volume, workspace);
+    if (status == UMICOM_DISK_OK) status = UmicomFatFileDirectorySector(volume,
+        workspace, parent, &fileWorkspace->stage);
+    if (status == UMICOM_DISK_OK) {
+        UmicomU8 *const target = fileWorkspace->stage.data + fileWorkspace->stage.entryOffset;
+        target[28] = (UmicomU8)newBytes;
+        target[29] = (UmicomU8)(newBytes >> 8U);
+        target[30] = (UmicomU8)(newBytes >> 16U);
+        target[31] = (UmicomU8)(newBytes >> 24U);
+        status = UmicomFatPlanSectors(volume, workspace, oldBytes, bytes);
+    }
+    if (status == UMICOM_DISK_OK) {
+        UmicomFatCopy(outDataPlan, &workspace->stage, sizeof(*outDataPlan));
+        UmicomFatCopy(outFilePlan, &fileWorkspace->stage, sizeof(*outFilePlan));
+    }
+    /* Publish neither partial plan after a failed validation or read. The
+     * original entry remains authoritative until both complete plans exist. */
+    UmicomFatClear(workspace, sizeof(*workspace));
+    workspace->self = workspace;
+    UmicomFatClear(fileWorkspace, sizeof(*fileWorkspace));
+    fileWorkspace->self = fileWorkspace;
+    volume->fatCached = UMICOM_FALSE;
+    return UmicomFatFinish(volume, status);
+}

@@ -542,6 +542,8 @@ UmicomKernelFat16UpdateStatus UmicomKernelFat16FileCommitConsoleClose(UmicomKern
     umicomFatFileCommitConsoleBusy = UMICOM_FALSE;
     return status;
 }
+static UmicomKernelShellStatus UmicomFatFileAppendCommand(UmicomKernelConsoleShell *shell,
+    const UmicomKernelShellCommand *command);
 UmicomKernelShellStatus UmicomKernelFat16FileCommitCommand(UmicomKernelConsoleShell *shell,
     const UmicomKernelShellCommand *command, UmicomBoolean *handled)
 {
@@ -549,6 +551,10 @@ UmicomKernelShellStatus UmicomKernelFat16FileCommitCommand(UmicomKernelConsoleSh
     *handled = UMICOM_FALSE;
     if (!command->count) return UMICOM_SHELL_OK;
     const char *const name = command->bytes + command->offsets[0];
+    if (UmicomFatConsoleEqual(name, "fatfileappend")) {
+        *handled = UMICOM_TRUE;
+        return UmicomFatFileAppendCommand(shell, command);
+    }
     const UmicomBoolean open = UmicomFatConsoleEqual(name, "fatfileopen");
     const UmicomBoolean calendar = UmicomFatConsoleEqual(name, "fatfiletime");
     const UmicomBoolean stage = UmicomFatConsoleEqual(name, "fatfilestage");
@@ -650,6 +656,56 @@ UmicomKernelShellStatus UmicomKernelFat16FileCommitCommand(UmicomKernelConsoleSh
         if (umicomFatFileConsoleCommitter.lastResult.commit.requestedBytes)
             UmicomFatFileCommitResult(shell, "fat.file.last-result", &umicomFatFileConsoleCommitter.lastResult);
     }
+    umicomFatFileCommitConsoleBusy = UMICOM_FALSE;
+    return status == UMICOM_FAT16_UPDATE_OK ? UMICOM_SHELL_OK : UMICOM_SHELL_IO_ERROR;
+}
+
+/* Append belongs to the same single-use file-commit console lifetime. Keeping
+ * the explicit calendar, Finish and Close commands avoids a second writable
+ * owner or an implicit clean publication after adding file bytes. */
+#include "umicom/kernel/fat16_file_append.h"
+static UmicomKernelShellStatus UmicomFatFileAppendCommand(UmicomKernelConsoleShell *shell,
+    const UmicomKernelShellCommand *command)
+{
+    if (command->count != 3U) return UMICOM_SHELL_INVALID_ARGUMENT;
+    if (umicomFatFileCommitConsoleBusy) return UMICOM_SHELL_BUSY;
+    if (umicomFatFileCommitConsole && umicomFatFileCommitConsole != shell)
+        return UMICOM_SHELL_BAD_STATE;
+    umicomFatFileCommitConsoleBusy = UMICOM_TRUE;
+    if (!umicomFatFileConsoleTimeSet) {
+        UmicomFatConsoleText(shell, "fat.file.append=bad-state; select an explicit calendar with fatfiletime first; previous evidence retained\r\n");
+        umicomFatFileCommitConsoleBusy = UMICOM_FALSE;
+        return UMICOM_SHELL_IO_ERROR;
+    }
+    /* The public command consumes the existing bounded parser's token copies.
+     * Empty payloads retain the lower API's pre-admission refusal and history. */
+    const char *const input = command->bytes + command->offsets[2];
+    UmicomSize bytes = 0U;
+    while (input[bytes]) ++bytes;
+    UmicomKernelFat16FileCommitResult result;
+    UmicomFatConsoleClear(&result, sizeof(result));
+    result.commit.requestedBytes = ~(UmicomSize)0U;
+    const UmicomKernelFat16UpdateStatus status = UmicomKernelFat16FileCommitAppend(
+        &umicomFatFileConsoleCommitter, command->bytes + command->offsets[1],
+        input, bytes, &umicomFatFileConsoleTime, &result);
+    UmicomFatFileCommitReport(shell, "fat.file.append", status);
+    if (result.commit.requestedBytes != ~(UmicomSize)0U) {
+        UmicomFatFileCommitResult(shell, "fat.file.result", &result);
+        if (result.directoryPlanned) {
+            /* These are planned sizes, even if a later write or barrier failed.
+             * Durable and accepted evidence remains in the ordinary result. */
+            UmicomFatCommitField(shell, "fat.file.append.original-bytes=", result.commit.offset);
+            UmicomFatCommitField(shell, " planned-bytes=", result.commit.offset + result.commit.requestedBytes);
+            UmicomFatConsoleText(shell, "\r\n");
+        }
+    } else {
+        UmicomFatConsoleText(shell, "fat.file.result=not-admitted; previous evidence retained\r\n");
+        if (umicomFatFileConsoleCommitter.lastResult.commit.requestedBytes)
+            UmicomFatFileCommitResult(shell, "fat.file.previous-result", &umicomFatFileConsoleCommitter.lastResult);
+    }
+    if (status == UMICOM_FAT16_UPDATE_OK)
+        UmicomFatConsoleText(shell, "Append bytes and the new file size were flushed and verified. The volume remains dirty until fatfilecommit succeeds.\r\n");
+    UmicomFatConsoleClear(&result, sizeof(result));
     umicomFatFileCommitConsoleBusy = UMICOM_FALSE;
     return status == UMICOM_FAT16_UPDATE_OK ? UMICOM_SHELL_OK : UMICOM_SHELL_IO_ERROR;
 }

@@ -533,6 +533,7 @@ UmicomKernelShellStatus UmicomKernelConsoleShellExecute(UmicomKernelConsoleShell
     if (UmicomShellEqual(name, "help") && command.count == 1U) {
 #ifdef UMICOM_KERNEL_FAT16_FILE_COMMIT
         UmicomShellText(shell, "fatfileopen SLOT PART | fatfiletime YYYY-MM-DDTHH:MM:SS | fatfilestage PATH OFFSET \"TEXT\" | fatfilecommit | fatfileinfo | fatfileclose\r\n");
+        UmicomShellText(shell, "fatfileappend PATH \"TEXT\" | append at EOF within the file's existing final-cluster space; then fatfilecommit\r\n");
         UmicomShellText(shell, "File commits set ARCHIVE and the supplied write time. Stage leaves dirty flags; only fatfilecommit finishes.\r\n");
 #endif
 #ifdef UMICOM_KERNEL_FAT16_UPDATE
