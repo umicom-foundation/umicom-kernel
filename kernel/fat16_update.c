@@ -426,3 +426,433 @@ const char *UmicomKernelFat16UpdateStatusName(UmicomKernelFat16UpdateStatus stat
     default: return "unknown-fat16-update-status";
     }
 }
+
+/*-----------------------------------------------------------------------------
+ * Ordered commits use the existing interpretation, deadline and lease helpers.
+ * The original metadata-preserving updater above remains intact. This separate
+ * outer owner adds persistent dirty guards without reopening an inspector over
+ * intentionally dirty media or changing the read-only parser's admission rules.
+ *---------------------------------------------------------------------------*/
+#include "umicom/kernel/fat16_commit.h"
+
+static UmicomBoolean UmicomCommitEqual(const void *left, const void *right, UmicomSize bytes)
+{
+    const UmicomU8 *const a = (const UmicomU8 *)left;
+    const UmicomU8 *const b = (const UmicomU8 *)right;
+    for (UmicomSize i = 0U; i < bytes; ++i) if (a[i] != b[i]) return UMICOM_FALSE;
+    return UMICOM_TRUE;
+}
+static UmicomBoolean UmicomCommitIndependent(const UmicomKernelFat16Committer *owner,
+    UmicomAddress address, UmicomSize bytes)
+{
+    return UmicomUpdateDomainIndependent(owner->updater.domain, address, bytes) &&
+        !UmicomUpdateOverlap(address, bytes, (UmicomAddress)owner, sizeof(*owner));
+}
+static UmicomKernelFat16UpdateStatus UmicomCommitLive(UmicomKernelFat16Committer *owner,
+    UmicomKernelFat16CommitState expected)
+{
+    if (!owner || (UmicomAddress)owner % alignof(UmicomKernelFat16Committer) ||
+        !UmicomUpdateSpan((UmicomAddress)owner, sizeof(*owner)))
+        return UMICOM_FAT16_UPDATE_INVALID_ARGUMENT;
+    if (owner->self != owner) return UMICOM_FAT16_UPDATE_BAD_STATE;
+    if (owner->busy) return UMICOM_FAT16_UPDATE_BUSY;
+    const UmicomKernelFat16UpdateStatus status = UmicomUpdateLive(&owner->updater);
+    if (status != UMICOM_FAT16_UPDATE_OK) return status;
+    if (owner->state != expected ||
+        !UmicomUpdateDomainIndependent(owner->updater.domain, (UmicomAddress)owner, sizeof(*owner)))
+        return UMICOM_FAT16_UPDATE_BAD_STATE;
+    return UMICOM_FAT16_UPDATE_OK;
+}
+static UmicomKernelFat16UpdateStatus UmicomCommitResultBuffer(UmicomKernelFat16Committer *owner,
+    UmicomKernelFat16CommitResult *outResult)
+{
+    return outResult && !((UmicomAddress)outResult % alignof(UmicomKernelFat16CommitResult)) &&
+        UmicomCommitIndependent(owner, (UmicomAddress)outResult, sizeof(*outResult)) ?
+        UMICOM_FAT16_UPDATE_OK : UMICOM_FAT16_UPDATE_INVALID_ARGUMENT;
+}
+static UmicomKernelFat16UpdateStatus UmicomCommitBuffers(UmicomKernelFat16Committer *owner,
+    const char *path, const void *input, UmicomSize bytes, UmicomKernelFat16CommitResult *outResult)
+{
+    if (UmicomCommitResultBuffer(owner, outResult) != UMICOM_FAT16_UPDATE_OK ||
+        !input || !bytes || bytes > UMICOM_FAT16_UPDATE_BYTES || !path ||
+        !UmicomCommitIndependent(owner, (UmicomAddress)input, bytes) ||
+        UmicomUpdateOverlap((UmicomAddress)input, bytes, (UmicomAddress)outResult, sizeof(*outResult)))
+        return UMICOM_FAT16_UPDATE_INVALID_ARGUMENT;
+    const UmicomAddress address = (UmicomAddress)path;
+    for (UmicomSize i = 0U; i < UMICOM_FAT16_PATH_BYTES; ++i) {
+        /* Check each candidate byte before dereferencing: an unterminated path
+         * inside result/input storage must not scan beyond the aliased object. */
+        if (address > ~(UmicomAddress)0U - i ||
+            !UmicomCommitIndependent(owner, address + i, 1U) ||
+            UmicomUpdateOverlap(address + i, 1U, (UmicomAddress)input, bytes) ||
+            UmicomUpdateOverlap(address + i, 1U, (UmicomAddress)outResult, sizeof(*outResult)))
+            return UMICOM_FAT16_UPDATE_INVALID_ARGUMENT;
+        if (!path[i]) return UMICOM_FAT16_UPDATE_OK;
+    }
+    return UMICOM_FAT16_UPDATE_INVALID_ARGUMENT;
+}
+static UmicomKernelFat16UpdateStatus UmicomCommitEnter(UmicomKernelFat16Committer *owner)
+{
+    owner->busy = UMICOM_TRUE;
+    const UmicomKernelFat16UpdateStatus status = UmicomUpdateEnter(&owner->updater);
+    if (status != UMICOM_FAT16_UPDATE_OK) owner->busy = UMICOM_FALSE;
+    return status;
+}
+static UmicomKernelFat16UpdateStatus UmicomCommitPublish(UmicomKernelFat16Committer *owner,
+    UmicomKernelFat16CommitResult *result, UmicomKernelFat16CommitResult *outResult,
+    UmicomKernelFat16UpdateStatus status)
+{
+    result->status = status;
+    result->diskStatus = owner->updater.lastDiskStatus;
+    result->blockStatus = owner->updater.lastBlockStatus;
+    result->needsFlush = owner->updater.needsFlush;
+    result->writeUncertain = owner->updater.writeUncertain;
+    owner->updater.lastStatus = status;
+    UmicomUpdateCopy(&owner->lastResult, result, sizeof(*result));
+    UmicomUpdateCopy(outResult, result, sizeof(*result));
+    owner->updater.busy = UMICOM_FALSE;
+    owner->busy = UMICOM_FALSE;
+    return status;
+}
+static UmicomKernelFat16UpdateStatus UmicomCommitRead(UmicomKernelFat16Committer *owner,
+    UmicomU64 sector, UmicomU8 *output)
+{
+    if (UmicomUpdateReadSector(&owner->updater, sector, output)) return UMICOM_FAT16_UPDATE_OK;
+    owner->updater.lastDiskStatus = UMICOM_DISK_IO_ERROR;
+    return UmicomUpdateFromDisk(&owner->updater, UMICOM_DISK_IO_ERROR);
+}
+static UmicomKernelFat16UpdateStatus UmicomCommitVerify(UmicomKernelFat16Committer *owner,
+    UmicomU64 sector, const UmicomU8 *expected)
+{
+    const UmicomKernelFat16UpdateStatus status = UmicomCommitRead(owner, sector, owner->readback);
+    if (status != UMICOM_FAT16_UPDATE_OK) return status;
+    if (!UmicomCommitEqual(owner->readback, expected, UMICOM_DISK_SECTOR_BYTES)) {
+        owner->updater.lastDiskStatus = UMICOM_DISK_CORRUPT;
+        return UMICOM_FAT16_UPDATE_FILESYSTEM_ERROR;
+    }
+    return UMICOM_FAT16_UPDATE_OK;
+}
+static UmicomKernelFat16UpdateStatus UmicomCommitVerifyHeaders(UmicomKernelFat16Committer *owner,
+    const UmicomU8 *expected)
+{
+    for (UmicomSize i = 0U; i < 2U; ++i) {
+        const UmicomKernelFat16UpdateStatus status =
+            UmicomCommitVerify(owner, owner->headerSectors[i], expected);
+        if (status != UMICOM_FAT16_UPDATE_OK) return status;
+    }
+    return UMICOM_FAT16_UPDATE_OK;
+}
+static UmicomKernelFat16UpdateStatus UmicomCommitVerifyData(UmicomKernelFat16Committer *owner)
+{
+    for (UmicomSize i = 0U; i < owner->updater.plan.count; ++i) {
+        const UmicomKernelFat16UpdateSector *const sector = &owner->updater.plan.sectors[i];
+        const UmicomKernelFat16UpdateStatus status = UmicomCommitVerify(owner, sector->sector, sector->data);
+        if (status != UMICOM_FAT16_UPDATE_OK) return status;
+    }
+    return UMICOM_FAT16_UPDATE_OK;
+}
+static UmicomKernelFat16UpdateStatus UmicomCommitWriteSector(UmicomKernelFat16Committer *owner,
+    UmicomKernelFat16CommitResult *result, UmicomKernelFat16CommitPhase phase,
+    UmicomU64 lba, const UmicomU8 *data, const UmicomKernelFat16UpdateSector *fileSector)
+{
+    UmicomKernelFat16Updater *const base = &owner->updater;
+    result->phase = phase;
+    result->lastBlockOutcome = UMICOM_BLOCK_NOT_SUBMITTED;
+    if (!UmicomUpdateClock(base)) return UmicomUpdateFromBlock(base->lastBlockStatus);
+    UmicomKernelBlockMutationOutcome outcome = UMICOM_BLOCK_NOT_SUBMITTED;
+    base->lastBlockStatus = UmicomKernelBlockWrite(base->domain, base->handle,
+        lba, 1U, data, UMICOM_DISK_SECTOR_BYTES, &outcome);
+    result->lastBlockOutcome = outcome;
+    if (outcome != UMICOM_BLOCK_NOT_SUBMITTED) {
+        result->mediaTouched = UMICOM_TRUE;
+        base->needsFlush = UMICOM_TRUE;
+        if (fileSector) {
+            ++result->submittedDataSectors;
+            result->submittedBytes += fileSector->bytes;
+        } else {
+            ++result->submittedMetadataSectors;
+            if (phase == UMICOM_FAT16_COMMIT_CLEAN_MIRROR || phase == UMICOM_FAT16_COMMIT_CLEAN_PRIMARY)
+                result->cleanFinalisationStarted = UMICOM_TRUE;
+        }
+    }
+    if (outcome == UMICOM_BLOCK_COMPLETED) {
+        if (fileSector) {
+            ++result->completedDataSectors;
+            result->confirmedBytes += fileSector->bytes;
+        } else ++result->completedMetadataSectors;
+    } else if (outcome == UMICOM_BLOCK_SUBMITTED_UNCONFIRMED) {
+        result->uncertainSector = lba;
+        result->uncertainSectorValid = UMICOM_TRUE;
+        base->writeUncertain = UMICOM_TRUE;
+        if (fileSector) result->dataOutcome = UMICOM_FAT16_UPDATE_SUBMITTED_UNCONFIRMED;
+    }
+    if (fileSector && result->dataOutcome != UMICOM_FAT16_UPDATE_SUBMITTED_UNCONFIRMED) {
+        result->dataOutcome = result->confirmedBytes == result->requestedBytes ?
+            UMICOM_FAT16_UPDATE_COMPLETED : result->confirmedBytes ?
+            UMICOM_FAT16_UPDATE_PARTIAL_CONFIRMED : UMICOM_FAT16_UPDATE_NOT_SUBMITTED;
+    }
+    UmicomKernelFat16UpdateStatus status = UmicomUpdateFromBlock(base->lastBlockStatus);
+    if (status == UMICOM_FAT16_UPDATE_OK && outcome != UMICOM_BLOCK_COMPLETED) {
+        base->lastBlockStatus = UMICOM_BLOCK_MALFORMED_COMPLETION;
+        status = UMICOM_FAT16_UPDATE_TRANSPORT_ERROR;
+    }
+    if (status == UMICOM_FAT16_UPDATE_OK && !UmicomUpdateClock(base))
+        status = UmicomUpdateFromBlock(base->lastBlockStatus);
+    return status;
+}
+static UmicomKernelFat16UpdateStatus UmicomCommitFlush(UmicomKernelFat16Committer *owner,
+    UmicomKernelFat16CommitResult *result, UmicomKernelFat16CommitPhase phase)
+{
+    UmicomKernelFat16Updater *const base = &owner->updater;
+    result->phase = phase;
+    result->lastBlockOutcome = UMICOM_BLOCK_NOT_SUBMITTED;
+    if (!UmicomUpdateClock(base)) return UmicomUpdateFromBlock(base->lastBlockStatus);
+    UmicomKernelBlockMutationOutcome outcome = UMICOM_BLOCK_NOT_SUBMITTED;
+    base->lastBlockStatus = UmicomKernelBlockFlush(base->domain, base->handle, &outcome);
+    base->lastFlush = outcome;
+    result->lastBlockOutcome = outcome;
+    if (base->lastBlockStatus == UMICOM_BLOCK_OK && outcome == UMICOM_BLOCK_COMPLETED) {
+        ++result->completedFlushes;
+        base->needsFlush = UMICOM_FALSE;
+        if (phase == UMICOM_FAT16_COMMIT_DIRTY_PRIMARY_FLUSH) result->dirtyDurable = UMICOM_TRUE;
+        if (phase == UMICOM_FAT16_COMMIT_DATA_FLUSH) result->dataDurable = UMICOM_TRUE;
+        if (phase == UMICOM_FAT16_COMMIT_CLEAN_PRIMARY_FLUSH) result->cleanDurable = UMICOM_TRUE;
+    }
+    UmicomKernelFat16UpdateStatus status = UmicomUpdateFromBlock(base->lastBlockStatus);
+    if (status == UMICOM_FAT16_UPDATE_OK && outcome != UMICOM_BLOCK_COMPLETED) {
+        base->lastBlockStatus = UMICOM_BLOCK_MALFORMED_COMPLETION;
+        status = UMICOM_FAT16_UPDATE_TRANSPORT_ERROR;
+    }
+    /* Preserve each successful barrier even if the enclosing acceptance clock
+     * fails now. The caller can see persistence acknowledgement without an
+     * invented successful high-level commit or permission to retry. */
+    if (status == UMICOM_FAT16_UPDATE_OK && !UmicomUpdateClock(base))
+        status = UmicomUpdateFromBlock(base->lastBlockStatus);
+    return status;
+}
+UmicomKernelFat16UpdateStatus UmicomKernelFat16CommitOpen(UmicomKernelFat16Committer *owner,
+    UmicomKernelBlockDomain *domain, UmicomSize slot, UmicomSize partition, UmicomU64 timeoutTicks)
+{
+    if (!owner || (UmicomAddress)owner % alignof(UmicomKernelFat16Committer) ||
+        !UmicomUpdateSpan((UmicomAddress)owner, sizeof(*owner)))
+        return UMICOM_FAT16_UPDATE_INVALID_ARGUMENT;
+    if (!UmicomUpdateDomainValid(domain)) return UMICOM_FAT16_UPDATE_BAD_STATE;
+    if (!UmicomUpdateDomainIndependent(domain, (UmicomAddress)owner, sizeof(*owner)))
+        return UMICOM_FAT16_UPDATE_INVALID_ARGUMENT;
+    if (owner->busy || owner->updater.busy || owner->updater.volume.busy ||
+        owner->updater.workspace.busy || domain->busy) return UMICOM_FAT16_UPDATE_BUSY;
+    if ((!owner->self && !UmicomUpdateZero(owner, sizeof(*owner))) ||
+        (owner->self && owner->self != owner) || owner->state != UMICOM_FAT16_COMMIT_UNUSED)
+        return UMICOM_FAT16_UPDATE_BAD_STATE;
+    /* The outer guard covers policy and open callbacks before the embedded
+     * helper establishes its own guard. Every alias check covers both owners. */
+    owner->busy = UMICOM_TRUE;
+    owner->self = owner;
+    const UmicomKernelFat16UpdateStatus status =
+        UmicomKernelFat16UpdateOpen(&owner->updater, domain, slot, partition, timeoutTicks);
+    owner->state = status == UMICOM_FAT16_UPDATE_OK ? UMICOM_FAT16_COMMIT_READY :
+        owner->updater.handle ? UMICOM_FAT16_COMMIT_CLOSING : UMICOM_FAT16_COMMIT_UNUSED;
+    owner->busy = UMICOM_FALSE;
+    return status;
+}
+static UmicomKernelFat16UpdateStatus UmicomCommitPlan(UmicomKernelFat16Committer *owner,
+    const char *path, UmicomU64 offset, const void *input, UmicomSize bytes)
+{
+    UmicomKernelFat16Updater *const base = &owner->updater;
+    const UmicomKernelDiskReader reader = {base->sectors, UmicomUpdateReadSector, base};
+    base->lastDiskStatus = UmicomKernelFat16Open(&base->volume, &reader, base->partition);
+    UmicomKernelFat16UpdateStatus status = UmicomUpdateFromDisk(base, base->lastDiskStatus);
+    if (status == UMICOM_FAT16_UPDATE_OK) {
+        base->lastDiskStatus = UmicomKernelFat16PlanUpdate(&base->volume, path, offset,
+            input, bytes, &base->workspace, &base->plan);
+        status = UmicomUpdateFromDisk(base, base->lastDiskStatus);
+    }
+    if (status == UMICOM_FAT16_UPDATE_OK) {
+        owner->headerSectors[0] = base->volume.info.firstSector + base->volume.fatStart;
+        owner->headerSectors[1] = owner->headerSectors[0] + base->volume.info.sectorsPerFat;
+        status = UmicomCommitRead(owner, owner->headerSectors[0], owner->cleanHeader);
+    }
+    if (status == UMICOM_FAT16_UPDATE_OK)
+        status = UmicomCommitVerify(owner, owner->headerSectors[1], owner->cleanHeader);
+    if (status == UMICOM_FAT16_UPDATE_OK) {
+        if (owner->cleanHeader[2] != 0xffU || owner->cleanHeader[3] != 0xffU) {
+            base->lastDiskStatus = UMICOM_DISK_DIRTY;
+            status = UMICOM_FAT16_UPDATE_FILESYSTEM_ERROR;
+        } else {
+            UmicomUpdateCopy(owner->dirtyHeader, owner->cleanHeader, sizeof(owner->dirtyHeader));
+            /* Clear only the clean-shutdown bit. The no-I/O-error bit is not
+             * an in-progress marker and must not be repurposed as one. */
+            owner->dirtyHeader[3] &= (UmicomU8)~(UMICOM_FAT16_CLEAN_MASK >> 8U);
+        }
+    }
+    /* Every address and payload is now a private qualified snapshot. */
+    return UmicomUpdateInspectorClose(base, status);
+}
+UmicomKernelFat16UpdateStatus UmicomKernelFat16CommitStage(UmicomKernelFat16Committer *owner,
+    const char *path, UmicomU64 offset, const void *input, UmicomSize bytes,
+    UmicomKernelFat16CommitResult *outResult)
+{
+    UmicomKernelFat16UpdateStatus status = UmicomCommitLive(owner, UMICOM_FAT16_COMMIT_READY);
+    if (status != UMICOM_FAT16_UPDATE_OK) return status;
+    status = UmicomCommitBuffers(owner, path, input, bytes, outResult);
+    if (status != UMICOM_FAT16_UPDATE_OK) return status;
+    status = UmicomCommitEnter(owner);
+    if (status != UMICOM_FAT16_UPDATE_OK) return status;
+    UmicomKernelFat16CommitResult result;
+    UmicomUpdateClear(&result, sizeof(result));
+    result.phase = UMICOM_FAT16_COMMIT_PREFLIGHT;
+    result.offset = offset;
+    result.requestedBytes = bytes;
+    UmicomUpdateBeginIo(&owner->updater);
+    status = UmicomCommitPlan(owner, path, offset, input, bytes);
+    /* Verification has a known remaining read cost. Reserve that budget before
+     * changing either FAT header, so an already predictable admission limit
+     * cannot unnecessarily leave an otherwise valid volume dirty. */
+    if (status == UMICOM_FAT16_UPDATE_OK && owner->updater.operationReads >
+        UMICOM_FAT16_IO_LIMIT - 2U - owner->updater.plan.count) {
+        owner->updater.lastDiskStatus = UMICOM_DISK_LIMIT;
+        status = UMICOM_FAT16_UPDATE_INSPECTION_LIMIT;
+    }
+    if (status == UMICOM_FAT16_UPDATE_OK)
+        status = UmicomCommitWriteSector(owner, &result, UMICOM_FAT16_COMMIT_DIRTY_MIRROR,
+            owner->headerSectors[1], owner->dirtyHeader, 0);
+    if (status == UMICOM_FAT16_UPDATE_OK)
+        status = UmicomCommitFlush(owner, &result, UMICOM_FAT16_COMMIT_DIRTY_MIRROR_FLUSH);
+    if (status == UMICOM_FAT16_UPDATE_OK)
+        status = UmicomCommitWriteSector(owner, &result, UMICOM_FAT16_COMMIT_DIRTY_PRIMARY,
+            owner->headerSectors[0], owner->dirtyHeader, 0);
+    if (status == UMICOM_FAT16_UPDATE_OK)
+        status = UmicomCommitFlush(owner, &result, UMICOM_FAT16_COMMIT_DIRTY_PRIMARY_FLUSH);
+    if (status == UMICOM_FAT16_UPDATE_OK) {
+        result.phase = UMICOM_FAT16_COMMIT_DIRTY_VERIFY;
+        status = UmicomCommitVerifyHeaders(owner, owner->dirtyHeader);
+        if (status == UMICOM_FAT16_UPDATE_OK) result.dirtyVerified = UMICOM_TRUE;
+    }
+    for (UmicomSize i = 0U; status == UMICOM_FAT16_UPDATE_OK && i < owner->updater.plan.count; ++i) {
+        const UmicomKernelFat16UpdateSector *const sector = &owner->updater.plan.sectors[i];
+        status = UmicomCommitWriteSector(owner, &result, UMICOM_FAT16_COMMIT_DATA_WRITE,
+            sector->sector, sector->data, sector);
+    }
+    if (status == UMICOM_FAT16_UPDATE_OK)
+        status = UmicomCommitFlush(owner, &result, UMICOM_FAT16_COMMIT_DATA_FLUSH);
+    if (status == UMICOM_FAT16_UPDATE_OK) {
+        result.phase = UMICOM_FAT16_COMMIT_DATA_VERIFY;
+        status = UmicomCommitVerifyData(owner);
+        if (status == UMICOM_FAT16_UPDATE_OK) result.dataVerified = UMICOM_TRUE;
+    }
+    if (status == UMICOM_FAT16_UPDATE_OK && !UmicomUpdateClock(&owner->updater))
+        status = UmicomUpdateFromBlock(owner->updater.lastBlockStatus);
+    owner->state = status == UMICOM_FAT16_UPDATE_OK ? UMICOM_FAT16_COMMIT_STAGED :
+        result.mediaTouched ? UMICOM_FAT16_COMMIT_FAILED : UMICOM_FAT16_COMMIT_READY;
+    if (owner->state == UMICOM_FAT16_COMMIT_READY)
+        UmicomUpdateClear(&owner->updater.plan, sizeof(owner->updater.plan));
+    return UmicomCommitPublish(owner, &result, outResult, status);
+}
+UmicomKernelFat16UpdateStatus UmicomKernelFat16CommitFinish(UmicomKernelFat16Committer *owner,
+    UmicomKernelFat16CommitResult *outResult)
+{
+    UmicomKernelFat16UpdateStatus status = UmicomCommitLive(owner, UMICOM_FAT16_COMMIT_STAGED);
+    if (status != UMICOM_FAT16_UPDATE_OK) return status;
+    status = UmicomCommitResultBuffer(owner, outResult);
+    if (status != UMICOM_FAT16_UPDATE_OK) return status;
+    if (!owner->lastResult.dirtyDurable || !owner->lastResult.dirtyVerified ||
+        !owner->lastResult.dataDurable || !owner->lastResult.dataVerified ||
+        owner->updater.writeUncertain || !owner->updater.plan.count ||
+        owner->updater.plan.count > UMICOM_FAT16_UPDATE_SECTOR_LIMIT)
+        return UMICOM_FAT16_UPDATE_BAD_STATE;
+    status = UmicomCommitEnter(owner);
+    if (status != UMICOM_FAT16_UPDATE_OK) return status;
+    UmicomKernelFat16CommitResult result;
+    UmicomUpdateCopy(&result, &owner->lastResult, sizeof(result));
+    UmicomUpdateBeginIo(&owner->updater);
+    result.phase = UMICOM_FAT16_COMMIT_FINISH_VERIFY;
+    status = UmicomCommitVerifyHeaders(owner, owner->dirtyHeader);
+    if (status == UMICOM_FAT16_UPDATE_OK) status = UmicomCommitVerifyData(owner);
+    if (status == UMICOM_FAT16_UPDATE_OK)
+        status = UmicomCommitWriteSector(owner, &result, UMICOM_FAT16_COMMIT_CLEAN_MIRROR,
+            owner->headerSectors[1], owner->cleanHeader, 0);
+    if (status == UMICOM_FAT16_UPDATE_OK)
+        status = UmicomCommitFlush(owner, &result, UMICOM_FAT16_COMMIT_CLEAN_MIRROR_FLUSH);
+    if (status == UMICOM_FAT16_UPDATE_OK)
+        status = UmicomCommitWriteSector(owner, &result, UMICOM_FAT16_COMMIT_CLEAN_PRIMARY,
+            owner->headerSectors[0], owner->cleanHeader, 0);
+    if (status == UMICOM_FAT16_UPDATE_OK)
+        status = UmicomCommitFlush(owner, &result, UMICOM_FAT16_COMMIT_CLEAN_PRIMARY_FLUSH);
+    if (status == UMICOM_FAT16_UPDATE_OK) {
+        result.phase = UMICOM_FAT16_COMMIT_CLEAN_VERIFY;
+        status = UmicomCommitVerifyHeaders(owner, owner->cleanHeader);
+        if (status == UMICOM_FAT16_UPDATE_OK) result.cleanVerified = UMICOM_TRUE;
+    }
+    if (status == UMICOM_FAT16_UPDATE_OK && !UmicomUpdateClock(&owner->updater))
+        status = UmicomUpdateFromBlock(owner->updater.lastBlockStatus);
+    if (status == UMICOM_FAT16_UPDATE_OK) {
+        result.phase = UMICOM_FAT16_COMMIT_COMPLETE;
+        result.commitAccepted = UMICOM_TRUE;
+        owner->state = UMICOM_FAT16_COMMIT_COMMITTED;
+    } else owner->state = UMICOM_FAT16_COMMIT_FAILED;
+    return UmicomCommitPublish(owner, &result, outResult, status);
+}
+UmicomKernelFat16UpdateStatus UmicomKernelFat16CommitClose(UmicomKernelFat16Committer *owner)
+{
+    if (!owner || (UmicomAddress)owner % alignof(UmicomKernelFat16Committer) ||
+        !UmicomUpdateSpan((UmicomAddress)owner, sizeof(*owner)))
+        return UMICOM_FAT16_UPDATE_INVALID_ARGUMENT;
+    if (owner->busy || owner->updater.busy || owner->updater.volume.busy ||
+        owner->updater.workspace.busy) return UMICOM_FAT16_UPDATE_BUSY;
+    if (!owner->self) return UmicomUpdateZero(owner, sizeof(*owner)) ?
+        UMICOM_FAT16_UPDATE_OK : UMICOM_FAT16_UPDATE_BAD_STATE;
+    if (owner->self != owner) return UMICOM_FAT16_UPDATE_BAD_STATE;
+    if (owner->state == UMICOM_FAT16_COMMIT_UNUSED || owner->state == UMICOM_FAT16_COMMIT_CLOSED)
+        return owner->updater.handle ? UMICOM_FAT16_UPDATE_BAD_STATE : UMICOM_FAT16_UPDATE_OK;
+    if (owner->state < UMICOM_FAT16_COMMIT_READY || owner->state > UMICOM_FAT16_COMMIT_CLOSING ||
+        !UmicomUpdateDomainValid(owner->updater.domain) ||
+        !UmicomUpdateDomainIndependent(owner->updater.domain, (UmicomAddress)owner, sizeof(*owner)))
+        return UMICOM_FAT16_UPDATE_BAD_STATE;
+    owner->busy = UMICOM_TRUE;
+    const UmicomKernelFat16UpdateStatus status = UmicomKernelFat16UpdateClose(&owner->updater);
+    if (status == UMICOM_FAT16_UPDATE_OK) {
+        owner->state = owner->updater.admitted ? UMICOM_FAT16_COMMIT_CLOSED : UMICOM_FAT16_COMMIT_UNUSED;
+        UmicomUpdateClear(owner->cleanHeader, sizeof(owner->cleanHeader));
+        UmicomUpdateClear(owner->dirtyHeader, sizeof(owner->dirtyHeader));
+        UmicomUpdateClear(owner->readback, sizeof(owner->readback));
+    } else if (owner->updater.state == UMICOM_FAT16_UPDATER_CLOSING)
+        owner->state = UMICOM_FAT16_COMMIT_CLOSING;
+    owner->busy = UMICOM_FALSE;
+    return status;
+}
+const char *UmicomKernelFat16CommitStateName(UmicomKernelFat16CommitState state)
+{
+    switch (state) {
+    case UMICOM_FAT16_COMMIT_UNUSED: return "unused";
+    case UMICOM_FAT16_COMMIT_READY: return "ready";
+    case UMICOM_FAT16_COMMIT_STAGED: return "staged";
+    case UMICOM_FAT16_COMMIT_FAILED: return "failed";
+    case UMICOM_FAT16_COMMIT_COMMITTED: return "committed";
+    case UMICOM_FAT16_COMMIT_CLOSING: return "closing";
+    case UMICOM_FAT16_COMMIT_CLOSED: return "closed";
+    default: return "unknown-fat16-commit-state";
+    }
+}
+const char *UmicomKernelFat16CommitPhaseName(UmicomKernelFat16CommitPhase phase)
+{
+    switch (phase) {
+    case UMICOM_FAT16_COMMIT_NONE: return "none";
+    case UMICOM_FAT16_COMMIT_PREFLIGHT: return "preflight";
+    case UMICOM_FAT16_COMMIT_DIRTY_MIRROR: return "dirty-mirror";
+    case UMICOM_FAT16_COMMIT_DIRTY_MIRROR_FLUSH: return "dirty-mirror-flush";
+    case UMICOM_FAT16_COMMIT_DIRTY_PRIMARY: return "dirty-primary";
+    case UMICOM_FAT16_COMMIT_DIRTY_PRIMARY_FLUSH: return "dirty-primary-flush";
+    case UMICOM_FAT16_COMMIT_DIRTY_VERIFY: return "dirty-verify";
+    case UMICOM_FAT16_COMMIT_DATA_WRITE: return "data-write";
+    case UMICOM_FAT16_COMMIT_DATA_FLUSH: return "data-flush";
+    case UMICOM_FAT16_COMMIT_DATA_VERIFY: return "data-verify";
+    case UMICOM_FAT16_COMMIT_FINISH_VERIFY: return "finish-verify";
+    case UMICOM_FAT16_COMMIT_CLEAN_MIRROR: return "clean-mirror";
+    case UMICOM_FAT16_COMMIT_CLEAN_MIRROR_FLUSH: return "clean-mirror-flush";
+    case UMICOM_FAT16_COMMIT_CLEAN_PRIMARY: return "clean-primary";
+    case UMICOM_FAT16_COMMIT_CLEAN_PRIMARY_FLUSH: return "clean-primary-flush";
+    case UMICOM_FAT16_COMMIT_CLEAN_VERIFY: return "clean-verify";
+    case UMICOM_FAT16_COMMIT_COMPLETE: return "complete";
+    default: return "unknown-fat16-commit-phase";
+    }
+}

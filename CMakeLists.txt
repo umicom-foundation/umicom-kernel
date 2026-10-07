@@ -545,6 +545,10 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/WritableBlock.cmake")
 # Whole-disk comparison and a new read-only guest verify the disposable result.
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/Fat16Update.cmake")
 
+# Qualify persistent dirty guards, explicit clean finalisation and fresh refusal
+# of deliberately unfinished updates on two separate disposable disk copies.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/Fat16Commit.cmake")
+
 # Preserve the linked Kernel entry while supporting QEMU firmware reset at RAM base.
 # Apply the same verified bridge to every Kernel-linked image after cloning.
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/FirmwareEntry.cmake")

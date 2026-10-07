@@ -46,6 +46,7 @@
 #include "umicom/kernel/disk_filesystem.h"
 #include "umicom/kernel/writable_block_validation.h"
 #include "umicom/kernel/fat16_update.h"
+#include "umicom/kernel/fat16_commit.h"
 #include "umicom/kernel/virtio_block.h"
 
 /* Read firmware descriptions without probing or binding devices. */
@@ -1427,6 +1428,12 @@ static void RunHardwareAddressTranslationTest(void)
 
 void UmicomKernelMain(UmicomU64 hartId, UmicomAddress deviceTreeAddress)
 {
+#if defined(UMICOM_KERNEL_FAT16_COMMIT_TEST) || defined(UMICOM_KERNEL_FAT16_COMMIT_READBACK_TEST) || \
+    defined(UMICOM_KERNEL_FAT16_COMMIT_INTERRUPTED_TEST) || defined(UMICOM_KERNEL_FAT16_COMMIT_REJECTED_TEST)
+    /* Separate processes distinguish accepted clean finalisation from a
+     * durably staged update deliberately closed without publishing clean. */
+    UmicomKernelFat16CommitBoot(hartId, deviceTreeAddress);
+#endif
 #if defined(UMICOM_KERNEL_FAT16_UPDATE_TEST) || defined(UMICOM_KERNEL_FAT16_UPDATE_READBACK_TEST)
     /* These explicit images qualify file data updates on an owned raw copy. */
     UmicomKernelFat16UpdateBoot(hartId, deviceTreeAddress);

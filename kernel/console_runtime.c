@@ -98,6 +98,7 @@ void UmicomKernelConsoleShellRun(void)
     UmicomKernelConsoleWriteLine("RAM-only data; no login, disk persistence or host filesystem access.");
 #endif
     UmicomKernelConsoleWriteLine("RAMFS is volatile. Explicit FAT16 data updates use fatwrite and fatflush.");
+    UmicomKernelConsoleWriteLine("Ordered FAT16 updates use fatcommitopen, fatstage and fatcommit; unfinished stages remain dirty.");
     UmicomKernelConsoleShellPrompt(&umicomInteractiveShell);
     while (!umicomInteractiveShell.exitRequested) {
 #ifdef UMICOM_KERNEL_SERVICE_CONSOLE

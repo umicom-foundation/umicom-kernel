@@ -233,3 +233,188 @@ UmicomKernelShellStatus UmicomKernelFat16UpdateCommand(UmicomKernelConsoleShell 
     umicomFatUpdateConsoleBusy = UMICOM_FALSE;
     return status == UMICOM_FAT16_UPDATE_OK ? UMICOM_SHELL_OK : UMICOM_SHELL_IO_ERROR;
 }
+
+/* The ordered updater owns a distinct console lifetime. Reuse the established
+ * text/number/status formatting while retaining every original data-only
+ * command. The new commands make the Stage/Finish persistence boundary visible;
+ * shell teardown can release an unfinished owner but cannot silently finish it. */
+#include "umicom/kernel/fat16_commit_console.h"
+static UmicomKernelFat16Committer umicomFatConsoleCommitter;
+static UmicomKernelConsoleShell *umicomFatCommitConsole;
+static UmicomBoolean umicomFatCommitConsoleBusy;
+
+static void UmicomFatCommitField(UmicomKernelConsoleShell *shell, const char *label, UmicomU64 value)
+{
+    UmicomFatConsoleText(shell, label);
+    UmicomFatConsoleNumber(shell, value);
+}
+static void UmicomFatCommitState(UmicomKernelConsoleShell *shell)
+{
+    UmicomFatConsoleText(shell, "fat.commit-state=");
+    UmicomFatConsoleText(shell, UmicomKernelFat16CommitStateName(umicomFatConsoleCommitter.state));
+    UmicomFatCommitField(shell, " slot=", umicomFatConsoleCommitter.updater.slot);
+    UmicomFatCommitField(shell, " partition=", umicomFatConsoleCommitter.updater.partition);
+    UmicomFatCommitField(shell, " needs-flush=", umicomFatConsoleCommitter.updater.needsFlush ? 1U : 0U);
+    UmicomFatCommitField(shell, " write-uncertain=", umicomFatConsoleCommitter.updater.writeUncertain ? 1U : 0U);
+    UmicomFatConsoleText(shell, "\r\n");
+}
+static void UmicomFatCommitReport(UmicomKernelConsoleShell *shell, const char *operation,
+    UmicomKernelFat16UpdateStatus status)
+{
+    UmicomFatConsoleText(shell, operation);
+    UmicomFatConsoleText(shell, "=");
+    UmicomFatConsoleText(shell, UmicomKernelFat16UpdateStatusName(status));
+    UmicomFatConsoleText(shell, " last-cleanup=");
+    UmicomFatConsoleText(shell, UmicomKernelBlockStatusName(umicomFatConsoleCommitter.updater.lastCleanupStatus));
+    /* Failed Open has no operation result yet. Preserve exact admission
+     * diagnostics so dirty media and inconsistent mirrors remain distinct. */
+    UmicomFatConsoleText(shell, " last-disk=");
+    UmicomFatConsoleText(shell, UmicomKernelDiskStatusName(umicomFatConsoleCommitter.updater.lastDiskStatus));
+    UmicomFatConsoleText(shell, " last-block=");
+    UmicomFatConsoleText(shell, UmicomKernelBlockStatusName(umicomFatConsoleCommitter.updater.lastBlockStatus));
+    UmicomFatConsoleText(shell, "\r\n");
+    UmicomFatCommitState(shell);
+}
+static void UmicomFatCommitResult(UmicomKernelConsoleShell *shell, const char *label,
+    const UmicomKernelFat16CommitResult *result)
+{
+    UmicomFatConsoleText(shell, label);
+    UmicomFatConsoleText(shell, "=");
+    UmicomFatConsoleText(shell, UmicomKernelFat16UpdateStatusName(result->status));
+    UmicomFatConsoleText(shell, " phase=");
+    UmicomFatConsoleText(shell, UmicomKernelFat16CommitPhaseName(result->phase));
+    UmicomFatConsoleText(shell, " disk=");
+    UmicomFatConsoleText(shell, UmicomKernelDiskStatusName(result->diskStatus));
+    UmicomFatConsoleText(shell, " block=");
+    UmicomFatConsoleText(shell, UmicomKernelBlockStatusName(result->blockStatus));
+    UmicomFatConsoleText(shell, " last-mutation-outcome=");
+    UmicomFatConsoleText(shell, UmicomFatConsoleBlockOutcome(result->lastBlockOutcome));
+    UmicomFatConsoleText(shell, "\r\nfat.commit.data-outcome=");
+    UmicomFatConsoleText(shell, UmicomFatConsoleOutcome(result->dataOutcome));
+    UmicomFatCommitField(shell, " offset=", result->offset);
+    UmicomFatCommitField(shell, " requested=", result->requestedBytes);
+    UmicomFatCommitField(shell, " confirmed=", result->confirmedBytes);
+    UmicomFatCommitField(shell, " submitted=", result->submittedBytes);
+    UmicomFatCommitField(shell, " data-sectors-completed=", result->completedDataSectors);
+    UmicomFatCommitField(shell, " data-sectors-submitted=", result->submittedDataSectors);
+    UmicomFatCommitField(shell, " metadata-sectors-completed=", result->completedMetadataSectors);
+    UmicomFatCommitField(shell, " metadata-sectors-submitted=", result->submittedMetadataSectors);
+    UmicomFatCommitField(shell, " flushes-completed=", result->completedFlushes);
+    UmicomFatConsoleText(shell, "\r\nfat.commit.observed");
+    UmicomFatCommitField(shell, " dirty-durable=", result->dirtyDurable ? 1U : 0U);
+    UmicomFatCommitField(shell, " dirty-verified=", result->dirtyVerified ? 1U : 0U);
+    UmicomFatCommitField(shell, " data-durable=", result->dataDurable ? 1U : 0U);
+    UmicomFatCommitField(shell, " data-verified=", result->dataVerified ? 1U : 0U);
+    UmicomFatCommitField(shell, " clean-started=", result->cleanFinalisationStarted ? 1U : 0U);
+    UmicomFatCommitField(shell, " clean-durable=", result->cleanDurable ? 1U : 0U);
+    UmicomFatCommitField(shell, " clean-verified=", result->cleanVerified ? 1U : 0U);
+    UmicomFatCommitField(shell, " commit-accepted=", result->commitAccepted ? 1U : 0U);
+    UmicomFatCommitField(shell, " needs-flush-at-return=", result->needsFlush ? 1U : 0U);
+    UmicomFatCommitField(shell, " write-uncertain-at-return=", result->writeUncertain ? 1U : 0U);
+    UmicomFatConsoleText(shell, "\r\n");
+    if (result->uncertainSectorValid) {
+        UmicomFatCommitField(shell, "fat.commit.uncertain-sector-lba=", result->uncertainSector);
+        UmicomFatConsoleText(shell, " sector-bytes-at-risk=512\r\n");
+    }
+    if (result->cleanFinalisationStarted && !result->commitAccepted)
+        UmicomFatConsoleText(shell, "Clean finalisation was submitted. A fresh reader may see a complete clean volume despite this error; do not retry automatically.\r\n");
+}
+static UmicomKernelFat16UpdateStatus UmicomFatCommitClose(UmicomKernelConsoleShell *shell)
+{
+    const UmicomKernelFat16UpdateStatus status = UmicomKernelFat16CommitClose(&umicomFatConsoleCommitter);
+    if (status == UMICOM_FAT16_UPDATE_OK && umicomFatConsoleCommitter.lastResult.mediaTouched &&
+        !umicomFatConsoleCommitter.lastResult.commitAccepted)
+        UmicomFatConsoleText(shell, "fat.commit.close=resources-released; update not accepted as committed; no flush or flag repair submitted\r\n");
+    return status;
+}
+UmicomKernelFat16UpdateStatus UmicomKernelFat16CommitConsoleClose(UmicomKernelConsoleShell *shell)
+{
+    if (!shell || !shell->output) return UMICOM_FAT16_UPDATE_INVALID_ARGUMENT;
+    if (!umicomFatCommitConsole) return UMICOM_FAT16_UPDATE_OK;
+    if (umicomFatCommitConsole != shell) return UMICOM_FAT16_UPDATE_BAD_STATE;
+    if (umicomFatCommitConsoleBusy) return UMICOM_FAT16_UPDATE_BUSY;
+    umicomFatCommitConsoleBusy = UMICOM_TRUE;
+    const UmicomKernelFat16UpdateStatus status = UmicomFatCommitClose(shell);
+    umicomFatCommitConsoleBusy = UMICOM_FALSE;
+    return status;
+}
+UmicomKernelShellStatus UmicomKernelFat16CommitCommand(UmicomKernelConsoleShell *shell,
+    const UmicomKernelShellCommand *command, UmicomBoolean *handled)
+{
+    if (!shell || !command || !handled || !shell->output) return UMICOM_SHELL_BAD_STATE;
+    *handled = UMICOM_FALSE;
+    if (!command->count) return UMICOM_SHELL_OK;
+    const char *const name = command->bytes + command->offsets[0];
+    const UmicomBoolean open = UmicomFatConsoleEqual(name, "fatcommitopen");
+    const UmicomBoolean stage = UmicomFatConsoleEqual(name, "fatstage");
+    const UmicomBoolean finish = UmicomFatConsoleEqual(name, "fatcommit");
+    const UmicomBoolean info = UmicomFatConsoleEqual(name, "fatcommitinfo");
+    const UmicomBoolean close = UmicomFatConsoleEqual(name, "fatcommitclose");
+    if (!open && !stage && !finish && !info && !close) return UMICOM_SHELL_OK;
+    *handled = UMICOM_TRUE;
+    if (command->count != (open ? 3U : stage ? 4U : 1U)) return UMICOM_SHELL_INVALID_ARGUMENT;
+    if (umicomFatCommitConsoleBusy) return UMICOM_SHELL_BUSY;
+    if (umicomFatCommitConsole && umicomFatCommitConsole != shell) return UMICOM_SHELL_BAD_STATE;
+    umicomFatCommitConsoleBusy = UMICOM_TRUE;
+    UmicomKernelFat16UpdateStatus status = UMICOM_FAT16_UPDATE_OK;
+    if (open) {
+        UmicomU64 slot = 0U, partition = 0U;
+        if (!UmicomKernelShellUnsigned(command->bytes + command->offsets[1], &slot) ||
+            !UmicomKernelShellUnsigned(command->bytes + command->offsets[2], &partition) ||
+            slot >= UMICOM_BLOCK_SLOT_LIMIT || partition >= UMICOM_DISK_PRIMARY_PARTITIONS) {
+            umicomFatCommitConsoleBusy = UMICOM_FALSE;
+            return UMICOM_SHELL_INVALID_ARGUMENT;
+        }
+        UmicomKernelBlockDomain *domain = (UmicomKernelBlockDomain *)0;
+        const UmicomKernelBlockStatus block = UmicomPlatformBlockDomainGet(&domain);
+        if (block != UMICOM_BLOCK_OK) {
+            UmicomFatConsoleText(shell, "fat.commit.transport=");
+            UmicomFatConsoleText(shell, UmicomKernelBlockStatusName(block));
+            UmicomFatConsoleText(shell, "\r\n");
+            status = UMICOM_FAT16_UPDATE_TRANSPORT_ERROR;
+        } else {
+            umicomFatCommitConsole = shell;
+            status = UmicomKernelFat16CommitOpen(&umicomFatConsoleCommitter, domain,
+                slot, partition, 10000000U);
+        }
+        UmicomFatCommitReport(shell, "fat.commit.open", status);
+        if (status == UMICOM_FAT16_UPDATE_OK)
+            UmicomFatConsoleText(shell, "Use fatstage PATH OFFSET \"TEXT\" to write and verify data with persistent dirty flags, then fatcommit to finish.\r\n");
+    } else if (stage || finish) {
+        UmicomU64 offset = 0U;
+        if (stage && !UmicomKernelShellUnsigned(command->bytes + command->offsets[2], &offset)) {
+            umicomFatCommitConsoleBusy = UMICOM_FALSE;
+            return UMICOM_SHELL_INVALID_ARGUMENT;
+        }
+        UmicomKernelFat16CommitResult result;
+        UmicomFatConsoleClear(&result, sizeof(result));
+        result.requestedBytes = ~(UmicomSize)0U;
+        if (stage) {
+            const char *const input = command->bytes + command->offsets[3];
+            UmicomSize bytes = 0U;
+            while (input[bytes]) ++bytes;
+            status = UmicomKernelFat16CommitStage(&umicomFatConsoleCommitter,
+                command->bytes + command->offsets[1], offset, input, bytes, &result);
+        } else status = UmicomKernelFat16CommitFinish(&umicomFatConsoleCommitter, &result);
+        UmicomFatCommitReport(shell, stage ? "fat.commit.stage" : "fat.commit.finish", status);
+        if (result.requestedBytes != ~(UmicomSize)0U)
+            UmicomFatCommitResult(shell, "fat.commit.result", &result);
+        else {
+            UmicomFatConsoleText(shell, "fat.commit.result=not-admitted; previous evidence retained\r\n");
+            if (umicomFatConsoleCommitter.lastResult.requestedBytes)
+                UmicomFatCommitResult(shell, "fat.commit.previous-result", &umicomFatConsoleCommitter.lastResult);
+        }
+        if (stage && status == UMICOM_FAT16_UPDATE_OK)
+            UmicomFatConsoleText(shell, "Data was flushed and verified. The volume remains dirty until fatcommit succeeds.\r\n");
+        UmicomFatConsoleClear(&result, sizeof(result));
+    } else if (close) {
+        status = UmicomFatCommitClose(shell);
+        UmicomFatCommitReport(shell, "fat.commit.release", status);
+    } else {
+        UmicomFatCommitReport(shell, "fat.commit.status", umicomFatConsoleCommitter.updater.lastStatus);
+        if (umicomFatConsoleCommitter.lastResult.requestedBytes)
+            UmicomFatCommitResult(shell, "fat.commit.last-result", &umicomFatConsoleCommitter.lastResult);
+    }
+    umicomFatCommitConsoleBusy = UMICOM_FALSE;
+    return status == UMICOM_FAT16_UPDATE_OK ? UMICOM_SHELL_OK : UMICOM_SHELL_IO_ERROR;
+}

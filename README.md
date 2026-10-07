@@ -161,3 +161,17 @@ allocation checks precede mutation, and partial or uncertain writes retain
 their evidence. See [Existing FAT16 data updates](docs/FAT16_DATA_UPDATES.md)
 and [FAT16 update validation](docs/FAT16_UPDATE_VALIDATION.md) for the supported
 profile, failure semantics, disposable-disk tests and integration commands.
+
+## Ordered FAT16 commits and persistent interruption detection
+
+The separate `fatcommitopen`, `fatstage` and `fatcommit` console path establishes
+durable dirty FAT guards before updating file data, verifies complete sectors,
+and explicitly finishes clean finalisation. An unfinished Stage remains dirty
+across resource-only Close and is refused by a fresh ordinary reader. Results
+retain partial writes and final-acknowledgement uncertainty. See
+[Ordered FAT16 commits](docs/FAT16_ORDERED_COMMITS.md) and
+[Commit validation and integration](docs/FAT16_COMMIT_VALIDATION.md).
+
+This remains a bounded existing-file data utility. Timestamp/ordinary directory
+metadata updates, allocation changes, general writable VFS access and recovery
+remain further work towards the persistent-system release gate.
