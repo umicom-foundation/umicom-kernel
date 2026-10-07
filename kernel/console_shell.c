@@ -21,6 +21,9 @@
  *---------------------------------------------------------------------------*/
 #ifdef UMICOM_KERNEL_READ_ONLY_BLOCK
 /* Disk inspection is separate from the RAM filesystem and uses no raw addresses. */
+#ifdef UMICOM_KERNEL_DISK_INSPECTION
+#include "umicom/kernel/disk_console.h"
+#endif
 #include "umicom/kernel/virtio_block.h"
 #endif
 #ifdef UMICOM_KERNEL_SERVICE_CONSOLE
@@ -480,8 +483,17 @@ UmicomKernelShellStatus UmicomKernelConsoleShellExecute(UmicomKernelConsoleShell
         return block == UMICOM_BLOCK_OK ? UMICOM_SHELL_OK : UMICOM_SHELL_IO_ERROR;
     }
 #endif
+#ifdef UMICOM_KERNEL_DISK_INSPECTION
+    /* Keep disk interpretation outside the RAMFS command implementation. */
+    UmicomBoolean diskHandled = UMICOM_FALSE;
+    const UmicomKernelShellStatus diskResult = UmicomKernelDiskInspectionCommand(shell, &command, &diskHandled);
+    if (diskHandled) { shell->busy = UMICOM_FALSE; return diskResult; }
+#endif
     UmicomBoolean poweroff = UMICOM_FALSE;
     if (UmicomShellEqual(name, "help") && command.count == 1U) {
+#ifdef UMICOM_KERNEL_DISK_INSPECTION
+        UmicomShellText(shell, "partitions SLOT | fatinfo SLOT PART | fatls SLOT PART PATH | fatcat SLOT PART PATH | diskclose\r\n");
+#endif
 #ifdef UMICOM_KERNEL_READ_ONLY_BLOCK
         UmicomShellText(shell, "disks | readsector SLOT LBA | blockclose (read-only block inspection)\r\n");
 #endif
@@ -756,6 +768,14 @@ UmicomKernelShellStatus UmicomKernelConsoleShellClose(UmicomKernelConsoleShell *
     /* Stop background instances before dismantling this console's file owners.
      * A refused cleanup remains retryable; poweroff must not bypass it. */
     if (UmicomKernelServiceConsoleClose(shell) != UMICOM_SHELL_OK) {
+        shell->busy = UMICOM_FALSE;
+        return UMICOM_SHELL_CLEANUP_FAILED;
+    }
+#endif
+#ifdef UMICOM_KERNEL_DISK_INSPECTION
+    /* A timed-out transport may still own DMA pages. Retire it before the
+     * console reports successful shutdown; preserve failures for retry. */
+    if (UmicomKernelDiskInspectionClose() != UMICOM_BLOCK_OK) {
         shell->busy = UMICOM_FALSE;
         return UMICOM_SHELL_CLEANUP_FAILED;
     }

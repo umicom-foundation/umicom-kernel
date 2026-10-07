@@ -50,7 +50,12 @@ void UmicomKernelBlockReport(void *context, UmicomKernelBlockOutput output)
     }
     UmicomBlockText(context, output,
         "Identity probe only. readsector SLOT LBA requires a modern, read-only block backend.\r\n"
+        /* This earlier system-wide sentence predates the read-only inspectors.
+         * Keep it for review, but describe this raw transport accurately now. */
+#if 0
         "No partitions, filesystems or disk writes are enabled. blockclose retries retained cleanup.\r\n");
+#endif
+        "Raw reads only; no mounts or disk writes. blockclose retries retained cleanup.\r\n");
 }
 UmicomKernelBlockStatus UmicomKernelBlockRetryClose(void)
 {

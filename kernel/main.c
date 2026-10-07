@@ -40,6 +40,8 @@
  *---------------------------------------------------------------------------*/
 
 /* Qualify and test read-only transport ownership after hardware discovery. */
+/* Separate disk-fixture entry; existing diagnostic and normal paths remain. */
+#include "umicom/kernel/disk_console.h"
 #include "umicom/kernel/virtio_block.h"
 
 /* Read firmware descriptions without probing or binding devices. */
@@ -1421,6 +1423,11 @@ static void RunHardwareAddressTranslationTest(void)
 
 void UmicomKernelMain(UmicomU64 hartId, UmicomAddress deviceTreeAddress)
 {
+#ifdef UMICOM_KERNEL_DISK_INSPECTION_TEST
+    /* This explicitly selected image uses a different synthetic disk. It must
+     * not weaken or relabel the older raw-sector acceptance sequence. */
+    UmicomKernelDiskInspectionBoot(hartId, deviceTreeAddress);
+#endif
 #ifdef UMICOM_KERNEL_NORMAL_BOOT
     /* The normal/recovery entries establish their own boot prerequisites and
      * do not execute the cumulative diagnostic path retained below. */

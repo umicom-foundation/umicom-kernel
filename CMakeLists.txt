@@ -528,3 +528,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/HardwareDiscovery.cmake")
 # Own qualified device transports and read synthetic disk sectors without writes.
 # The RAM filesystem and recovery path remain independent of block-device access.
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/ReadOnlyBlock.cmake")
+
+# Interpret bounded primary partitions and FAT16 files above read-only sectors.
+# The original raw-block fixture and the writable RAM filesystem stay separate.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/DiskInspection.cmake")
