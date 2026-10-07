@@ -47,6 +47,10 @@
 /* Ordered updates retain a dirty-volume guard until explicit finalisation. */
 #include "umicom/kernel/fat16_commit_console.h"
 #endif
+#ifdef UMICOM_KERNEL_FAT16_FILE_COMMIT
+/* Explicit calendar metadata uses the ordered commit transport and its own owner. */
+#include "umicom/kernel/fat16_file_commit_console.h"
+#endif
 #ifdef UMICOM_KERNEL_TERMINAL
 #include "umicom/kernel/console_terminal.h"
 #endif
@@ -519,8 +523,18 @@ UmicomKernelShellStatus UmicomKernelConsoleShellExecute(UmicomKernelConsoleShell
         &command, &commitHandled);
     if (commitHandled) { shell->busy = UMICOM_FALSE; return commitResult; }
 #endif
+#ifdef UMICOM_KERNEL_FAT16_FILE_COMMIT
+    UmicomBoolean fileCommitHandled = UMICOM_FALSE;
+    const UmicomKernelShellStatus fileCommitResult = UmicomKernelFat16FileCommitCommand(shell,
+        &command, &fileCommitHandled);
+    if (fileCommitHandled) { shell->busy = UMICOM_FALSE; return fileCommitResult; }
+#endif
     UmicomBoolean poweroff = UMICOM_FALSE;
     if (UmicomShellEqual(name, "help") && command.count == 1U) {
+#ifdef UMICOM_KERNEL_FAT16_FILE_COMMIT
+        UmicomShellText(shell, "fatfileopen SLOT PART | fatfiletime YYYY-MM-DDTHH:MM:SS | fatfilestage PATH OFFSET \"TEXT\" | fatfilecommit | fatfileinfo | fatfileclose\r\n");
+        UmicomShellText(shell, "File commits set ARCHIVE and the supplied write time. Stage leaves dirty flags; only fatfilecommit finishes.\r\n");
+#endif
 #ifdef UMICOM_KERNEL_FAT16_UPDATE
         UmicomShellText(shell, "fatwriteopen SLOT PART | fatwrite PATH OFFSET \"TEXT\" | fatflush | fatwriteinfo | fatwriteclose\r\n");
         UmicomShellText(shell, "FAT updates preserve allocation and size. Flush explicitly before closing or powering off.\r\n");
@@ -561,6 +575,9 @@ UmicomKernelShellStatus UmicomKernelConsoleShellExecute(UmicomKernelConsoleShell
             "write truncates an existing file. runrw grants all rights on this RAMFS.\r\n");
     } else if (UmicomShellEqual(name, "about") && command.count == 1U) {
         UmicomShellText(shell, "Umicom Kernel - trusted development console\r\n"
+#ifdef UMICOM_KERNEL_FAT16_FILE_COMMIT
+            "RAM-backed files, native programs and timestamped FAT16 file commits; no login.\r\n");
+#else
 #ifdef UMICOM_KERNEL_FAT16_COMMIT
             "RAM-backed files, native programs and ordered FAT16 data commits; no login.\r\n");
 #else
@@ -573,6 +590,7 @@ UmicomKernelShellStatus UmicomKernelConsoleShellExecute(UmicomKernelConsoleShell
             "RAM-backed files, foreground native programs; no login or persistent disk.\r\n");
 #endif
 #endif
+#endif /* Preserve the established about strings for their original profiles. */
     } else if (UmicomShellEqual(name, "pwd") && command.count == 1U) {
         UmicomShellText(shell, "/\r\n"); /* There is no mutable working directory. */
     } else if (UmicomShellEqual(name, "status") && command.count == 1U) {
@@ -852,6 +870,13 @@ UmicomKernelShellStatus UmicomKernelConsoleShellClose(UmicomKernelConsoleShell *
     /* An unfinished Stage remains dirty on disk. Teardown releases resources
      * and retains failed cleanup for retry; it cannot invent a clean commit. */
     if (UmicomKernelFat16CommitConsoleClose(shell) != UMICOM_FAT16_UPDATE_OK) {
+        shell->busy = UMICOM_FALSE;
+        return UMICOM_SHELL_CLEANUP_FAILED;
+    }
+#endif
+#ifdef UMICOM_KERNEL_FAT16_FILE_COMMIT
+    /* Shutdown releases the timestamped owner without publishing clean flags. */
+    if (UmicomKernelFat16FileCommitConsoleClose(shell) != UMICOM_FAT16_UPDATE_OK) {
         shell->busy = UMICOM_FALSE;
         return UMICOM_SHELL_CLEANUP_FAILED;
     }

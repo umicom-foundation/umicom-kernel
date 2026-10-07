@@ -549,6 +549,10 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/Fat16Update.cmake")
 # of deliberately unfinished updates on two separate disposable disk copies.
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/Fat16Commit.cmake")
 
+# Qualify explicit write timestamps and ARCHIVE updates under persistent dirty
+# guards, with independent complete-media checks in fresh read-only guests.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/Fat16FileCommit.cmake")
+
 # Preserve the linked Kernel entry while supporting QEMU firmware reset at RAM base.
 # Apply the same verified bridge to every Kernel-linked image after cloning.
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/FirmwareEntry.cmake")

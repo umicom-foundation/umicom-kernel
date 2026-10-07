@@ -418,3 +418,238 @@ UmicomKernelShellStatus UmicomKernelFat16CommitCommand(UmicomKernelConsoleShell 
     umicomFatCommitConsoleBusy = UMICOM_FALSE;
     return status == UMICOM_FAT16_UPDATE_OK ? UMICOM_SHELL_OK : UMICOM_SHELL_IO_ERROR;
 }
+
+/* Explicit calendar metadata has a separate single-use console owner. Existing
+ * data-only commands remain intact. No host time, RTC or elapsed Kernel ticks
+ * is silently turned into a filesystem timestamp. */
+#include "umicom/kernel/fat16_file_commit_console.h"
+static UmicomKernelFat16FileCommitter umicomFatFileConsoleCommitter;
+static UmicomKernelConsoleShell *umicomFatFileCommitConsole;
+static UmicomBoolean umicomFatFileCommitConsoleBusy;
+static UmicomKernelFat16FileTime umicomFatFileConsoleTime;
+static UmicomBoolean umicomFatFileConsoleTimeSet;
+
+static UmicomBoolean UmicomFatFileCalendar(const char *text, UmicomKernelFat16FileTime *time)
+{
+    /* Fixed-width syntax makes missing fields, suffixes, signs, spaces and
+     * timezone claims unambiguous. Semantic Gregorian validation is shared
+     * with the planner rather than approximated in the console. */
+    static const UmicomSize positions[6] = {0U, 5U, 8U, 11U, 14U, 17U};
+    static const UmicomSize widths[6] = {4U, 2U, 2U, 2U, 2U, 2U};
+    UmicomSize length = 0U;
+    while (length < 20U && text[length]) ++length;
+    if (length != 19U || text[4] != '-' || text[7] != '-' || text[10] != 'T' ||
+        text[13] != ':' || text[16] != ':') return UMICOM_FALSE;
+    UmicomU16 fields[6] = {0U, 0U, 0U, 0U, 0U, 0U};
+    for (UmicomSize field = 0U; field < 6U; ++field) {
+        for (UmicomSize digit = 0U; digit < widths[field]; ++digit) {
+            const char value = text[positions[field] + digit];
+            if (value < '0' || value > '9') return UMICOM_FALSE;
+            fields[field] = (UmicomU16)((UmicomU32)fields[field] * 10U + (UmicomU32)(value - '0'));
+        }
+    }
+    const UmicomKernelFat16FileTime staged = {fields[0], fields[1], fields[2], fields[3], fields[4], fields[5]};
+    UmicomKernelFat16FileTimeEncoding encoded;
+    if (UmicomKernelFat16FileTimeEncode(&staged, &encoded) != UMICOM_DISK_OK) return UMICOM_FALSE;
+    *time = staged;
+    return UMICOM_TRUE;
+}
+static void UmicomFatFileDigits(UmicomKernelConsoleShell *shell, UmicomU16 value, UmicomSize width)
+{
+    char digits[4];
+    for (UmicomSize i = width; i > 0U; --i) {
+        digits[i - 1U] = (char)('0' + value % 10U);
+        value = (UmicomU16)(value / 10U);
+    }
+    shell->output(shell->outputContext, digits, width);
+}
+static void UmicomFatFileTime(UmicomKernelConsoleShell *shell, const UmicomKernelFat16FileTime *time)
+{
+    UmicomFatFileDigits(shell, time->year, 4U); UmicomFatConsoleText(shell, "-");
+    UmicomFatFileDigits(shell, time->month, 2U); UmicomFatConsoleText(shell, "-");
+    UmicomFatFileDigits(shell, time->day, 2U); UmicomFatConsoleText(shell, "T");
+    UmicomFatFileDigits(shell, time->hour, 2U); UmicomFatConsoleText(shell, ":");
+    UmicomFatFileDigits(shell, time->minute, 2U); UmicomFatConsoleText(shell, ":");
+    UmicomFatFileDigits(shell, time->second, 2U);
+}
+static void UmicomFatFileCommitReport(UmicomKernelConsoleShell *shell, const char *operation,
+    UmicomKernelFat16UpdateStatus status)
+{
+    const UmicomKernelFat16Updater *const base = &umicomFatFileConsoleCommitter.commit.updater;
+    UmicomFatConsoleText(shell, operation); UmicomFatConsoleText(shell, "=");
+    UmicomFatConsoleText(shell, UmicomKernelFat16UpdateStatusName(status));
+    UmicomFatConsoleText(shell, " last-cleanup=");
+    UmicomFatConsoleText(shell, UmicomKernelBlockStatusName(base->lastCleanupStatus));
+    UmicomFatConsoleText(shell, " last-disk=");
+    UmicomFatConsoleText(shell, UmicomKernelDiskStatusName(base->lastDiskStatus));
+    UmicomFatConsoleText(shell, " last-block=");
+    UmicomFatConsoleText(shell, UmicomKernelBlockStatusName(base->lastBlockStatus));
+    UmicomFatConsoleText(shell, "\r\nfat.file-state=");
+    UmicomFatConsoleText(shell, UmicomKernelFat16CommitStateName(umicomFatFileConsoleCommitter.commit.state));
+    UmicomFatCommitField(shell, " slot=", base->slot);
+    UmicomFatCommitField(shell, " partition=", base->partition);
+    UmicomFatCommitField(shell, " needs-flush=", base->needsFlush ? 1U : 0U);
+    UmicomFatCommitField(shell, " write-uncertain=", base->writeUncertain ? 1U : 0U);
+    UmicomFatConsoleText(shell, "\r\n");
+}
+static void UmicomFatFileCommitResult(UmicomKernelConsoleShell *shell, const char *label,
+    const UmicomKernelFat16FileCommitResult *result)
+{
+    /* The common lines are labelled fat.commit: their counters describe this
+     * file result and include directory metadata as documented in the API. */
+    UmicomFatCommitResult(shell, label, &result->commit);
+    UmicomFatCommitField(shell, "fat.file.directory-planned=", result->directoryPlanned ? 1U : 0U);
+    if (result->directoryPlanned) {
+        UmicomFatCommitField(shell, " sector=", result->directorySector);
+        UmicomFatCommitField(shell, " entry-offset=", result->entryOffset);
+        UmicomFatCommitField(shell, " attributes-before=", result->originalAttributes);
+        UmicomFatCommitField(shell, " attributes-after=", result->updatedAttributes);
+        UmicomFatConsoleText(shell, "\r\nfat.file.requested-time=");
+        UmicomFatFileTime(shell, &result->requestedTime);
+        UmicomKernelFat16FileTime stored = result->requestedTime;
+        stored.second = result->encodedTime.storedSecond;
+        UmicomFatConsoleText(shell, " stored-time="); UmicomFatFileTime(shell, &stored);
+        UmicomFatCommitField(shell, " fat-write-date=", result->encodedTime.writeDate);
+        UmicomFatCommitField(shell, " fat-write-time=", result->encodedTime.writeTime);
+    }
+    UmicomFatConsoleText(shell, "\r\nfat.file.directory-observed");
+    UmicomFatCommitField(shell, " submitted=", result->directorySubmitted ? 1U : 0U);
+    UmicomFatCommitField(shell, " completed=", result->directoryCompleted ? 1U : 0U);
+    UmicomFatCommitField(shell, " durable=", result->directoryDurable ? 1U : 0U);
+    UmicomFatCommitField(shell, " verified=", result->directoryVerified ? 1U : 0U);
+    UmicomFatConsoleText(shell, "\r\n");
+}
+static UmicomKernelFat16UpdateStatus UmicomFatFileCommitClose(UmicomKernelConsoleShell *shell)
+{
+    const UmicomKernelFat16UpdateStatus status = UmicomKernelFat16FileCommitClose(&umicomFatFileConsoleCommitter);
+    if (status == UMICOM_FAT16_UPDATE_OK && umicomFatFileConsoleCommitter.lastResult.commit.mediaTouched &&
+        !umicomFatFileConsoleCommitter.lastResult.commit.commitAccepted)
+        UmicomFatConsoleText(shell, "fat.file.close=resources-released; file commit not accepted; no flush or flag repair submitted\r\n");
+    if (status == UMICOM_FAT16_UPDATE_OK) {
+        UmicomFatConsoleClear(&umicomFatFileConsoleTime, sizeof(umicomFatFileConsoleTime));
+        umicomFatFileConsoleTimeSet = UMICOM_FALSE;
+    }
+    return status;
+}
+UmicomKernelFat16UpdateStatus UmicomKernelFat16FileCommitConsoleClose(UmicomKernelConsoleShell *shell)
+{
+    if (!shell || !shell->output) return UMICOM_FAT16_UPDATE_INVALID_ARGUMENT;
+    if (!umicomFatFileCommitConsole) return UMICOM_FAT16_UPDATE_OK;
+    if (umicomFatFileCommitConsole != shell) return UMICOM_FAT16_UPDATE_BAD_STATE;
+    if (umicomFatFileCommitConsoleBusy) return UMICOM_FAT16_UPDATE_BUSY;
+    umicomFatFileCommitConsoleBusy = UMICOM_TRUE;
+    const UmicomKernelFat16UpdateStatus status = UmicomFatFileCommitClose(shell);
+    umicomFatFileCommitConsoleBusy = UMICOM_FALSE;
+    return status;
+}
+UmicomKernelShellStatus UmicomKernelFat16FileCommitCommand(UmicomKernelConsoleShell *shell,
+    const UmicomKernelShellCommand *command, UmicomBoolean *handled)
+{
+    if (!shell || !command || !handled || !shell->output) return UMICOM_SHELL_BAD_STATE;
+    *handled = UMICOM_FALSE;
+    if (!command->count) return UMICOM_SHELL_OK;
+    const char *const name = command->bytes + command->offsets[0];
+    const UmicomBoolean open = UmicomFatConsoleEqual(name, "fatfileopen");
+    const UmicomBoolean calendar = UmicomFatConsoleEqual(name, "fatfiletime");
+    const UmicomBoolean stage = UmicomFatConsoleEqual(name, "fatfilestage");
+    const UmicomBoolean finish = UmicomFatConsoleEqual(name, "fatfilecommit");
+    const UmicomBoolean info = UmicomFatConsoleEqual(name, "fatfileinfo");
+    const UmicomBoolean close = UmicomFatConsoleEqual(name, "fatfileclose");
+    if (!open && !calendar && !stage && !finish && !info && !close) return UMICOM_SHELL_OK;
+    *handled = UMICOM_TRUE;
+    if (command->count != (open ? 3U : calendar ? 2U : stage ? 4U : 1U)) return UMICOM_SHELL_INVALID_ARGUMENT;
+    if (umicomFatFileCommitConsoleBusy) return UMICOM_SHELL_BUSY;
+    if (umicomFatFileCommitConsole && umicomFatFileCommitConsole != shell) return UMICOM_SHELL_BAD_STATE;
+    umicomFatFileCommitConsoleBusy = UMICOM_TRUE;
+    UmicomKernelFat16UpdateStatus status = UMICOM_FAT16_UPDATE_OK;
+    if (open) {
+        UmicomU64 slot = 0U, partition = 0U;
+        if (!UmicomKernelShellUnsigned(command->bytes + command->offsets[1], &slot) ||
+            !UmicomKernelShellUnsigned(command->bytes + command->offsets[2], &partition) ||
+            slot >= UMICOM_BLOCK_SLOT_LIMIT || partition >= UMICOM_DISK_PRIMARY_PARTITIONS) {
+            umicomFatFileCommitConsoleBusy = UMICOM_FALSE;
+            return UMICOM_SHELL_INVALID_ARGUMENT;
+        }
+        UmicomKernelBlockDomain *domain = (UmicomKernelBlockDomain *)0;
+        const UmicomKernelBlockStatus block = UmicomPlatformBlockDomainGet(&domain);
+        if (block != UMICOM_BLOCK_OK) {
+            UmicomFatConsoleText(shell, "fat.file.transport=");
+            UmicomFatConsoleText(shell, UmicomKernelBlockStatusName(block));
+            UmicomFatConsoleText(shell, "\r\n");
+            status = UMICOM_FAT16_UPDATE_TRANSPORT_ERROR;
+        } else {
+            umicomFatFileCommitConsole = shell;
+            status = UmicomKernelFat16FileCommitOpen(&umicomFatFileConsoleCommitter, domain,
+                slot, partition, 10000000U);
+        }
+        UmicomFatFileCommitReport(shell, "fat.file.open", status);
+        if (status == UMICOM_FAT16_UPDATE_OK)
+            UmicomFatConsoleText(shell, "Use fatfiletime YYYY-MM-DDTHH:MM:SS, then fatfilestage PATH OFFSET \"TEXT\" and fatfilecommit. Seconds are floored to two-second precision; no timezone is inferred.\r\n");
+    } else if (calendar) {
+        UmicomKernelFat16FileTime time;
+        UmicomFatConsoleClear(&time, sizeof(time));
+        if (!UmicomFatFileCalendar(command->bytes + command->offsets[1], &time)) {
+            UmicomFatConsoleText(shell, "fat.file.time=invalid-argument; expected a valid 1980..2107 calendar as YYYY-MM-DDTHH:MM:SS\r\n");
+            umicomFatFileCommitConsoleBusy = UMICOM_FALSE;
+            return UMICOM_SHELL_INVALID_ARGUMENT;
+        }
+        if (umicomFatFileConsoleCommitter.self != &umicomFatFileConsoleCommitter ||
+            umicomFatFileConsoleCommitter.commit.state != UMICOM_FAT16_COMMIT_READY) {
+            status = UMICOM_FAT16_UPDATE_BAD_STATE;
+        } else {
+            umicomFatFileConsoleTime = time;
+            umicomFatFileConsoleTimeSet = UMICOM_TRUE;
+        }
+        UmicomFatFileCommitReport(shell, "fat.file.time", status);
+        if (status == UMICOM_FAT16_UPDATE_OK) {
+            UmicomFatConsoleText(shell, "fat.file.selected-time=");
+            UmicomFatFileTime(shell, &time);
+            time.second = (UmicomU16)((time.second / 2U) * 2U);
+            UmicomFatConsoleText(shell, " stored-time=");
+            UmicomFatFileTime(shell, &time);
+            UmicomFatConsoleText(shell, "\r\n");
+        }
+        UmicomFatConsoleClear(&time, sizeof(time));
+    } else if (stage || finish) {
+        UmicomU64 offset = 0U;
+        if (stage && !UmicomKernelShellUnsigned(command->bytes + command->offsets[2], &offset)) {
+            umicomFatFileCommitConsoleBusy = UMICOM_FALSE;
+            return UMICOM_SHELL_INVALID_ARGUMENT;
+        }
+        if (stage && !umicomFatFileConsoleTimeSet) {
+            UmicomFatConsoleText(shell, "fat.file.stage=bad-state; select an explicit calendar with fatfiletime first; previous evidence retained\r\n");
+            umicomFatFileCommitConsoleBusy = UMICOM_FALSE;
+            return UMICOM_SHELL_IO_ERROR;
+        }
+        UmicomKernelFat16FileCommitResult result;
+        UmicomFatConsoleClear(&result, sizeof(result));
+        result.commit.requestedBytes = ~(UmicomSize)0U;
+        if (stage) {
+            const char *const input = command->bytes + command->offsets[3];
+            UmicomSize bytes = 0U;
+            while (input[bytes]) ++bytes;
+            status = UmicomKernelFat16FileCommitStage(&umicomFatFileConsoleCommitter,
+                command->bytes + command->offsets[1], offset, input, bytes, &umicomFatFileConsoleTime, &result);
+        } else status = UmicomKernelFat16FileCommitFinish(&umicomFatFileConsoleCommitter, &result);
+        UmicomFatFileCommitReport(shell, stage ? "fat.file.stage" : "fat.file.finish", status);
+        if (result.commit.requestedBytes != ~(UmicomSize)0U)
+            UmicomFatFileCommitResult(shell, "fat.file.result", &result);
+        else {
+            UmicomFatConsoleText(shell, "fat.file.result=not-admitted; previous evidence retained\r\n");
+            if (umicomFatFileConsoleCommitter.lastResult.commit.requestedBytes)
+                UmicomFatFileCommitResult(shell, "fat.file.previous-result", &umicomFatFileConsoleCommitter.lastResult);
+        }
+        if (stage && status == UMICOM_FAT16_UPDATE_OK)
+            UmicomFatConsoleText(shell, "File data and directory metadata were flushed and verified. The volume remains dirty until fatfilecommit succeeds.\r\n");
+        UmicomFatConsoleClear(&result, sizeof(result));
+    } else if (close) {
+        status = UmicomFatFileCommitClose(shell);
+        UmicomFatFileCommitReport(shell, "fat.file.release", status);
+    } else {
+        UmicomFatFileCommitReport(shell, "fat.file.status", umicomFatFileConsoleCommitter.commit.updater.lastStatus);
+        if (umicomFatFileConsoleCommitter.lastResult.commit.requestedBytes)
+            UmicomFatFileCommitResult(shell, "fat.file.last-result", &umicomFatFileConsoleCommitter.lastResult);
+    }
+    umicomFatFileCommitConsoleBusy = UMICOM_FALSE;
+    return status == UMICOM_FAT16_UPDATE_OK ? UMICOM_SHELL_OK : UMICOM_SHELL_IO_ERROR;
+}

@@ -50,6 +50,10 @@ typedef enum UmicomKernelFat16CommitPhase {
     UMICOM_FAT16_COMMIT_CLEAN_PRIMARY_FLUSH,
     UMICOM_FAT16_COMMIT_CLEAN_VERIFY,
     UMICOM_FAT16_COMMIT_COMPLETE
+    /* Append new phases without changing any established value or line. */
+    , UMICOM_FAT16_COMMIT_DIRECTORY_WRITE
+    , UMICOM_FAT16_COMMIT_DIRECTORY_FLUSH
+    , UMICOM_FAT16_COMMIT_DIRECTORY_VERIFY
 } UmicomKernelFat16CommitPhase;
 
 /* Cumulative evidence for this owner's one update. Completion of a request,

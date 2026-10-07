@@ -99,6 +99,7 @@ void UmicomKernelConsoleShellRun(void)
 #endif
     UmicomKernelConsoleWriteLine("RAMFS is volatile. Explicit FAT16 data updates use fatwrite and fatflush.");
     UmicomKernelConsoleWriteLine("Ordered FAT16 updates use fatcommitopen, fatstage and fatcommit; unfinished stages remain dirty.");
+    UmicomKernelConsoleWriteLine("Timestamped FAT16 file updates use fatfileopen, fatfilestage and fatfilecommit; supply the calendar time explicitly.");
     UmicomKernelConsoleShellPrompt(&umicomInteractiveShell);
     while (!umicomInteractiveShell.exitRequested) {
 #ifdef UMICOM_KERNEL_SERVICE_CONSOLE
