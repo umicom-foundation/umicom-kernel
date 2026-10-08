@@ -113,7 +113,9 @@ set(UMICOM_LIFECYCLE_PLAN_CASES
     create.refusal.bad_operation
     create.refusal.relative
     create.refusal.parent_path
-    create.refusal.full_parent
+    # The old fixed-parent expectation remains in the test source for review.
+    # create.refusal.full_parent
+    create.success.parent_growth
     create.refusal.no_clusters
     create.refusal.io_budget
     create.refusal.orphan
@@ -486,4 +488,171 @@ set(UMICOM_LIFECYCLE_TRANSPORT_CASES
 foreach(UMICOM_CASE IN LISTS UMICOM_LIFECYCLE_TRANSPORT_CASES)
     add_test(NAME "fat16-lifecycle.transport.${UMICOM_CASE}" COMMAND umicom-fat16-lifecycle-tests "${UMICOM_CASE}" "${CMAKE_CURRENT_SOURCE_DIR}/../disk_inspection/fixture.raw")
     set_tests_properties("fat16-lifecycle.transport.${UMICOM_CASE}" PROPERTIES TIMEOUT 180)
+endforeach()
+
+# Directory cases use the same real transport with a separate raw-media oracle.
+set(UMICOM_DIRECTORY_CASES
+    move.rename-directory
+    move.rename-file
+    move.move-file
+    move.move-empty
+    move.move-directory
+    move.to-root
+    move.boundary
+    move.console
+    move.snapshot
+    move.full-parent-rename
+    move.depth.empty
+    move.depth.leaf
+    move.refusal.cycle
+    move.refusal.root
+    move.refusal.collision
+    move.refusal.same-name
+    move.refusal.missing-parent
+    move.refusal.readonly-source
+    move.refusal.readonly-destination
+    move.refusal.readonly-parent
+    move.refusal.full
+    move.guard.null
+    move.guard.owner
+    move.guard.output
+    move.guard.request
+    move.guard.source
+    move.guard.domain
+    move.guard.unterminated
+    move.guard.calendar
+    move.guard.payload
+    move.move-directory.fault.read
+    move.move-directory.fault.write
+    move.move-directory.fault.flush
+    move.move-directory.fault.drop
+    move.move-directory.fault.alter
+    move.move-directory.fault.cut-cached
+    move.move-directory.fault.cut-eager
+    move.boundary.fault.read
+    move.boundary.fault.write
+    move.boundary.fault.flush
+    move.boundary.fault.drop
+    move.boundary.fault.alter
+    move.boundary.fault.cut-cached
+    move.boundary.fault.cut-eager
+    query.guard.null-path
+    query.guard.request-alignment
+    query.guard.output-alignment
+    query.guard.output-domain
+    query.callbacks.reentry
+    query.callbacks.timeout
+    query.callbacks.rollback
+    query.success.stat
+    query.success.list
+    query.success.read
+    query.success.eof
+    query.guard.null-request
+    query.guard.null-output
+    query.guard.request-owner
+    query.guard.output-owner
+    query.guard.request-output
+    query.guard.path-owner
+    query.guard.path-output
+    query.guard.path-request
+    query.guard.unterminated
+    query.guard.kind
+    query.guard.stat-offset
+    query.guard.stat-capacity
+    query.guard.read-zero
+    query.guard.read-overflow
+    query.guard.copied
+    query.guard.busy
+    query.guard.failed
+    query.refusal.missing
+    query.refusal.file-list
+    query.refusal.directory-read
+    query.failures.stat
+    query.failures.list
+    query.failures.read
+    query.staged
+    query.console
+    geometry.two-sector
+    geometry.scan-boundary
+    geometry.beyond-scan-bound
+    capacity.fixed-root
+    capacity.growth-allocation-bound
+    capacity.no-free-cluster
+    arguments.mkdir-input
+    arguments.mkdir-bytes
+    arguments.mkdir-size
+    arguments.mkdir-time
+    arguments.remove-input
+    arguments.remove-bytes
+    arguments.remove-size
+    arguments.remove-time
+    collision.existing-file
+    collision.existing-directory
+    collision.missing-parent
+    collision.file-parent
+    collision.readonly-parent
+    mkdir.growth.fragmented
+    mkdir.growth.fragmented.fault.read
+    mkdir.growth.fragmented.fault.write
+    mkdir.growth.fragmented.fault.flush
+    mkdir.growth.fragmented.fault.drop
+    mkdir.growth.fragmented.fault.alter
+    mkdir.growth.fragmented.fault.cut-cached
+    mkdir.growth.fragmented.fault.cut-eager
+    mkdir.root
+    mkdir.nested
+    mkdir.growth
+    remove.root
+    remove.nested
+    remove.chain
+    sequence
+    console
+    refusal.nonempty
+    refusal.root
+    refusal.file
+    refusal.readonly
+    refusal.bad-dot
+    refusal.bad-parent
+    refusal.missing
+    mkdir.root.fault.read
+    mkdir.root.fault.write
+    mkdir.root.fault.flush
+    mkdir.root.fault.drop
+    mkdir.root.fault.alter
+    mkdir.root.fault.cut-cached
+    mkdir.root.fault.cut-eager
+    mkdir.growth.fault.read
+    mkdir.growth.fault.write
+    mkdir.growth.fault.flush
+    mkdir.growth.fault.drop
+    mkdir.growth.fault.alter
+    mkdir.growth.fault.cut-cached
+    mkdir.growth.fault.cut-eager
+    remove.chain.fault.read
+    remove.chain.fault.write
+    remove.chain.fault.flush
+    remove.chain.fault.drop
+    remove.chain.fault.alter
+    remove.chain.fault.cut-cached
+    remove.chain.fault.cut-eager)
+foreach(UMICOM_CASE IN LISTS UMICOM_DIRECTORY_CASES)
+    add_test(NAME "fat16-directory.${UMICOM_CASE}"
+        COMMAND umicom-fat16-lifecycle-tests "directory.${UMICOM_CASE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../fat16_file_commit/fixture.raw")
+    set_tests_properties("fat16-directory.${UMICOM_CASE}" PROPERTIES TIMEOUT 180)
+endforeach()
+
+# A separate native executable checks host-generated checkpoint images using
+# the guest's independent byte oracle before QEMU ever mutates a disposable copy.
+add_executable(umicom-fat16-directory-image-verify ../fat16_directories/image_verify.c)
+target_include_directories(umicom-fat16-directory-image-verify PRIVATE "${UMICOM_ROOT}/include")
+target_compile_options(umicom-fat16-directory-image-verify PRIVATE
+    -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)
+
+# The read-only planner must reject overlapping destination storage before I/O.
+foreach(UMICOM_MOVE_PLAN_CASE IN ITEMS success read-failures null volume workspace scratch output request source unterminated)
+    add_test(NAME "fat16-lifecycle.plan.move.${UMICOM_MOVE_PLAN_CASE}"
+        COMMAND umicom-fat16-lifecycle-plan-tests "move.${UMICOM_MOVE_PLAN_CASE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../disk_inspection/fixture.raw")
+    set_tests_properties("fat16-lifecycle.plan.move.${UMICOM_MOVE_PLAN_CASE}" PROPERTIES TIMEOUT 180)
 endforeach()

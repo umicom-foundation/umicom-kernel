@@ -68,6 +68,7 @@ typedef struct UmicomKernelFat16LifecycleCommitter {
     UmicomKernelFat16LifecyclePlan plan;
     UmicomKernelFat16LifecycleRequest request;
     char path[UMICOM_FAT16_PATH_BYTES];
+    char destination[UMICOM_FAT16_PATH_BYTES];
     UmicomU8 input[UMICOM_FAT16_UPDATE_BYTES];
     UmicomU8 finalDirtyHeader[UMICOM_DISK_SECTOR_BYTES];
     UmicomU64 committedOperations;
@@ -82,6 +83,22 @@ typedef struct UmicomKernelFat16LifecycleCommitter {
 UmicomKernelFat16UpdateStatus UmicomKernelFat16LifecycleOpen(
     UmicomKernelFat16LifecycleCommitter *owner, UmicomKernelBlockDomain *domain,
     UmicomSize slot, UmicomSize partition, UmicomU64 timeoutTicks);
+
+/* MOVE uses this same lease and leaves allocation unchanged. With both FAT
+ * headers durably dirty, it updates a directory's parent reference, tombstones
+ * the old entry, prepares a successor marker if needed, then exposes the new
+ * entry. Each distinct sector is flushed and verified. Same-parent rename
+ * changes its existing sector alone. Finish rechecks all images before CLEAN.
+ * Interruption can leave a missing or inconsistent namespace; release does not
+ * repair it. An error after submission permits Close only. */
+
+/* Directory operations use this same owner. CREATE_DIRECTORY initializes dot
+ * entries and allocation before publication; REMOVE_DIRECTORY tombstones an
+ * empty directory before freeing its chain. A parent extension publishes its
+ * prepared entry with the new FAT link, so its initialization write is counted
+ * as data and is not repeated as an identical directory-sector submission.
+ * The original regular-file protocol description below is retained for review;
+ * its per-directory-write statement is superseded for that extension case. */
 
 /* Admit a request in READY or after the preceding accepted Finish. Snapshot
  * request/path/payload before media callbacks; re-open the clean inspector,

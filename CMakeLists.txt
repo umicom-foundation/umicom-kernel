@@ -572,3 +572,6 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/Fat16Lifecycle.cmake")
 # Preserve the linked Kernel entry while supporting QEMU firmware reset at RAM base.
 # Apply the same verified bridge to every Kernel-linked image after cloning.
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/FirmwareEntry.cmake")
+
+# Independent directory lifecycle guests reuse the Kernel source graph.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/Fat16Directory.cmake")

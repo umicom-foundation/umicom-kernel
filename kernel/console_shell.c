@@ -538,6 +538,11 @@ UmicomKernelShellStatus UmicomKernelConsoleShellExecute(UmicomKernelConsoleShell
         UmicomShellText(shell, "fatrenameopen SLOT PART | fatrenamestage PATH NEWNAME | fatrenamecommit | fatrenameinfo | fatrenameclose\r\n");
         UmicomShellText(shell, "Rename preserves file data, attributes and calendar fields and refuses existing names. Stage leaves the volume dirty until fatrenamecommit succeeds.\r\n");
         UmicomShellText(shell, "fatfsopen SLOT PART | fatfstime YYYY-MM-DDTHH:MM:SS | fatfscommit | fatfsinfo | fatfsclose\r\n");
+        /* Inspection borrows the active lease only between finished changes. */
+        UmicomShellText(shell, "fatfsls PATH | fatfsstat PATH | fatfsread PATH OFFSET BYTES (committed data, maximum 4096 bytes)\r\n");
+        /* Directory operations follow the same staged publication workflow. */
+        UmicomShellText(shell, "fatmkdir PATH | fatrmdir PATH (finish each operation with fatfscommit)\r\n");
+        UmicomShellText(shell, "fatmove SOURCE DESTINATION (rename or move; then fatfscommit)\r\n");
         UmicomShellText(shell, "fatcreate PATH \"TEXT\" | fatappend PATH \"TEXT\" | fattruncate PATH SIZE | fatdelete PATH\r\n");
         UmicomShellText(shell, "File lifecycle commands can allocate and free clusters. Finish each staged operation with fatfscommit before the next operation in the same session.\r\n");
 #endif

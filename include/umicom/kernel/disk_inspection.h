@@ -49,6 +49,8 @@ typedef enum UmicomKernelDiskStatus {
     , UMICOM_DISK_EXISTS
     /* Allocation and fixed-directory capacity exhaustion are explicit. */
     , UMICOM_DISK_NO_SPACE
+    /* Live children prevent directory removal without recursive deletion. */
+    , UMICOM_DISK_NOT_EMPTY
 } UmicomKernelDiskStatus;
 
 /* A successful callback fills exactly one sector. Its capacity is fixed by the

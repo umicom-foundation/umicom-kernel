@@ -52,6 +52,7 @@
 #include "umicom/kernel/fat16_file_append.h"
 #include "umicom/kernel/fat16_rename_commit.h"
 #include "umicom/kernel/fat16_lifecycle_commit.h"
+#include "umicom/kernel/fat16_directory_validation.h"
 #include "umicom/kernel/virtio_block.h"
 
 /* Read firmware descriptions without probing or binding devices. */
@@ -1433,6 +1434,13 @@ static void RunHardwareAddressTranslationTest(void)
 
 void UmicomKernelMain(UmicomU64 hartId, UmicomAddress deviceTreeAddress)
 {
+/* Dedicated directory guests never enter the ordinary interactive startup.
+ * Each role owns only the disposable image supplied by its qualification run. */
+#if defined(UMICOM_KERNEL_FAT16_DIRECTORY_TEST) || defined(UMICOM_KERNEL_FAT16_DIRECTORY_READBACK_TEST) || \
+    defined(UMICOM_KERNEL_FAT16_DIRECTORY_INTERRUPTED_TEST) || defined(UMICOM_KERNEL_FAT16_DIRECTORY_REJECTED_TEST)
+    UmicomKernelFat16DirectoryBoot(hartId, deviceTreeAddress);
+#endif
+
 #if defined(UMICOM_KERNEL_FAT16_LIFECYCLE_TEST) || defined(UMICOM_KERNEL_FAT16_LIFECYCLE_READBACK_TEST) || \
     defined(UMICOM_KERNEL_FAT16_LIFECYCLE_INTERRUPTED_TEST) || defined(UMICOM_KERNEL_FAT16_LIFECYCLE_REJECTED_TEST)
     UmicomKernelFat16LifecycleBoot(hartId, deviceTreeAddress);

@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Find your way through Umicom Kernel</title><style>body{font:17px/1.6 system-ui,sans-serif;max-width:980px;margin:3rem auto;padding:0 1.3rem;color:#203144}h1,h2{line-height:1.25}code,pre{font-family:Consolas,monospace}pre{background:#eef3f7;padding:1rem;overflow:auto}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccd5df;padding:.65rem;text-align:left;vertical-align:top}a{color:#155bb0}</style></head><body><main><h1>Find your way through Umicom Kernel</h1>
+
+<p>Umicom Kernel is an independent native-kernel repository. The complete OS distribution, graphical
+desktop and applications belong to other repositories. The kernel does not depend on the full
+Umicom Framework. Application portability needs a System Services adapter above the kernel's native ABI.</p>
+<h2>Start with the boundary</h2>
+<ol><li>Read <a href="ARCHITECTURE.md">the architecture</a> and
+<a href="PORTABILITY_AND_SYSTEM_ABI.md">the portability and System ABI guide</a>.
+These distinguish privileged mechanisms from user-space services.</li>
+<li>Choose a capability below and read its interface and implementation together.
+A registered fixture describes an intended check; it is not evidence that a particular machine
+or revision has passed it.</li>
+<li>Use the capability's validation guide when qualifying that specific profile.
+Record the source revision, toolchain, guest configuration and actual result.
+Keep hardware claims limited to the configuration exercised.</li></ol>
+<h2>Read by capability</h2>
+<table><tr><th>Capability</th><th>Where to learn</th><th>Scope to keep in mind</th></tr>
+<tr><td>RISC-V boot, traps and translation</td><td><a href="FIRST_BOOT.md">First boot</a>,
+<a href="TRAPS_AND_TIMER.md">traps and timer</a>,
+<a href="HARDWARE_ADDRESS_TRANSLATION.md">hardware translation</a></td><td>
+The source contains Sv39 activation and translation-cache fences, beyond the early page-table-only foundation.
+See <a href="../arch/riscv64/mmu.S">MMU assembly</a> and
+<a href="../arch/riscv64/user_execution.S">user entry and return</a>.</td></tr>
+<tr><td>Programs, processes and threads</td><td><a href="EXECUTABLE_LOADING.md">ELF loading</a>,
+<a href="PROGRAM_ARGUMENTS_AND_LAUNCH.md">launch arguments</a>,
+<a href="PROCESS_SUPERVISION.md">supervision</a>,
+<a href="TIMER_DRIVEN_USER_SCHEDULING.md">scheduling</a></td><td>
+These native execution and lifetime contracts are not a claim that arbitrary desktop software or
+every POSIX application already runs.</td></tr>
+<tr><td>Console and services</td><td><a href="INTERACTIVE_CONSOLE.md">interactive console</a>,
+<a href="STANDARD_STREAMS.md">standard streams</a>,
+<a href="NORMAL_STARTUP_AND_RECOVERY.md">startup and recovery</a>,
+<a href="MANAGED_SERVICES.md">managed services</a></td><td>
+The native console and service lifecycle are distinct from a graphical Umicom desktop.</td></tr>
+<tr><td>Communication and ownership</td><td><a href="MESSAGE_CHANNELS.md">message channels</a>,
+<a href="BLOCKING_IPC.md">blocking IPC</a>,
+<a href="EVENTS_AND_WAIT_ANY.md">events</a>,
+<a href="INTERRUPT_OWNERSHIP.md">interrupt ownership</a></td><td>
+Handles, rights and wait lifetimes should remain explicit when extending user-space servers.</td></tr>
+<tr><td>Files and devices</td><td><a href="PROCESS_FILE_SERVICES.md">process files</a>,
+<a href="READ_ONLY_FILESYSTEM_PROVIDER.md">read-only provider</a>,
+<a href="HARDWARE_DISCOVERY.md">hardware discovery</a>,
+<a href="WRITABLE_VIRTIO_BLOCK.md">writable VirtIO block</a></td><td>
+RAM files, read-only disk mounting and exclusive writable-device admission have different owners.</td></tr>
+<tr><td>Bounded FAT16 editing</td><td><a href="FAT16_FILE_LIFECYCLE.md">file lifecycle</a>,
+<a href="FAT16_ORDERED_COMMITS.md">ordered commits</a>,
+<a href="FAT16_METADATA_INSPECTION.md">metadata inspection</a></td><td>
+Trusted-console operations include create, allocating append, truncate and delete, under bounded exclusive
+ownership. This is not a general writable filesystem service for all applications.</td></tr><tr><td>FAT16 directories and committed inspection</td><td>
+<a href="FAT16_DIRECTORY_LIFECYCLE.md">Directory lifecycle and console inspection</a></td><td>
+Create nested directories with supplied timestamps, remove empty directories and
+reuse their allocation. An allocated parent can grow within the documented limits;
+the fixed root cannot. The same exclusive lease supports committed listing,
+metadata and bounded reads between accepted changes.</td></tr><tr><td>FAT16 file and directory moves</td><td>
+Rename or move short-name files and nonempty directory trees through the existing
+exclusive lifecycle session. Parent references, collision checks, source and
+parent read-only flags, subtree depth and whole-image preservation are checked.
+A move requires an existing destination slot and explicit Finish.
+See <a href="FAT16_FILE_MOVES.md">Moving FAT16 files and directories</a>.
+This remains a trusted Kernel interface, without journalling or automatic recovery.
+</td></tr></table>
+<h2>Understand persistence before extending it</h2>
+<p>The FAT16 editing source stages bounded updates behind persistent dirty guards and performs explicit
+ordered finalisation. Closing an owner releases resources; it does not promise to undo bytes already written.
+An unfinished dirty volume is refused by the relevant admission checks. Refusal protects evidence,
+but does not itself reconstruct an interrupted transaction.</p>
+<!-- The directory lifecycle guide supersedes the earlier directory gap below.
+The original scope statement is retained for engineering review.
+<p>Do not describe this as journalling or automatic crash recovery. General writable VFS access,
+directory creation and extension, long filenames, broader driver coverage, networking and graphical
+desktop integration require their own implementation and qualification. Read the lifecycle guide's
+limits before increasing capacities or granting an untrusted process a write handle.</p>
+-->
+<p>Directory creation, empty removal and bounded parent extension use the same
+explicit Stage and Finish protocol as regular-file changes. Do not describe that
+protocol as journalling or automatic crash recovery. General writable VFS access,
+long filenames, broader driver coverage, networking and graphical desktop
+integration still require their own implementation and qualification. Read the
+directory guide's limits before changing capacities or granting an untrusted
+process a write handle.</p>
+<h2>Keep OS integration deliberate</h2>
+<p>The RISC-V research profile is a native-kernel execution route. An installable Umicom OS distribution
+and its existing kernel choice remain separate products. Adding a native-kernel profile should preserve
+the distribution's working routes and declare which device, service and application capabilities are
+actually available. Linking Framework directly into privileged kernel code would bypass that boundary.</p>
+
+</main></body></html>

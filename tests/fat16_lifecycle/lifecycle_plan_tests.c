@@ -54,7 +54,15 @@ static void LifeDefaults(UmicomKernelFat16LifecycleOperation operation)
     lifeNextDirectory=lifeDirectory;lifeNextEntry=lifeEntry+32U;
     memcpy(path,operation==UMICOM_FAT16_LIFECYCLE_CREATE?"/LIFE.BIN":"/FRAG.BIN",10U);
     for(UmicomSize i=0U;i<sizeof(lifeInput);++i) lifeInput[i]=(UmicomU8)(i*29U+0x31U);
+    /* Named fields keep optional request extensions zero-initialized.
+     * The earlier positional initializer is retained for review. */
+#if 0
     lifeRequest=(UmicomKernelFat16LifecycleRequest){operation,path,NULL,0U,0U,{2044U,2U,29U,23U,58U,57U}};
+#endif
+    lifeRequest = (UmicomKernelFat16LifecycleRequest){
+        .operation=operation, .path=path,
+        .time={2044U,2U,29U,23U,58U,57U}};
+
     if(operation==UMICOM_FAT16_LIFECYCLE_CREATE||operation==UMICOM_FAT16_LIFECYCLE_APPEND) {
         lifeRequest.input=lifeInput;lifeRequest.bytes=operation==UMICOM_FAT16_LIFECYCLE_CREATE?700U:900U;
     } else if(operation==UMICOM_FAT16_LIFECYCLE_TRUNCATE) lifeRequest.size=513U;
@@ -203,6 +211,35 @@ static void LifeFixture(const char *name)
         if(lifeRequest.operation==UMICOM_FAT16_LIFECYCLE_TRUNCATE) lifeRequest.size=513U;
     } else CHECK(!strcmp(name,"ordinary")||!strcmp(name,"snapshot")||!strcmp(name,"reentry"));
 }
+/* An allocated parent now grows when its last slot is occupied. Construct
+ * the expected extra chain independently, including the entire zeroed cluster.
+ * The earlier NO_SPACE expectation remains in LifeRefusal for source review. */
+static void LifeParentGrowth(void)
+{
+    memcpy(path, "/DOCS/LIFE.BIN", 15U);
+    for (UmicomSize i = 3U; i < 16U; ++i) {
+        char alias[12];
+        CHECK(snprintf(alias, sizeof(alias), "F%07uTXT", (unsigned)i) == 11);
+        LifeEntryMake(Cluster(3U) + i * 32U, alias, 0U, 0U);
+    }
+    lifeDirectory = UMICOM_DISK_FIXTURE_DATA + 8U; /* File takes 5,8; parent takes 10. */
+    lifeEntry = 0U;
+    lifeNextDirectory = lifeDirectory;
+    lifeNextEntry = 32U;
+    memcpy(mediumBefore, media, sizeof(media));
+    LifeOracle();
+    UmicomU8 entry[32];
+    memcpy(entry, lifeExpected + (UmicomSize)lifeDirectory * 512U, sizeof(entry));
+    memset(lifeExpected + (UmicomSize)lifeDirectory * 512U, 0, 512U);
+    memcpy(lifeExpected + (UmicomSize)lifeDirectory * 512U, entry, sizeof(entry));
+    LifeFatPut(lifeExpected, 3U, 10U);
+    LifeFatPut(lifeExpected, 10U, 0xffffU);
+    ++lifeExpectedAllocated;
+    LifeStart();
+    CHECK(LifeCall() == UMICOM_DISK_OK);
+    CHECK(lifePlan.parentGrown && lifePlan.parentAddedCluster == 10U);
+    LifeVerify();
+}
 static void LifeSuccess(const char *name)
 {
     LifeFixture(name);memcpy(mediumBefore,media,sizeof(media));LifeOracle();LifeStart();
@@ -306,6 +343,9 @@ static void LifeFailures(void)
     }
     printf("lifecycle planner operation=%u read-failure positions=%llu\n",(unsigned)lifeRequest.operation,(unsigned long long)count);
 }
+/* The test dispatcher now selects successful parent growth explicitly.
+ * Its former full-parent refusal dispatch is retained for engineering review. */
+#if 0
 int main(int argc,char **argv)
 {
     CHECK(argc==3);Setup(argv[2]);const char *name=argv[1];UmicomKernelFat16LifecycleOperation operation=UMICOM_FAT16_LIFECYCLE_CREATE;
@@ -315,6 +355,30 @@ int main(int argc,char **argv)
     else if(!strncmp(name,"delete.",7U)) {operation=UMICOM_FAT16_LIFECYCLE_DELETE;name+=7U;}
     LifeDefaults(operation);
     if(!strncmp(name,"success.",8U)) LifeSuccess(name+8U);
+    else if(!strncmp(name,"refusal.",8U)) LifeRefusal(name+8U);
+    else if(!strncmp(name,"guard.",6U)) LifeGuard(name+6U);
+    else if(!strcmp(name,"all_read_failures")) LifeFailures();
+    else CHECK(0);
+    printf("fat16-lifecycle.plan.%s: ok\n",argv[1]);return 0;
+}
+#endif
+
+/* Direct API checks complement the transport and console journeys. */
+#include "move_plan_cases.inc"
+int main(int argc,char **argv)
+{
+    CHECK(argc==3);Setup(argv[2]);
+    if (!strncmp(argv[1], "move.", 5U)) {
+        LifeMove(argv[1] + 5U); printf("fat16-lifecycle.plan.%s: ok\n", argv[1]); return 0;
+    }
+    const char *name=argv[1];UmicomKernelFat16LifecycleOperation operation=UMICOM_FAT16_LIFECYCLE_CREATE;
+    if(!strncmp(name,"create.",7U)) name+=7U;
+    else if(!strncmp(name,"append.",7U)) {operation=UMICOM_FAT16_LIFECYCLE_APPEND;name+=7U;}
+    else if(!strncmp(name,"truncate.",9U)) {operation=UMICOM_FAT16_LIFECYCLE_TRUNCATE;name+=9U;}
+    else if(!strncmp(name,"delete.",7U)) {operation=UMICOM_FAT16_LIFECYCLE_DELETE;name+=7U;}
+    LifeDefaults(operation);
+    if(!strcmp(name,"success.parent_growth")) LifeParentGrowth();
+    else if(!strncmp(name,"success.",8U)) LifeSuccess(name+8U);
     else if(!strncmp(name,"refusal.",8U)) LifeRefusal(name+8U);
     else if(!strncmp(name,"guard.",6U)) LifeGuard(name+6U);
     else if(!strcmp(name,"all_read_failures")) LifeFailures();

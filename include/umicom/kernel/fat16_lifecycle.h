@@ -14,14 +14,23 @@
 #define UMICOM_FAT16_LIFECYCLE_DATA_SECTORS 72U
 #define UMICOM_FAT16_LIFECYCLE_NEW_CLUSTERS 8U
 #define UMICOM_FAT16_LIFECYCLE_FAT_SECTORS 32U
+/* A move can touch destination, end marker, source and dot-parent sectors.
+ * The earlier bound is retained to explain the additional plan storage. */
+#if 0
 #define UMICOM_FAT16_LIFECYCLE_DIRECTORY_SECTORS 2U
+#endif
+#define UMICOM_FAT16_LIFECYCLE_DIRECTORY_SECTORS 4U
 
 typedef enum UmicomKernelFat16LifecycleOperation {
     UMICOM_FAT16_LIFECYCLE_NONE,
     UMICOM_FAT16_LIFECYCLE_CREATE,
     UMICOM_FAT16_LIFECYCLE_APPEND,
     UMICOM_FAT16_LIFECYCLE_TRUNCATE,
-    UMICOM_FAT16_LIFECYCLE_DELETE
+    UMICOM_FAT16_LIFECYCLE_DELETE,
+    /* Directory operations share the same exclusive owner and explicit finish. */
+    UMICOM_FAT16_LIFECYCLE_CREATE_DIRECTORY,
+    UMICOM_FAT16_LIFECYCLE_REMOVE_DIRECTORY,
+    UMICOM_FAT16_LIFECYCLE_MOVE
 } UmicomKernelFat16LifecycleOperation;
 
 typedef struct UmicomKernelFat16LifecycleRequest {
@@ -31,6 +40,8 @@ typedef struct UmicomKernelFat16LifecycleRequest {
     UmicomSize bytes;
     UmicomU32 size;
     UmicomKernelFat16FileTime time;
+    /* MOVE alone reads this absolute destination. Other operations ignore it. */
+    const char *destination;
 } UmicomKernelFat16LifecycleRequest;
 
 typedef struct UmicomKernelFat16LifecycleFatSector {
@@ -68,6 +79,12 @@ typedef struct UmicomKernelFat16LifecyclePlan {
     UmicomSize directorySectorCount;
     UmicomKernelFat16LifecycleDirectorySector directorySectors[UMICOM_FAT16_LIFECYCLE_DIRECTORY_SECTORS];
     UmicomSize entryOffset; /* Target entry in directorySectors[0]. */
+    /* A full allocated parent may acquire one initialized cluster. Its first
+     * data image also contains the new entry, before the old tail is linked.
+     * These values identify the sole permitted data/directory image overlap. */
+    UmicomBoolean parentGrown;
+    UmicomU16 parentAddedCluster;
+    UmicomU16 parentTailCluster;
 } UmicomKernelFat16LifecyclePlan;
 
 /* Stable zero-filled scratch, scrubbed after every admitted call except self.
@@ -77,9 +94,32 @@ typedef struct UmicomKernelFat16LifecycleWorkspace {
     const struct UmicomKernelFat16LifecycleWorkspace *self;
     UmicomBoolean busy;
     char path[UMICOM_FAT16_PATH_BYTES];
+    char destination[UMICOM_FAT16_PATH_BYTES];
     UmicomU16 newChain[UMICOM_FAT16_LIFECYCLE_NEW_CLUSTERS];
     UmicomKernelFat16LifecyclePlan stage;
 } UmicomKernelFat16LifecycleWorkspace;
+
+/* MOVE renames a file or directory, or transfers it to another existing parent.
+ * It preserves allocation, payload, attributes and calendar fields. Only the
+ * alias/display bits, old entry tombstone and moved directory's dot-parent
+ * reference change. No replacement, parent allocation or implicit time occurs.
+ * A full destination returns NO_SPACE. Same-parent rename reuses its entry.
+ * Root moves, read-only source/parents, collisions, cycles and uninspectable
+ * resulting depth are refused. Both independent paths are copied before I/O.
+ * input, bytes, size and every time field must be zero for MOVE.
+ * Four distinct metadata sectors suffice; no data/FAT allocation link changes.
+ * Publication remains interruption-detecting Stage/Finish, never a journal or
+ * promise of power-loss atomicity. The original two-sector statement below
+ * still describes the earlier allocation operations. */
+
+/* Directory lifecycle extension: CREATE_DIRECTORY has no input or size and
+ * requires an explicit calendar. REMOVE_DIRECTORY has no input, size or time;
+ * it refuses the root, regular files and directories containing live children.
+ * New directories have canonical dot entries and one fully initialized cluster.
+ * CREATE and CREATE_DIRECTORY can extend an allocated parent by one cluster,
+ * subject to all existing bounds. The FAT16 fixed root never grows.
+ * The regular-file description below records the original narrower contract;
+ * its no-extension statement is superseded by this documented extension. */
 
 /* CREATE accepts 0..4096 initial bytes, input NULL exactly when bytes is zero,
  * size zero and a valid explicit calendar. APPEND accepts 1..4096 bytes, size

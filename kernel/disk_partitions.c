@@ -92,6 +92,7 @@ const char *UmicomKernelDiskStatusName(UmicomKernelDiskStatus status)
     case UMICOM_DISK_BUSY: return "busy";
     case UMICOM_DISK_READ_ONLY: return "read-only";
     case UMICOM_DISK_EXISTS: return "exists";
+    case UMICOM_DISK_NOT_EMPTY: return "not-empty";
     case UMICOM_DISK_NO_SPACE: return "no-space";
     }
     return "unknown-status";

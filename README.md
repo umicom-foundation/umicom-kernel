@@ -95,6 +95,10 @@ The project studies operating-system concepts and public documentation from GNU/
 
 Do not copy source simply to reproduce a feature.
 
+## Capability navigation
+
+Read [Find your way through Umicom Kernel](docs/CURRENT_CAPABILITIES.html) for the current source-level capability map and its limits. It distinguishes native console and storage foundations from a complete graphical operating system.
+
 ## Current implemented foundations
 
 The active RISC-V research profile currently demonstrates:
@@ -105,8 +109,15 @@ The active RISC-V research profile currently demonstrates:
 - physical page-frame ownership and reservation;
 - construction, validation and software translation of Sv39 4 KiB page tables.
 
+Hardware translation now has dedicated RISC-V activation and supervisor/user execution paths. See [Hardware address translation](docs/HARDWARE_ADDRESS_TRANSLATION.md) for their contracts and qualification.
+
+<!-- The page-table-only description below predates hardware activation. The
+hardware translation guide replaces it; the original wording remains here for
+engineering review rather than being discarded. -->
+<!--
 Address translation is not enabled in hardware yet; the page-table subsystem is
 being validated before supervisor/user execution activates virtual addressing.
+-->
 
 Educational guides are organised by capability rather than development batch:
 
@@ -187,3 +198,14 @@ exclusive live session. The trusted console exposes `fatfsopen`, `fatcreate`,
 metadata and allocation rules, bounds, interruption semantics, reboot tests
 and disposable-disk instructions. General writable VFS access and recovery
 remain outside this interface.
+
+## Persistent FAT16 directory lifecycle
+
+The same exclusive lifecycle owner now creates nested directories with explicit
+calendar fields, removes empty directories, and reuses their allocation.
+When an allocated parent runs out of entry slots, creation can extend its chain
+within the documented limits. The fixed FAT16 root cannot grow.
+See [Creating and removing FAT16 directories](docs/FAT16_DIRECTORY_LIFECYCLE.md)
+for `fatmkdir`, `fatrmdir`, publication ordering and refusal rules.
+
+For same-parent rename and cross-parent moves, see [Moving FAT16 files and directories](docs/FAT16_FILE_MOVES.md). The lifecycle session preserves data and calendars and requires an explicit Finish for every move.

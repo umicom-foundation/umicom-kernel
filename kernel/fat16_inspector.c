@@ -1566,6 +1566,9 @@ static void UmicomFatLifecyclePut32(UmicomU8 *target, UmicomU32 value)
 {
     for (UmicomSize i = 0U; i < 4U; ++i) target[i] = (UmicomU8)(value >> (i * 8U));
 }
+/* Directory requests now pass the same disjoint-buffer and calendar admission as file requests. The preceding implementation is retained below for
+ * source review; only the implementation after this disabled block executes. */
+#if 0
 static UmicomKernelDiskStatus UmicomFatLifecycleArguments(UmicomKernelFat16 *volume,
     const UmicomKernelFat16LifecycleRequest *request,
     UmicomKernelFat16UpdateWorkspace *workspace,
@@ -1632,6 +1635,187 @@ static UmicomKernelDiskStatus UmicomFatLifecycleArguments(UmicomKernelFat16 *vol
         return UMICOM_DISK_BAD_STATE;
     UmicomFatClear(encoded, sizeof(*encoded));
     if (request->operation != UMICOM_FAT16_LIFECYCLE_DELETE) {
+        const UmicomKernelDiskStatus status = UmicomFatFileTimeFields(&request->time, encoded);
+        if (status != UMICOM_DISK_OK) return status;
+    }
+    *outPathBytes = pathBytes + 1U;
+    return UMICOM_DISK_OK;
+}
+#endif
+
+/* Move preparation validates a second independent path before any callbacks.
+ * The preceding implementation is retained for engineering review. */
+#if 0
+static UmicomKernelDiskStatus UmicomFatLifecycleArguments(UmicomKernelFat16 *volume,
+    const UmicomKernelFat16LifecycleRequest *request,
+    UmicomKernelFat16UpdateWorkspace *workspace,
+    UmicomKernelFat16LifecycleWorkspace *lifecycleWorkspace,
+    UmicomKernelFat16LifecyclePlan *outPlan, UmicomSize *outPathBytes,
+    UmicomKernelFat16FileTimeEncoding *encoded)
+{
+    const void *const owners[] = {volume, request, workspace, lifecycleWorkspace, outPlan};
+    const UmicomSize lengths[] = {sizeof(*volume), sizeof(*request), sizeof(*workspace),
+        sizeof(*lifecycleWorkspace), sizeof(*outPlan)};
+    const UmicomSize alignments[] = {_Alignof(UmicomKernelFat16),
+        _Alignof(UmicomKernelFat16LifecycleRequest), _Alignof(UmicomKernelFat16UpdateWorkspace),
+        _Alignof(UmicomKernelFat16LifecycleWorkspace), _Alignof(UmicomKernelFat16LifecyclePlan)};
+    for (UmicomSize i = 0U; i < 5U; ++i) {
+        if (!UmicomFatPlanSpan(owners[i], lengths[i]) || (UmicomAddress)owners[i] % alignments[i])
+            return UMICOM_DISK_INVALID_ARGUMENT;
+        for (UmicomSize j = 0U; j < i; ++j)
+            if (UmicomFatPlanOverlap(owners[i], lengths[i], owners[j], lengths[j]))
+                return UMICOM_DISK_INVALID_ARGUMENT;
+    }
+    /* Only after validating the request's independent storage may its fields
+     * become addresses or lengths. No protected output byte is probed first. */
+    if (!UmicomFatPlanSpan(request->path, UMICOM_FAT16_PATH_BYTES) ||
+        request->bytes > UMICOM_FAT16_UPDATE_BYTES ||
+        (request->bytes ? !UmicomFatPlanSpan(request->input, request->bytes) : request->input != 0))
+        return UMICOM_DISK_INVALID_ARGUMENT;
+    switch (request->operation) {
+    case UMICOM_FAT16_LIFECYCLE_CREATE:
+        if (request->size) return UMICOM_DISK_INVALID_ARGUMENT;
+        break;
+    case UMICOM_FAT16_LIFECYCLE_APPEND:
+        if (!request->bytes || request->size) return UMICOM_DISK_INVALID_ARGUMENT;
+        break;
+    case UMICOM_FAT16_LIFECYCLE_TRUNCATE:
+        if (request->bytes) return UMICOM_DISK_INVALID_ARGUMENT;
+        break;
+    case UMICOM_FAT16_LIFECYCLE_CREATE_DIRECTORY:
+        /* Directory bytes belong to the filesystem, never to caller payload. */
+        if (request->bytes || request->size) return UMICOM_DISK_INVALID_ARGUMENT;
+        break;
+    case UMICOM_FAT16_LIFECYCLE_REMOVE_DIRECTORY:
+    case UMICOM_FAT16_LIFECYCLE_DELETE:
+        if (request->bytes || request->size || request->time.year || request->time.month ||
+            request->time.day || request->time.hour || request->time.minute || request->time.second)
+            return UMICOM_DISK_INVALID_ARGUMENT;
+        break;
+    default: return UMICOM_DISK_INVALID_ARGUMENT;
+    }
+    for (UmicomSize i = 0U; request->bytes && i < 5U; ++i)
+        if (UmicomFatPlanOverlap(request->input, request->bytes, owners[i], lengths[i]))
+            return UMICOM_DISK_INVALID_ARGUMENT;
+    UmicomSize pathBytes = 0U;
+    while (pathBytes < UMICOM_FAT16_PATH_BYTES) {
+        for (UmicomSize i = 0U; i < 5U; ++i)
+            if (UmicomFatPlanOverlap(request->path + pathBytes, 1U, owners[i], lengths[i]))
+                return UMICOM_DISK_INVALID_ARGUMENT;
+        if (request->bytes && UmicomFatPlanOverlap(request->path + pathBytes, 1U,
+            request->input, request->bytes)) return UMICOM_DISK_INVALID_ARGUMENT;
+        if (!request->path[pathBytes]) break;
+        ++pathBytes;
+    }
+    if (pathBytes == UMICOM_FAT16_PATH_BYTES) return UMICOM_DISK_LIMIT;
+    if ((workspace->self && workspace->self != workspace) ||
+        (lifecycleWorkspace->self && lifecycleWorkspace->self != lifecycleWorkspace))
+        return UMICOM_DISK_BAD_STATE;
+    if (workspace->busy || lifecycleWorkspace->busy) return UMICOM_DISK_BUSY;
+    if ((!workspace->self && !UmicomFatPlanZero(workspace, sizeof(*workspace))) ||
+        (!lifecycleWorkspace->self && !UmicomFatPlanZero(lifecycleWorkspace, sizeof(*lifecycleWorkspace))))
+        return UMICOM_DISK_BAD_STATE;
+    UmicomFatClear(encoded, sizeof(*encoded));
+    if (request->operation != UMICOM_FAT16_LIFECYCLE_DELETE &&
+        request->operation != UMICOM_FAT16_LIFECYCLE_REMOVE_DIRECTORY) {
+        const UmicomKernelDiskStatus status = UmicomFatFileTimeFields(&request->time, encoded);
+        if (status != UMICOM_DISK_OK) return status;
+    }
+    *outPathBytes = pathBytes + 1U;
+    return UMICOM_DISK_OK;
+}
+#endif
+
+static UmicomKernelDiskStatus UmicomFatLifecycleArguments(UmicomKernelFat16 *volume,
+    const UmicomKernelFat16LifecycleRequest *request,
+    UmicomKernelFat16UpdateWorkspace *workspace,
+    UmicomKernelFat16LifecycleWorkspace *lifecycleWorkspace,
+    UmicomKernelFat16LifecyclePlan *outPlan, UmicomSize *outPathBytes,
+    UmicomKernelFat16FileTimeEncoding *encoded, UmicomSize *outDestinationBytes)
+{
+    const void *const owners[] = {volume, request, workspace, lifecycleWorkspace, outPlan};
+    const UmicomSize lengths[] = {sizeof(*volume), sizeof(*request), sizeof(*workspace),
+        sizeof(*lifecycleWorkspace), sizeof(*outPlan)};
+    const UmicomSize alignments[] = {_Alignof(UmicomKernelFat16),
+        _Alignof(UmicomKernelFat16LifecycleRequest), _Alignof(UmicomKernelFat16UpdateWorkspace),
+        _Alignof(UmicomKernelFat16LifecycleWorkspace), _Alignof(UmicomKernelFat16LifecyclePlan)};
+    for (UmicomSize i = 0U; i < 5U; ++i) {
+        if (!UmicomFatPlanSpan(owners[i], lengths[i]) || (UmicomAddress)owners[i] % alignments[i])
+            return UMICOM_DISK_INVALID_ARGUMENT;
+        for (UmicomSize j = 0U; j < i; ++j)
+            if (UmicomFatPlanOverlap(owners[i], lengths[i], owners[j], lengths[j]))
+                return UMICOM_DISK_INVALID_ARGUMENT;
+    }
+    /* Only after validating the request's independent storage may its fields
+     * become addresses or lengths. No protected output byte is probed first. */
+    if (!UmicomFatPlanSpan(request->path, UMICOM_FAT16_PATH_BYTES) ||
+        request->bytes > UMICOM_FAT16_UPDATE_BYTES ||
+        (request->bytes ? !UmicomFatPlanSpan(request->input, request->bytes) : request->input != 0))
+        return UMICOM_DISK_INVALID_ARGUMENT;
+    switch (request->operation) {
+    case UMICOM_FAT16_LIFECYCLE_CREATE:
+        if (request->size) return UMICOM_DISK_INVALID_ARGUMENT;
+        break;
+    case UMICOM_FAT16_LIFECYCLE_APPEND:
+        if (!request->bytes || request->size) return UMICOM_DISK_INVALID_ARGUMENT;
+        break;
+    case UMICOM_FAT16_LIFECYCLE_TRUNCATE:
+        if (request->bytes) return UMICOM_DISK_INVALID_ARGUMENT;
+        break;
+    case UMICOM_FAT16_LIFECYCLE_CREATE_DIRECTORY:
+        /* Directory bytes belong to the filesystem, never to caller payload. */
+        if (request->bytes || request->size) return UMICOM_DISK_INVALID_ARGUMENT;
+        break;
+    case UMICOM_FAT16_LIFECYCLE_MOVE:
+    case UMICOM_FAT16_LIFECYCLE_REMOVE_DIRECTORY:
+    case UMICOM_FAT16_LIFECYCLE_DELETE:
+        if (request->bytes || request->size || request->time.year || request->time.month ||
+            request->time.day || request->time.hour || request->time.minute || request->time.second)
+            return UMICOM_DISK_INVALID_ARGUMENT;
+        break;
+    default: return UMICOM_DISK_INVALID_ARGUMENT;
+    }
+    for (UmicomSize i = 0U; request->bytes && i < 5U; ++i)
+        if (UmicomFatPlanOverlap(request->input, request->bytes, owners[i], lengths[i]))
+            return UMICOM_DISK_INVALID_ARGUMENT;
+    UmicomSize pathBytes = 0U;
+    while (pathBytes < UMICOM_FAT16_PATH_BYTES) {
+        for (UmicomSize i = 0U; i < 5U; ++i)
+            if (UmicomFatPlanOverlap(request->path + pathBytes, 1U, owners[i], lengths[i]))
+                return UMICOM_DISK_INVALID_ARGUMENT;
+        if (request->bytes && UmicomFatPlanOverlap(request->path + pathBytes, 1U,
+            request->input, request->bytes)) return UMICOM_DISK_INVALID_ARGUMENT;
+        if (!request->path[pathBytes]) break;
+        ++pathBytes;
+    }
+    if (pathBytes == UMICOM_FAT16_PATH_BYTES) return UMICOM_DISK_LIMIT;
+    *outDestinationBytes = 0U;
+    if (request->operation == UMICOM_FAT16_LIFECYCLE_MOVE) {
+        if (!UmicomFatPlanSpan(request->destination, UMICOM_FAT16_PATH_BYTES))
+            return UMICOM_DISK_INVALID_ARGUMENT;
+        UmicomSize bytes = 0U;
+        for (; bytes < UMICOM_FAT16_PATH_BYTES; ++bytes) {
+            for (UmicomSize i = 0U; i < 5U; ++i)
+                if (UmicomFatPlanOverlap(request->destination + bytes, 1U, owners[i], lengths[i]))
+                    return UMICOM_DISK_INVALID_ARGUMENT;
+            if (UmicomFatPlanOverlap(request->destination + bytes, 1U, request->path, pathBytes + 1U))
+                return UMICOM_DISK_INVALID_ARGUMENT;
+            if (!request->destination[bytes]) break;
+        }
+        if (bytes == UMICOM_FAT16_PATH_BYTES) return UMICOM_DISK_LIMIT;
+        *outDestinationBytes = bytes + 1U;
+    }
+    if ((workspace->self && workspace->self != workspace) ||
+        (lifecycleWorkspace->self && lifecycleWorkspace->self != lifecycleWorkspace))
+        return UMICOM_DISK_BAD_STATE;
+    if (workspace->busy || lifecycleWorkspace->busy) return UMICOM_DISK_BUSY;
+    if ((!workspace->self && !UmicomFatPlanZero(workspace, sizeof(*workspace))) ||
+        (!lifecycleWorkspace->self && !UmicomFatPlanZero(lifecycleWorkspace, sizeof(*lifecycleWorkspace))))
+        return UMICOM_DISK_BAD_STATE;
+    UmicomFatClear(encoded, sizeof(*encoded));
+    if (request->operation != UMICOM_FAT16_LIFECYCLE_DELETE &&
+        request->operation != UMICOM_FAT16_LIFECYCLE_REMOVE_DIRECTORY &&
+        request->operation != UMICOM_FAT16_LIFECYCLE_MOVE) {
         const UmicomKernelDiskStatus status = UmicomFatFileTimeFields(&request->time, encoded);
         if (status != UMICOM_DISK_OK) return status;
     }
@@ -1714,6 +1898,9 @@ static UmicomKernelDiskStatus UmicomFatLifecycleLink(UmicomKernelFat16 *volume,
     return UMICOM_DISK_OK;
 }
 
+/* A new directory needs one cluster even though FAT directory byte size is zero. The preceding implementation is retained below for
+ * source review; only the implementation after this disabled block executes. */
+#if 0
 static UmicomKernelDiskStatus UmicomFatLifecycleAllocation(UmicomKernelFat16 *volume,
     UmicomKernelFat16UpdateWorkspace *workspace, UmicomKernelFat16LifecycleWorkspace *lifecycleWorkspace)
 {
@@ -1721,6 +1908,59 @@ static UmicomKernelDiskStatus UmicomFatLifecycleAllocation(UmicomKernelFat16 *vo
     const UmicomU64 clusterBytes = (UmicomU64)volume->info.sectorsPerCluster * UMICOM_DISK_SECTOR_BYTES;
     const UmicomU64 required = stage->updatedEntryPresent ?
         ((UmicomU64)stage->updatedEntry.bytes + clusterBytes - 1U) / clusterBytes : 0U;
+    if (required > UMICOM_FAT16_CHAIN_LIMIT) return UMICOM_DISK_LIMIT;
+    UmicomSize header = 0U;
+    UmicomKernelDiskStatus status = UmicomFatLifecycleFatSector(volume, stage, 0U, &header);
+    if (status != UMICOM_DISK_OK) return status;
+    const UmicomSize oldCount = workspace->targetClusters;
+    const UmicomSize newCount = (UmicomSize)required;
+    if (newCount > oldCount) {
+        stage->allocatedClusters = newCount - oldCount;
+        if (stage->allocatedClusters > UMICOM_FAT16_LIFECYCLE_NEW_CLUSTERS) return UMICOM_DISK_LIMIT;
+        UmicomSize selected = 0U;
+        /* The completed allocation proof established unowned iff FREE for
+         * every usable identifier. Select deterministically without rereading
+         * all FAT sectors or ever treating reserved entries as candidates. */
+        for (UmicomU32 cluster = 2U; cluster <= volume->info.clusters + 1U &&
+            selected < stage->allocatedClusters; ++cluster)
+            if (!UmicomFatPlanOwned(workspace, (UmicomU16)cluster))
+                lifecycleWorkspace->newChain[selected++] = (UmicomU16)cluster;
+        if (selected != stage->allocatedClusters) return UMICOM_DISK_NO_SPACE;
+        for (UmicomSize i = 0U; i < selected; ++i) {
+            status = UmicomFatLifecycleLink(volume, stage, lifecycleWorkspace->newChain[i],
+                i + 1U < selected ? lifecycleWorkspace->newChain[i + 1U] : (UmicomU16)0xffffU,
+                UMICOM_FALSE);
+            if (status != UMICOM_DISK_OK) return status;
+        }
+        if (oldCount) {
+            status = UmicomFatLifecycleLink(volume, stage, workspace->targetChain[oldCount - 1U],
+                lifecycleWorkspace->newChain[0], UMICOM_TRUE);
+            if (status != UMICOM_DISK_OK) return status;
+        } else stage->updatedEntry.firstCluster = lifecycleWorkspace->newChain[0];
+    } else if (newCount < oldCount) {
+        stage->freedClusters = oldCount - newCount;
+        if (newCount) {
+            status = UmicomFatLifecycleLink(volume, stage, workspace->targetChain[newCount - 1U],
+                0xffffU, UMICOM_TRUE);
+            if (status != UMICOM_DISK_OK) return status;
+        } else stage->updatedEntry.firstCluster = 0U;
+        for (UmicomSize i = newCount; i < oldCount; ++i) {
+            status = UmicomFatLifecycleLink(volume, stage, workspace->targetChain[i], 0U, UMICOM_FALSE);
+            if (status != UMICOM_DISK_OK) return status;
+        }
+    }
+    return UMICOM_DISK_OK;
+}
+#endif
+
+static UmicomKernelDiskStatus UmicomFatLifecycleAllocation(UmicomKernelFat16 *volume,
+    UmicomKernelFat16UpdateWorkspace *workspace, UmicomKernelFat16LifecycleWorkspace *lifecycleWorkspace)
+{
+    UmicomKernelFat16LifecyclePlan *const stage = &lifecycleWorkspace->stage;
+    const UmicomU64 clusterBytes = (UmicomU64)volume->info.sectorsPerCluster * UMICOM_DISK_SECTOR_BYTES;
+    const UmicomU64 required = stage->updatedEntryPresent ?
+        (stage->updatedEntry.directory ? 1U :
+         ((UmicomU64)stage->updatedEntry.bytes + clusterBytes - 1U) / clusterBytes) : 0U;
     if (required > UMICOM_FAT16_CHAIN_LIMIT) return UMICOM_DISK_LIMIT;
     UmicomSize header = 0U;
     UmicomKernelDiskStatus status = UmicomFatLifecycleFatSector(volume, stage, 0U, &header);
@@ -1794,11 +2034,43 @@ static UmicomKernelDiskStatus UmicomFatLifecycleDataSector(UmicomKernelFat16 *vo
     ++stage->dataSectorCount;
     return UMICOM_DISK_OK;
 }
+/* Directory storage now shares full-cluster initialization with allocated file data. The preceding implementation is retained below for
+ * source review; only the implementation after this disabled block executes. */
+#if 0
 static UmicomKernelDiskStatus UmicomFatLifecycleData(UmicomKernelFat16 *volume,
     UmicomKernelFat16UpdateWorkspace *workspace, UmicomKernelFat16LifecycleWorkspace *lifecycleWorkspace)
 {
     UmicomKernelFat16LifecyclePlan *const stage = &lifecycleWorkspace->stage;
     if (!stage->requestedBytes) return UMICOM_DISK_OK;
+    const UmicomU64 clusterBytes = (UmicomU64)volume->info.sectorsPerCluster * UMICOM_DISK_SECTOR_BYTES;
+    const UmicomU64 oldCapacity = (UmicomU64)workspace->targetClusters * clusterBytes;
+    const UmicomU64 end = stage->offset + stage->requestedBytes;
+    for (UmicomU64 logical = stage->offset / UMICOM_DISK_SECTOR_BYTES * UMICOM_DISK_SECTOR_BYTES;
+        logical < end && logical < oldCapacity; logical += UMICOM_DISK_SECTOR_BYTES) {
+        const UmicomSize index = (UmicomSize)(logical / clusterBytes);
+        const UmicomKernelDiskStatus status = UmicomFatLifecycleDataSector(volume, workspace, stage,
+            workspace->targetChain[index], (UmicomSize)((logical % clusterBytes) / UMICOM_DISK_SECTOR_BYTES),
+            logical, UMICOM_FALSE);
+        if (status != UMICOM_DISK_OK) return status;
+    }
+    for (UmicomSize i = 0U; i < stage->allocatedClusters; ++i)
+        for (UmicomSize sector = 0U; sector < volume->info.sectorsPerCluster; ++sector) {
+            const UmicomU64 logical = oldCapacity + (UmicomU64)i * clusterBytes + sector * UMICOM_DISK_SECTOR_BYTES;
+            const UmicomKernelDiskStatus status = UmicomFatLifecycleDataSector(volume, workspace, stage,
+                lifecycleWorkspace->newChain[i], sector, logical, UMICOM_TRUE);
+            if (status != UMICOM_DISK_OK) return status;
+        }
+    return UMICOM_DISK_OK;
+}
+#endif
+
+static UmicomKernelDiskStatus UmicomFatLifecycleData(UmicomKernelFat16 *volume,
+    UmicomKernelFat16UpdateWorkspace *workspace, UmicomKernelFat16LifecycleWorkspace *lifecycleWorkspace)
+{
+    UmicomKernelFat16LifecyclePlan *const stage = &lifecycleWorkspace->stage;
+    /* Directory initialization has no caller payload but must clear the
+     * complete allocated cluster before either FAT copy exposes it. */
+    if (!stage->requestedBytes && !stage->updatedEntry.directory) return UMICOM_DISK_OK;
     const UmicomU64 clusterBytes = (UmicomU64)volume->info.sectorsPerCluster * UMICOM_DISK_SECTOR_BYTES;
     const UmicomU64 oldCapacity = (UmicomU64)workspace->targetClusters * clusterBytes;
     const UmicomU64 end = stage->offset + stage->requestedBytes;
@@ -1828,6 +2100,9 @@ static UmicomU64 UmicomFatLifecycleDirectoryRelative(const UmicomKernelFat16 *vo
     return volume->dataStart + ((UmicomU64)workspace->chain[index] - 2U) *
         volume->info.sectorsPerCluster + (entry / 16U) % volume->info.sectorsPerCluster;
 }
+/* Directory entries now use the same timestamp encoder and tombstone publication as regular files. The preceding implementation is retained below for
+ * source review; only the implementation after this disabled block executes. */
+#if 0
 static void UmicomFatLifecycleDirectoryPatch(UmicomKernelFat16LifecyclePlan *stage)
 {
     UmicomU8 *const raw = stage->directorySectors[0].data + stage->entryOffset;
@@ -1850,6 +2125,67 @@ static void UmicomFatLifecycleDirectoryPatch(UmicomKernelFat16LifecyclePlan *sta
     UmicomFatLifecyclePut16(raw + 26U, stage->updatedEntry.firstCluster);
     UmicomFatLifecyclePut32(raw + 28U, stage->updatedEntry.bytes);
 }
+#endif
+
+/* Moves need an unchanged source entry before metadata publication.
+ * The preceding implementation is retained for engineering review. */
+#if 0
+static void UmicomFatLifecycleDirectoryPatch(UmicomKernelFat16LifecyclePlan *stage)
+{
+    UmicomU8 *const raw = stage->directorySectors[0].data + stage->entryOffset;
+    if (stage->operation == UMICOM_FAT16_LIFECYCLE_DELETE ||
+        stage->operation == UMICOM_FAT16_LIFECYCLE_REMOVE_DIRECTORY) { raw[0] = 0xe5U; return; }
+    if (stage->operation == UMICOM_FAT16_LIFECYCLE_CREATE ||
+        stage->operation == UMICOM_FAT16_LIFECYCLE_CREATE_DIRECTORY) {
+        UmicomFatClear(raw, 32U);
+        for (UmicomSize i = 0U; i < 11U; ++i) raw[i] = ' ';
+        UmicomSize position = 0U;
+        for (UmicomSize i = 0U; stage->updatedEntry.name[i]; ++i) {
+            if (stage->updatedEntry.name[i] == '.') position = 8U;
+            else raw[position++] = (UmicomU8)stage->updatedEntry.name[i];
+        }
+        UmicomFatLifecyclePut16(raw + 14U, stage->encodedTime.writeTime);
+        UmicomFatLifecyclePut16(raw + 16U, stage->encodedTime.writeDate);
+        UmicomFatLifecyclePut16(raw + 18U, stage->encodedTime.writeDate);
+    }
+    raw[11] = stage->updatedEntry.attributes;
+    UmicomFatLifecyclePut16(raw + 22U, stage->encodedTime.writeTime);
+    UmicomFatLifecyclePut16(raw + 24U, stage->encodedTime.writeDate);
+    UmicomFatLifecyclePut16(raw + 26U, stage->updatedEntry.firstCluster);
+    UmicomFatLifecyclePut32(raw + 28U, stage->updatedEntry.bytes);
+}
+#endif
+
+static void UmicomFatLifecycleDirectoryPatch(UmicomKernelFat16LifecyclePlan *stage)
+{
+    /* Capture a move source without changing its calendar or attributes. The
+     * move planner later patches only the explicitly permitted bytes. */
+    if (stage->operation == UMICOM_FAT16_LIFECYCLE_MOVE) return;
+    UmicomU8 *const raw = stage->directorySectors[0].data + stage->entryOffset;
+    if (stage->operation == UMICOM_FAT16_LIFECYCLE_DELETE ||
+        stage->operation == UMICOM_FAT16_LIFECYCLE_REMOVE_DIRECTORY) { raw[0] = 0xe5U; return; }
+    if (stage->operation == UMICOM_FAT16_LIFECYCLE_CREATE ||
+        stage->operation == UMICOM_FAT16_LIFECYCLE_CREATE_DIRECTORY) {
+        UmicomFatClear(raw, 32U);
+        for (UmicomSize i = 0U; i < 11U; ++i) raw[i] = ' ';
+        UmicomSize position = 0U;
+        for (UmicomSize i = 0U; stage->updatedEntry.name[i]; ++i) {
+            if (stage->updatedEntry.name[i] == '.') position = 8U;
+            else raw[position++] = (UmicomU8)stage->updatedEntry.name[i];
+        }
+        UmicomFatLifecyclePut16(raw + 14U, stage->encodedTime.writeTime);
+        UmicomFatLifecyclePut16(raw + 16U, stage->encodedTime.writeDate);
+        UmicomFatLifecyclePut16(raw + 18U, stage->encodedTime.writeDate);
+    }
+    raw[11] = stage->updatedEntry.attributes;
+    UmicomFatLifecyclePut16(raw + 22U, stage->encodedTime.writeTime);
+    UmicomFatLifecyclePut16(raw + 24U, stage->encodedTime.writeDate);
+    UmicomFatLifecyclePut16(raw + 26U, stage->updatedEntry.firstCluster);
+    UmicomFatLifecyclePut32(raw + 28U, stage->updatedEntry.bytes);
+}
+/* Slot selection now accepts directory creation while retaining fixed-root capacity checks. The preceding implementation is retained below for
+ * source review; only the implementation after this disabled block executes. */
+#if 0
 static UmicomKernelDiskStatus UmicomFatLifecycleDirectory(UmicomKernelFat16 *volume,
     UmicomKernelFat16UpdateWorkspace *workspace, UmicomU16 parent,
     UmicomKernelFat16LifecyclePlan *stage)
@@ -1915,7 +2251,164 @@ static UmicomKernelDiskStatus UmicomFatLifecycleDirectory(UmicomKernelFat16 *vol
     }
     return create ? UMICOM_DISK_NO_SPACE : UMICOM_DISK_CORRUPT;
 }
+#endif
 
+static UmicomKernelDiskStatus UmicomFatLifecycleDirectory(UmicomKernelFat16 *volume,
+    UmicomKernelFat16UpdateWorkspace *workspace, UmicomU16 parent,
+    UmicomKernelFat16LifecyclePlan *stage)
+{
+    UmicomSize count = 0U;
+    UmicomU64 entries = volume->info.rootEntries;
+    if (parent) {
+        const UmicomKernelDiskStatus status = UmicomFatChain(volume, parent,
+            UMICOM_FALSE, 0U, workspace->chain, &count);
+        if (status != UMICOM_DISK_OK) return status;
+        entries = (UmicomU64)count * volume->info.sectorsPerCluster * 16U;
+    }
+    if (entries > UMICOM_FAT16_SCAN_ENTRIES) return UMICOM_DISK_LIMIT;
+    const UmicomBoolean create = stage->operation == UMICOM_FAT16_LIFECYCLE_CREATE ||
+        stage->operation == UMICOM_FAT16_LIFECYCLE_CREATE_DIRECTORY;
+    for (UmicomU64 i = 0U; i < entries; ++i) {
+        const UmicomU64 relative = UmicomFatLifecycleDirectoryRelative(volume, workspace, parent, i);
+        if (i % 16U == 0U) {
+            const UmicomKernelDiskStatus status = UmicomFatReadSector(volume, relative, volume->dataSector);
+            if (status != UMICOM_DISK_OK) return status;
+        }
+        const UmicomU8 *const raw = volume->dataSector + (i % 16U) * 32U;
+        const UmicomBoolean endMarker = !raw[0];
+        if (create) {
+            if (raw[0] && raw[0] != 0xe5U) continue;
+        } else {
+            if (endMarker) break;
+            if (raw[0] == 0xe5U || raw[0] == '.' || (raw[11] & 0x08U)) continue;
+            char name[13];
+            UmicomFatClear(name, sizeof(name));
+            const UmicomKernelDiskStatus status = UmicomFatDecodeName(raw, name);
+            if (status != UMICOM_DISK_OK) return status;
+            if (!UmicomFatStringEqual(name, stage->originalEntry.name)) continue;
+            if (raw[11] != stage->originalEntry.attributes || (raw[12] & ~0x18U) ||
+                UmicomFat16Word(raw + 20U) ||
+                UmicomFat16Word(raw + 26U) != stage->originalEntry.firstCluster ||
+                UmicomFat32Word(raw + 28U) != stage->originalEntry.bytes) return UMICOM_DISK_CORRUPT;
+        }
+        UmicomKernelFat16LifecycleDirectorySector *const sector = &stage->directorySectors[0];
+        sector->sector = volume->info.firstSector + relative;
+        UmicomFatCopy(sector->original, volume->dataSector, sizeof(sector->original));
+        UmicomFatCopy(sector->data, sector->original, sizeof(sector->data));
+        stage->directorySectorCount = 1U;
+        stage->entryOffset = (UmicomSize)(i % 16U) * 32U;
+        UmicomFatLifecycleDirectoryPatch(stage);
+        if (create && endMarker && i + 1U < entries) {
+            const UmicomU64 next = UmicomFatLifecycleDirectoryRelative(volume, workspace, parent, i + 1U);
+            const UmicomSize offset = (UmicomSize)((i + 1U) % 16U) * 32U;
+            if (next == relative) sector->data[offset] = 0U;
+            else {
+                const UmicomKernelDiskStatus status = UmicomFatReadSector(volume, next, volume->dataSector);
+                if (status != UMICOM_DISK_OK) return status;
+                if (volume->dataSector[offset]) {
+                    UmicomKernelFat16LifecycleDirectorySector *const continuation = &stage->directorySectors[1];
+                    continuation->sector = volume->info.firstSector + next;
+                    UmicomFatCopy(continuation->original, volume->dataSector, sizeof(continuation->original));
+                    UmicomFatCopy(continuation->data, continuation->original, sizeof(continuation->data));
+                    continuation->data[offset] = 0U;
+                    stage->directorySectorCount = 2U;
+                }
+            }
+        }
+        return UMICOM_DISK_OK;
+    }
+    return create ? UMICOM_DISK_NO_SPACE : UMICOM_DISK_CORRUPT;
+}
+
+
+/* Dot records describe namespace ownership, rather than ordinary child files.
+ * All timestamps match the containing entry. FAT16 uses cluster zero for the
+ * fixed root parent, even though the root itself occupies reserved sectors. */
+static void UmicomFatLifecycleDotEntries(UmicomKernelFat16LifecyclePlan *stage,
+    UmicomU16 parent)
+{
+    UmicomU8 *const data = stage->dataSectors[0].data;
+    for (UmicomSize record = 0U; record < 2U; ++record) {
+        UmicomU8 *const raw = data + record * 32U;
+        for (UmicomSize i = 0U; i < 11U; ++i) raw[i] = ' ';
+        raw[0] = '.';
+        if (record) raw[1] = '.';
+        raw[11] = 0x10U;
+        UmicomFatLifecyclePut16(raw + 14U, stage->encodedTime.writeTime);
+        UmicomFatLifecyclePut16(raw + 16U, stage->encodedTime.writeDate);
+        UmicomFatLifecyclePut16(raw + 18U, stage->encodedTime.writeDate);
+        UmicomFatLifecyclePut16(raw + 22U, stage->encodedTime.writeTime);
+        UmicomFatLifecyclePut16(raw + 24U, stage->encodedTime.writeDate);
+        UmicomFatLifecyclePut16(raw + 26U, record ? parent : stage->updatedEntry.firstCluster);
+    }
+}
+
+/* Extend only an allocated parent whose existing slots are exhausted. The
+ * namespace proof has already accounted for every old cluster. Excluding this
+ * operation's newly selected clusters prevents the parent and child sharing
+ * storage before those allocations appear in the on-disk FAT. */
+static UmicomKernelDiskStatus UmicomFatLifecycleGrowParent(UmicomKernelFat16 *volume,
+    UmicomKernelFat16UpdateWorkspace *workspace,
+    UmicomKernelFat16LifecycleWorkspace *lifecycleWorkspace, UmicomU16 parent)
+{
+    UmicomKernelFat16LifecyclePlan *const stage = &lifecycleWorkspace->stage;
+    if (!parent) return UMICOM_DISK_NO_SPACE;
+    UmicomSize count = 0U;
+    UmicomKernelDiskStatus status = UmicomFatChain(volume, parent, UMICOM_FALSE,
+        0U, workspace->chain, &count);
+    if (status != UMICOM_DISK_OK) return status;
+    if (!count) return UMICOM_DISK_CORRUPT;
+    if (count >= UMICOM_FAT16_CHAIN_LIMIT ||
+        (UmicomU64)(count + 1U) * volume->info.sectorsPerCluster * 16U > UMICOM_FAT16_SCAN_ENTRIES ||
+        stage->allocatedClusters >= UMICOM_FAT16_LIFECYCLE_NEW_CLUSTERS ||
+        volume->info.sectorsPerCluster > UMICOM_FAT16_LIFECYCLE_DATA_SECTORS - stage->dataSectorCount)
+        return UMICOM_DISK_LIMIT;
+    UmicomU16 added = 0U;
+    for (UmicomU32 candidate = 2U; candidate <= volume->info.clusters + 1U; ++candidate) {
+        if (UmicomFatPlanOwned(workspace, (UmicomU16)candidate)) continue;
+        UmicomBoolean selected = UMICOM_FALSE;
+        for (UmicomSize i = 0U; i < stage->allocatedClusters; ++i)
+            if (lifecycleWorkspace->newChain[i] == candidate) selected = UMICOM_TRUE;
+        if (!selected) { added = (UmicomU16)candidate; break; }
+    }
+    if (!added) return UMICOM_DISK_NO_SPACE;
+    const UmicomU16 tail = workspace->chain[count - 1U];
+    status = UmicomFatLifecycleLink(volume, stage, added, 0xffffU, UMICOM_FALSE);
+    if (status == UMICOM_DISK_OK)
+        status = UmicomFatLifecycleLink(volume, stage, tail, added, UMICOM_TRUE);
+    if (status != UMICOM_DISK_OK) return status;
+    UmicomKernelFat16LifecycleDirectorySector *const directory = &stage->directorySectors[0];
+    const UmicomU64 relative = volume->dataStart +
+        ((UmicomU64)added - 2U) * volume->info.sectorsPerCluster;
+    directory->sector = volume->info.firstSector + relative;
+    status = UmicomFatReadSector(volume, relative, directory->original);
+    if (status != UMICOM_DISK_OK) return status;
+    UmicomFatClear(directory->data, sizeof(directory->data));
+    stage->directorySectorCount = 1U;
+    stage->entryOffset = 0U;
+    UmicomFatLifecycleDirectoryPatch(stage);
+    const UmicomSize firstData = stage->dataSectorCount;
+    for (UmicomSize sector = 0U; sector < volume->info.sectorsPerCluster; ++sector) {
+        /* A logical position beyond the payload requests initialization only.
+         * The parent extension must never receive the child's file contents. */
+        status = UmicomFatLifecycleDataSector(volume, workspace, stage, added, sector,
+            stage->offset + stage->requestedBytes + sector * UMICOM_DISK_SECTOR_BYTES, UMICOM_TRUE);
+        if (status != UMICOM_DISK_OK) return status;
+    }
+    /* Initialize the entry while this cluster is still unreachable. Keeping
+     * both plan images identical allows Finish to reverify every data sector
+     * after directory publication without mistaking our own write for damage. */
+    UmicomFatCopy(stage->dataSectors[firstData].data, directory->data, sizeof(directory->data));
+    lifecycleWorkspace->newChain[stage->allocatedClusters++] = added;
+    stage->parentGrown = UMICOM_TRUE;
+    stage->parentAddedCluster = added;
+    stage->parentTailCluster = tail;
+    return UMICOM_DISK_OK;
+}
+
+/* Directory allocation and removal now reuse the complete namespace proof and immutable plan publication. The preceding implementation is retained below for
+ * source review; only the implementation after this disabled block executes. */
+#if 0
 UmicomKernelDiskStatus UmicomKernelFat16PlanLifecycle(UmicomKernelFat16 *volume,
     const UmicomKernelFat16LifecycleRequest *request,
     UmicomKernelFat16UpdateWorkspace *workspace,
@@ -1986,6 +2479,233 @@ UmicomKernelDiskStatus UmicomKernelFat16PlanLifecycle(UmicomKernelFat16 *volume,
     if (status == UMICOM_DISK_OK) status = UmicomFatLifecycleAllocation(volume, workspace, lifecycleWorkspace);
     if (status == UMICOM_DISK_OK) status = UmicomFatLifecycleData(volume, workspace, lifecycleWorkspace);
     if (status == UMICOM_DISK_OK) status = UmicomFatLifecycleDirectory(volume, workspace, parent, stage);
+    if (status == UMICOM_DISK_OK) UmicomFatCopy(outPlan, stage, sizeof(*outPlan));
+    UmicomFatClear(workspace, sizeof(*workspace)); workspace->self = workspace;
+    UmicomFatClear(lifecycleWorkspace, sizeof(*lifecycleWorkspace)); lifecycleWorkspace->self = lifecycleWorkspace;
+    volume->fatCached = UMICOM_FALSE;
+    return UmicomFatFinish(volume, status);
+}
+#endif
+
+/* Metadata-only moves follow the same complete ownership proof as allocation operations.
+ * The preceding implementation is retained for engineering review. */
+#if 0
+UmicomKernelDiskStatus UmicomKernelFat16PlanLifecycle(UmicomKernelFat16 *volume,
+    const UmicomKernelFat16LifecycleRequest *request,
+    UmicomKernelFat16UpdateWorkspace *workspace,
+    UmicomKernelFat16LifecycleWorkspace *lifecycleWorkspace,
+    UmicomKernelFat16LifecyclePlan *outPlan)
+{
+    UmicomSize pathBytes = 0U;
+    UmicomKernelFat16FileTimeEncoding encoded;
+    UmicomKernelDiskStatus status = UmicomFatLifecycleArguments(volume, request, workspace,
+        lifecycleWorkspace, outPlan, &pathBytes, &encoded);
+    if (status != UMICOM_DISK_OK) return status;
+    /* Copy scalar intent before admission; the request itself is never read
+     * after a callback. Its borrowed pointers are used only for these copies. */
+    const UmicomKernelFat16LifecycleRequest selected = *request;
+    status = UmicomFatBegin(volume);
+    if (status != UMICOM_DISK_OK) return status;
+    UmicomFatClear(workspace, sizeof(*workspace));
+    workspace->self = workspace; workspace->busy = UMICOM_TRUE;
+    UmicomFatClear(lifecycleWorkspace, sizeof(*lifecycleWorkspace));
+    lifecycleWorkspace->self = lifecycleWorkspace; lifecycleWorkspace->busy = UMICOM_TRUE;
+    UmicomFatCopy(lifecycleWorkspace->path, selected.path, pathBytes);
+    if (selected.bytes) UmicomFatCopy(workspace->input, selected.input, selected.bytes);
+    UmicomKernelFat16LifecyclePlan *const stage = &lifecycleWorkspace->stage;
+    stage->operation = selected.operation;
+    stage->requestedTime = selected.time;
+    stage->encodedTime = encoded;
+    stage->requestedBytes = selected.bytes;
+    const UmicomBoolean makeDirectory = selected.operation == UMICOM_FAT16_LIFECYCLE_CREATE_DIRECTORY;
+    const UmicomBoolean removeDirectory = selected.operation == UMICOM_FAT16_LIFECYCLE_REMOVE_DIRECTORY;
+    const UmicomBoolean create = selected.operation == UMICOM_FAT16_LIFECYCLE_CREATE || makeDirectory;
+    const UmicomBoolean remove = selected.operation == UMICOM_FAT16_LIFECYCLE_DELETE || removeDirectory;
+    UmicomU16 parent = 0U;
+    status = UmicomFatPlanGeometry(volume);
+    if (status == UMICOM_DISK_OK && create) {
+        status = UmicomFatLifecycleCreateLookup(volume, lifecycleWorkspace->path, &stage->updatedEntry, &parent);
+        if (status == UMICOM_DISK_OK) {
+            stage->updatedEntryPresent = UMICOM_TRUE;
+            stage->updatedEntry.bytes = (UmicomU32)selected.bytes;
+            stage->updatedEntry.attributes = makeDirectory ? 0x10U : 0x20U;
+            stage->updatedEntry.directory = makeDirectory;
+        }
+    } else if (status == UMICOM_DISK_OK) {
+        status = UmicomFatFileLookup(volume, lifecycleWorkspace->path, &stage->originalEntry, &parent);
+        if (status == UMICOM_DISK_OK && removeDirectory) {
+            if (!stage->originalEntry.directory) status = UMICOM_DISK_NOT_DIRECTORY;
+            else if (!stage->originalEntry.firstCluster) status = UMICOM_DISK_IS_DIRECTORY;
+            else {
+                /* Ignore canonical dot records, but never erase live children.
+                 * The full namespace proof below still validates dot ownership. */
+                status = UmicomFatDirectoryRead(volume, stage->originalEntry.firstCluster);
+                if (status == UMICOM_DISK_OK && volume->directoryStage.count)
+                    status = UMICOM_DISK_NOT_EMPTY;
+            }
+        } else if (status == UMICOM_DISK_OK && stage->originalEntry.directory)
+            status = UMICOM_DISK_IS_DIRECTORY;
+        if (status == UMICOM_DISK_OK && (stage->originalEntry.attributes & 0x01U)) status = UMICOM_DISK_READ_ONLY;
+        if (status == UMICOM_DISK_OK) {
+            stage->originalEntryPresent = UMICOM_TRUE;
+            if (!remove) {
+                stage->updatedEntryPresent = UMICOM_TRUE;
+                stage->updatedEntry = stage->originalEntry;
+                stage->updatedEntry.attributes |= 0x20U;
+            }
+            if (selected.operation == UMICOM_FAT16_LIFECYCLE_APPEND) {
+                stage->offset = stage->originalEntry.bytes;
+                if (selected.bytes > (UmicomU64)0xffffffffU - stage->offset) status = UMICOM_DISK_RANGE;
+                else stage->updatedEntry.bytes = (UmicomU32)(stage->offset + selected.bytes);
+            } else if (selected.operation == UMICOM_FAT16_LIFECYCLE_TRUNCATE) {
+                if (selected.size > stage->originalEntry.bytes) status = UMICOM_DISK_RANGE;
+                else stage->updatedEntry.bytes = selected.size;
+            }
+        }
+        if (status == UMICOM_DISK_OK) {
+            const UmicomU64 clusterBytes = (UmicomU64)volume->info.sectorsPerCluster * UMICOM_DISK_SECTOR_BYTES;
+            const UmicomU64 required = ((UmicomU64)stage->originalEntry.bytes + clusterBytes - 1U) / clusterBytes;
+            status = UmicomFatChain(volume, stage->originalEntry.firstCluster, !removeDirectory,
+                required, workspace->targetChain, &workspace->targetClusters);
+        }
+    }
+    if (status == UMICOM_DISK_OK) status = UmicomFatPlanNamespace(volume, workspace);
+    if (status == UMICOM_DISK_OK && create &&
+        workspace->objects >= UMICOM_FAT16_UPDATE_OBJECT_LIMIT) status = UMICOM_DISK_LIMIT;
+    /* A newly published directory must fit the same bounded reader used after
+     * reboot. Large FAT16 clusters are legal, but this implementation cannot
+     * promise access to more raw directory entries than it can inspect. */
+    if (status == UMICOM_DISK_OK && makeDirectory &&
+        (UmicomU64)volume->info.sectorsPerCluster * 16U > UMICOM_FAT16_SCAN_ENTRIES)
+        status = UMICOM_DISK_LIMIT;
+    if (status == UMICOM_DISK_OK && makeDirectory &&
+        workspace->directoryCount >= UMICOM_FAT16_UPDATE_DIRECTORY_LIMIT) status = UMICOM_DISK_LIMIT;
+    if (status == UMICOM_DISK_OK) status = UmicomFatPlanAllocation(volume, workspace);
+    if (status == UMICOM_DISK_OK) status = UmicomFatLifecycleAllocation(volume, workspace, lifecycleWorkspace);
+    if (status == UMICOM_DISK_OK) status = UmicomFatLifecycleData(volume, workspace, lifecycleWorkspace);
+    if (status == UMICOM_DISK_OK && makeDirectory) UmicomFatLifecycleDotEntries(stage, parent);
+    if (status == UMICOM_DISK_OK) {
+        status = UmicomFatLifecycleDirectory(volume, workspace, parent, stage);
+        if (status == UMICOM_DISK_NO_SPACE && create)
+            status = UmicomFatLifecycleGrowParent(volume, workspace, lifecycleWorkspace, parent);
+    }
+    if (status == UMICOM_DISK_OK) UmicomFatCopy(outPlan, stage, sizeof(*outPlan));
+    UmicomFatClear(workspace, sizeof(*workspace)); workspace->self = workspace;
+    UmicomFatClear(lifecycleWorkspace, sizeof(*lifecycleWorkspace)); lifecycleWorkspace->self = lifecycleWorkspace;
+    volume->fatCached = UMICOM_FALSE;
+    return UmicomFatFinish(volume, status);
+}
+#endif
+
+/* Read-only move helpers share the existing namespace proof. */
+#include "fat16_move_plan.inc"
+
+UmicomKernelDiskStatus UmicomKernelFat16PlanLifecycle(UmicomKernelFat16 *volume,
+    const UmicomKernelFat16LifecycleRequest *request,
+    UmicomKernelFat16UpdateWorkspace *workspace,
+    UmicomKernelFat16LifecycleWorkspace *lifecycleWorkspace,
+    UmicomKernelFat16LifecyclePlan *outPlan)
+{
+    UmicomSize pathBytes = 0U;
+    UmicomSize destinationBytes = 0U;
+    UmicomKernelFat16FileTimeEncoding encoded;
+    UmicomKernelDiskStatus status = UmicomFatLifecycleArguments(volume, request, workspace,
+        lifecycleWorkspace, outPlan, &pathBytes, &encoded, &destinationBytes);
+    if (status != UMICOM_DISK_OK) return status;
+    /* Copy scalar intent before admission; the request itself is never read
+     * after a callback. Its borrowed pointers are used only for these copies. */
+    const UmicomKernelFat16LifecycleRequest selected = *request;
+    status = UmicomFatBegin(volume);
+    if (status != UMICOM_DISK_OK) return status;
+    UmicomFatClear(workspace, sizeof(*workspace));
+    workspace->self = workspace; workspace->busy = UMICOM_TRUE;
+    UmicomFatClear(lifecycleWorkspace, sizeof(*lifecycleWorkspace));
+    lifecycleWorkspace->self = lifecycleWorkspace; lifecycleWorkspace->busy = UMICOM_TRUE;
+    UmicomFatCopy(lifecycleWorkspace->path, selected.path, pathBytes);
+    if (destinationBytes) UmicomFatCopy(lifecycleWorkspace->destination, selected.destination, destinationBytes);
+    if (selected.bytes) UmicomFatCopy(workspace->input, selected.input, selected.bytes);
+    UmicomKernelFat16LifecyclePlan *const stage = &lifecycleWorkspace->stage;
+    stage->operation = selected.operation;
+    stage->requestedTime = selected.time;
+    stage->encodedTime = encoded;
+    stage->requestedBytes = selected.bytes;
+    const UmicomBoolean move = selected.operation == UMICOM_FAT16_LIFECYCLE_MOVE;
+    const UmicomBoolean makeDirectory = selected.operation == UMICOM_FAT16_LIFECYCLE_CREATE_DIRECTORY;
+    const UmicomBoolean removeDirectory = selected.operation == UMICOM_FAT16_LIFECYCLE_REMOVE_DIRECTORY;
+    const UmicomBoolean create = selected.operation == UMICOM_FAT16_LIFECYCLE_CREATE || makeDirectory;
+    const UmicomBoolean remove = selected.operation == UMICOM_FAT16_LIFECYCLE_DELETE || removeDirectory;
+    UmicomU16 parent = 0U;
+    status = UmicomFatPlanGeometry(volume);
+    if (status == UMICOM_DISK_OK && create) {
+        status = UmicomFatLifecycleCreateLookup(volume, lifecycleWorkspace->path, &stage->updatedEntry, &parent);
+        if (status == UMICOM_DISK_OK) {
+            stage->updatedEntryPresent = UMICOM_TRUE;
+            stage->updatedEntry.bytes = (UmicomU32)selected.bytes;
+            stage->updatedEntry.attributes = makeDirectory ? 0x10U : 0x20U;
+            stage->updatedEntry.directory = makeDirectory;
+        }
+    } else if (status == UMICOM_DISK_OK) {
+        status = UmicomFatFileLookup(volume, lifecycleWorkspace->path, &stage->originalEntry, &parent);
+        if (status == UMICOM_DISK_OK && removeDirectory) {
+            if (!stage->originalEntry.directory) status = UMICOM_DISK_NOT_DIRECTORY;
+            else if (!stage->originalEntry.firstCluster) status = UMICOM_DISK_IS_DIRECTORY;
+            else {
+                /* Ignore canonical dot records, but never erase live children.
+                 * The full namespace proof below still validates dot ownership. */
+                status = UmicomFatDirectoryRead(volume, stage->originalEntry.firstCluster);
+                if (status == UMICOM_DISK_OK && volume->directoryStage.count)
+                    status = UMICOM_DISK_NOT_EMPTY;
+            }
+        } else if (status == UMICOM_DISK_OK && stage->originalEntry.directory && !move)
+            status = UMICOM_DISK_IS_DIRECTORY;
+        if (status == UMICOM_DISK_OK && move && stage->originalEntry.directory &&
+            !stage->originalEntry.firstCluster) status = UMICOM_DISK_IS_DIRECTORY;
+        if (status == UMICOM_DISK_OK && (stage->originalEntry.attributes & 0x01U)) status = UMICOM_DISK_READ_ONLY;
+        if (status == UMICOM_DISK_OK) {
+            stage->originalEntryPresent = UMICOM_TRUE;
+            if (!remove) {
+                stage->updatedEntryPresent = UMICOM_TRUE;
+                stage->updatedEntry = stage->originalEntry;
+                if (!move) stage->updatedEntry.attributes |= 0x20U;
+            }
+            if (selected.operation == UMICOM_FAT16_LIFECYCLE_APPEND) {
+                stage->offset = stage->originalEntry.bytes;
+                if (selected.bytes > (UmicomU64)0xffffffffU - stage->offset) status = UMICOM_DISK_RANGE;
+                else stage->updatedEntry.bytes = (UmicomU32)(stage->offset + selected.bytes);
+            } else if (selected.operation == UMICOM_FAT16_LIFECYCLE_TRUNCATE) {
+                if (selected.size > stage->originalEntry.bytes) status = UMICOM_DISK_RANGE;
+                else stage->updatedEntry.bytes = selected.size;
+            }
+        }
+        if (status == UMICOM_DISK_OK) {
+            const UmicomU64 clusterBytes = (UmicomU64)volume->info.sectorsPerCluster * UMICOM_DISK_SECTOR_BYTES;
+            const UmicomU64 required = ((UmicomU64)stage->originalEntry.bytes + clusterBytes - 1U) / clusterBytes;
+            status = UmicomFatChain(volume, stage->originalEntry.firstCluster, !(removeDirectory || (move && stage->originalEntry.directory)),
+                required, workspace->targetChain, &workspace->targetClusters);
+        }
+    }
+    if (status == UMICOM_DISK_OK) status = UmicomFatPlanNamespace(volume, workspace);
+    if (status == UMICOM_DISK_OK && create &&
+        workspace->objects >= UMICOM_FAT16_UPDATE_OBJECT_LIMIT) status = UMICOM_DISK_LIMIT;
+    /* A newly published directory must fit the same bounded reader used after
+     * reboot. Large FAT16 clusters are legal, but this implementation cannot
+     * promise access to more raw directory entries than it can inspect. */
+    if (status == UMICOM_DISK_OK && makeDirectory &&
+        (UmicomU64)volume->info.sectorsPerCluster * 16U > UMICOM_FAT16_SCAN_ENTRIES)
+        status = UMICOM_DISK_LIMIT;
+    if (status == UMICOM_DISK_OK && makeDirectory &&
+        workspace->directoryCount >= UMICOM_FAT16_UPDATE_DIRECTORY_LIMIT) status = UMICOM_DISK_LIMIT;
+    if (status == UMICOM_DISK_OK) status = UmicomFatPlanAllocation(volume, workspace);
+    if (status == UMICOM_DISK_OK && move)
+        status = UmicomFatLifecycleMove(volume, workspace, lifecycleWorkspace, parent);
+    if (status == UMICOM_DISK_OK && !move) status = UmicomFatLifecycleAllocation(volume, workspace, lifecycleWorkspace);
+    if (status == UMICOM_DISK_OK && !move) status = UmicomFatLifecycleData(volume, workspace, lifecycleWorkspace);
+    if (status == UMICOM_DISK_OK && makeDirectory) UmicomFatLifecycleDotEntries(stage, parent);
+    if (status == UMICOM_DISK_OK && !move) {
+        status = UmicomFatLifecycleDirectory(volume, workspace, parent, stage);
+        if (status == UMICOM_DISK_NO_SPACE && create)
+            status = UmicomFatLifecycleGrowParent(volume, workspace, lifecycleWorkspace, parent);
+    }
     if (status == UMICOM_DISK_OK) UmicomFatCopy(outPlan, stage, sizeof(*outPlan));
     UmicomFatClear(workspace, sizeof(*workspace)); workspace->self = workspace;
     UmicomFatClear(lifecycleWorkspace, sizeof(*lifecycleWorkspace)); lifecycleWorkspace->self = lifecycleWorkspace;

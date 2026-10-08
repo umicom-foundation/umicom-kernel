@@ -250,7 +250,15 @@ static void LCDefaults(UmicomKernelFat16LifecycleOperation operation)
     lcNextDirectory=lcDirectory;lcNextEntry=lcEntry+32U;
     memcpy(lcPath,operation==UMICOM_FAT16_LIFECYCLE_CREATE?"/LIFE.BIN":"/FRAG.BIN",10U);
     for(UmicomSize i=0U;i<sizeof(lcInput);++i) lcInput[i]=(UmicomU8)(i*29U+0x31U);
+    /* Named fields keep optional request extensions zero-initialized.
+     * The earlier positional initializer is retained for review. */
+#if 0
     lcRequest=(UmicomKernelFat16LifecycleRequest){operation,lcPath,NULL,0U,0U,{2044U,2U,29U,23U,58U,57U}};
+#endif
+    lcRequest = (UmicomKernelFat16LifecycleRequest){
+        .operation=operation, .path=lcPath,
+        .time={2044U,2U,29U,23U,58U,57U}};
+
     if(operation==UMICOM_FAT16_LIFECYCLE_CREATE||operation==UMICOM_FAT16_LIFECYCLE_APPEND) {
         lcRequest.input=lcInput;lcRequest.bytes=operation==UMICOM_FAT16_LIFECYCLE_CREATE?700U:900U;
     } else if(operation==UMICOM_FAT16_LIFECYCLE_TRUNCATE) lcRequest.size=513U;
@@ -769,8 +777,13 @@ static void LCConsole(const char *name)
     CHECK(!Allocated() && commitMutations==mutations);
     if(lcConsoleQueue||lcConsoleOutput) CHECK(lcConsoleReentries>0U);
 }
+/* Reuse the existing device fault model while keeping the directory oracle
+ * independent of both the regular-file oracle and production plan decisions. */
+#include "directory_cases.inc"
 int __wrap_main(int argc,char **argv)
 {
+    if (argc == 3 && !strncmp(argv[1], "directory.", 10U))
+        return DirectoryCase(argv[2], argv[1] + 10U);
     CHECK(argc==3);const char *name=argv[1];UmicomKernelFat16LifecycleOperation operation=UMICOM_FAT16_LIFECYCLE_CREATE;
     if(!strncmp(name,"create.",7U)) name+=7U;
     else if(!strncmp(name,"append.",7U)) {operation=UMICOM_FAT16_LIFECYCLE_APPEND;name+=7U;}

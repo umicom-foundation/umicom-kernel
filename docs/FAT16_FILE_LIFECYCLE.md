@@ -235,7 +235,12 @@ Add these arguments to the normal `umicom-system.elf` QEMU boot command:
     -device "virtio-blk-device,drive=umicom_files,write-cache=on"
 ```
 
+<!-- The console exposes disk discovery as "disks". The earlier command
+name below is retained for review; use the corrected instruction after it.
 Use `blocks` to discover the slot; the qualified QEMU layout reports slot 7
+and the fixture's first primary partition is index 0. Enter inside the Kernel:
+-->
+Use `disks` to discover the slot; the qualified QEMU layout reports slot 7
 and the fixture's first primary partition is index 0. Enter inside the Kernel:
 
 ```text

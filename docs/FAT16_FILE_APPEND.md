@@ -179,7 +179,12 @@ using the following additional arguments:
     -device "virtio-blk-device,drive=umicom_append"
 ```
 
+<!-- The console exposes disk discovery as "disks". The earlier command
+name below is retained for review; use the corrected instruction after it.
 Use `blocks` to discover the slot. The fixture's first primary partition is
+index 0. On the qualified QEMU layout the device appears in slot 7:
+-->
+Use `disks` to discover the slot. The fixture's first primary partition is
 index 0. On the qualified QEMU layout the device appears in slot 7:
 
 ```text
