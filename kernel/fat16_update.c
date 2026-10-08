@@ -856,6 +856,12 @@ const char *UmicomKernelFat16CommitPhaseName(UmicomKernelFat16CommitPhase phase)
     case UMICOM_FAT16_COMMIT_DIRECTORY_WRITE: return "directory-write";
     case UMICOM_FAT16_COMMIT_DIRECTORY_FLUSH: return "directory-flush";
     case UMICOM_FAT16_COMMIT_DIRECTORY_VERIFY: return "directory-verify";
+    case UMICOM_FAT16_COMMIT_FAT_MIRROR_WRITE: return "fat-mirror-write";
+    case UMICOM_FAT16_COMMIT_FAT_MIRROR_FLUSH: return "fat-mirror-flush";
+    case UMICOM_FAT16_COMMIT_FAT_MIRROR_VERIFY: return "fat-mirror-verify";
+    case UMICOM_FAT16_COMMIT_FAT_PRIMARY_WRITE: return "fat-primary-write";
+    case UMICOM_FAT16_COMMIT_FAT_PRIMARY_FLUSH: return "fat-primary-flush";
+    case UMICOM_FAT16_COMMIT_FAT_PRIMARY_VERIFY: return "fat-primary-verify";
     default: return "unknown-fat16-commit-phase";
     }
 }
@@ -1638,4 +1644,576 @@ UmicomKernelFat16UpdateStatus UmicomKernelFat16RenameClose(UmicomKernelFat16Rena
     }
     owner->busy = UMICOM_FALSE;
     return status;
+}
+
+/*-----------------------------------------------------------------------------
+ * Persistent file management keeps old single-operation owners intact. This
+ * owner can finish several independent operations under one exclusive lease;
+ * each starts from a fresh clean inspection and has its own evidence/budgets.
+ * Original header guards and final allocation-bearing headers are distinct.
+ *---------------------------------------------------------------------------*/
+#include "umicom/kernel/fat16_lifecycle_commit.h"
+
+static UmicomBoolean UmicomLifecycleIndependent(const UmicomKernelFat16LifecycleCommitter *owner,
+    UmicomAddress address, UmicomSize bytes)
+{
+    return UmicomUpdateDomainIndependent(owner->commit.updater.domain, address, bytes) &&
+        !UmicomUpdateOverlap(address, bytes, (UmicomAddress)owner, sizeof(*owner));
+}
+static UmicomKernelFat16UpdateStatus UmicomLifecycleLive(UmicomKernelFat16LifecycleCommitter *owner,
+    UmicomBoolean staged)
+{
+    if (!owner || (UmicomAddress)owner % alignof(UmicomKernelFat16LifecycleCommitter) ||
+        !UmicomUpdateSpan((UmicomAddress)owner, sizeof(*owner)))
+        return UMICOM_FAT16_UPDATE_INVALID_ARGUMENT;
+    if (owner->self != owner) return UMICOM_FAT16_UPDATE_BAD_STATE;
+    if (owner->busy || owner->workspace.busy) return UMICOM_FAT16_UPDATE_BUSY;
+    const UmicomKernelFat16CommitState state = owner->commit.state;
+    if (staged ? state != UMICOM_FAT16_COMMIT_STAGED :
+        (state != UMICOM_FAT16_COMMIT_READY && state != UMICOM_FAT16_COMMIT_COMMITTED))
+        return UMICOM_FAT16_UPDATE_BAD_STATE;
+    const UmicomKernelFat16UpdateStatus status = UmicomCommitLive(&owner->commit, state);
+    if (status != UMICOM_FAT16_UPDATE_OK) return status;
+    if (!UmicomUpdateDomainIndependent(owner->commit.updater.domain,
+        (UmicomAddress)owner, sizeof(*owner))) return UMICOM_FAT16_UPDATE_BAD_STATE;
+    return UMICOM_FAT16_UPDATE_OK;
+}
+static UmicomKernelFat16UpdateStatus UmicomLifecycleResultBuffer(
+    UmicomKernelFat16LifecycleCommitter *owner, UmicomKernelFat16LifecycleResult *output)
+{
+    return output && !((UmicomAddress)output % alignof(UmicomKernelFat16LifecycleResult)) &&
+        UmicomLifecycleIndependent(owner, (UmicomAddress)output, sizeof(*output)) ?
+        UMICOM_FAT16_UPDATE_OK : UMICOM_FAT16_UPDATE_INVALID_ARGUMENT;
+}
+static UmicomBoolean UmicomLifecycleRequestFields(const UmicomKernelFat16LifecycleRequest *request)
+{
+    switch (request->operation) {
+    case UMICOM_FAT16_LIFECYCLE_CREATE:
+        if (request->size || request->bytes > UMICOM_FAT16_UPDATE_BYTES ||
+            (request->bytes ? !request->input : request->input != 0)) return UMICOM_FALSE;
+        break;
+    case UMICOM_FAT16_LIFECYCLE_APPEND:
+        if (request->size || !request->bytes || request->bytes > UMICOM_FAT16_UPDATE_BYTES ||
+            !request->input) return UMICOM_FALSE;
+        break;
+    case UMICOM_FAT16_LIFECYCLE_TRUNCATE:
+        if (request->input || request->bytes) return UMICOM_FALSE;
+        break;
+    case UMICOM_FAT16_LIFECYCLE_DELETE:
+        return !request->input && !request->bytes && !request->size &&
+            UmicomUpdateZero(&request->time, sizeof(request->time));
+    default: return UMICOM_FALSE;
+    }
+    UmicomKernelFat16FileTimeEncoding encoded;
+    return UmicomKernelFat16FileTimeEncode(&request->time, &encoded) == UMICOM_DISK_OK;
+}
+static UmicomKernelFat16UpdateStatus UmicomLifecycleBuffers(UmicomKernelFat16LifecycleCommitter *owner,
+    const UmicomKernelFat16LifecycleRequest *request, UmicomKernelFat16LifecycleResult *output)
+{
+    if (UmicomLifecycleResultBuffer(owner, output) != UMICOM_FAT16_UPDATE_OK || !request ||
+        (UmicomAddress)request % alignof(UmicomKernelFat16LifecycleRequest) ||
+        !UmicomLifecycleIndependent(owner, (UmicomAddress)request, sizeof(*request)) ||
+        UmicomUpdateOverlap((UmicomAddress)request, sizeof(*request), (UmicomAddress)output, sizeof(*output)))
+        return UMICOM_FAT16_UPDATE_INVALID_ARGUMENT;
+    if (!UmicomLifecycleRequestFields(request) || !request->path)
+        return UMICOM_FAT16_UPDATE_INVALID_ARGUMENT;
+    if (request->bytes && (!UmicomLifecycleIndependent(owner, (UmicomAddress)request->input, request->bytes) ||
+        UmicomUpdateOverlap((UmicomAddress)request->input, request->bytes, (UmicomAddress)request, sizeof(*request)) ||
+        UmicomUpdateOverlap((UmicomAddress)request->input, request->bytes, (UmicomAddress)output, sizeof(*output))))
+        return UMICOM_FAT16_UPDATE_INVALID_ARGUMENT;
+    const UmicomAddress path = (UmicomAddress)request->path;
+    for (UmicomSize i = 0U; i < UMICOM_FAT16_PATH_BYTES; ++i) {
+        if (path > ~(UmicomAddress)0U - i || !UmicomLifecycleIndependent(owner, path + i, 1U) ||
+            UmicomUpdateOverlap(path + i, 1U, (UmicomAddress)request, sizeof(*request)) ||
+            UmicomUpdateOverlap(path + i, 1U, (UmicomAddress)output, sizeof(*output)) ||
+            UmicomUpdateOverlap(path + i, 1U, (UmicomAddress)request->input, request->bytes))
+            return UMICOM_FAT16_UPDATE_INVALID_ARGUMENT;
+        if (!request->path[i]) return UMICOM_FAT16_UPDATE_OK;
+    }
+    return UMICOM_FAT16_UPDATE_INVALID_ARGUMENT;
+}
+static UmicomKernelFat16UpdateStatus UmicomLifecycleEnter(UmicomKernelFat16LifecycleCommitter *owner)
+{
+    owner->busy = UMICOM_TRUE;
+    const UmicomKernelFat16UpdateStatus status = UmicomCommitEnter(&owner->commit);
+    if (status != UMICOM_FAT16_UPDATE_OK) owner->busy = UMICOM_FALSE;
+    return status;
+}
+static void UmicomLifecycleScrubRequest(UmicomKernelFat16LifecycleCommitter *owner)
+{
+    UmicomUpdateClear(&owner->request, sizeof(owner->request));
+    UmicomUpdateClear(owner->path, sizeof(owner->path));
+    UmicomUpdateClear(owner->input, sizeof(owner->input));
+}
+static UmicomKernelFat16UpdateStatus UmicomLifecyclePublish(UmicomKernelFat16LifecycleCommitter *owner,
+    UmicomKernelFat16LifecycleResult *result, UmicomKernelFat16LifecycleResult *output,
+    UmicomKernelFat16UpdateStatus status)
+{
+    UmicomKernelFat16Updater *const base = &owner->commit.updater;
+    result->commit.status = status;
+    result->commit.diskStatus = base->lastDiskStatus;
+    result->commit.blockStatus = base->lastBlockStatus;
+    result->commit.needsFlush = base->needsFlush;
+    result->commit.writeUncertain = base->writeUncertain;
+    result->committedOperations = owner->committedOperations;
+    base->lastStatus = status;
+    UmicomUpdateCopy(&owner->lastResult, result, sizeof(*result));
+    UmicomUpdateCopy(&owner->commit.lastResult, &result->commit, sizeof(result->commit));
+    UmicomUpdateCopy(output, result, sizeof(*result));
+    UmicomLifecycleScrubRequest(owner);
+    base->busy = UMICOM_FALSE;
+    owner->commit.busy = UMICOM_FALSE;
+    owner->busy = UMICOM_FALSE;
+    return status;
+}
+UmicomKernelFat16UpdateStatus UmicomKernelFat16LifecycleOpen(
+    UmicomKernelFat16LifecycleCommitter *owner, UmicomKernelBlockDomain *domain,
+    UmicomSize slot, UmicomSize partition, UmicomU64 timeoutTicks)
+{
+    if (!owner || (UmicomAddress)owner % alignof(UmicomKernelFat16LifecycleCommitter) ||
+        !UmicomUpdateSpan((UmicomAddress)owner, sizeof(*owner)))
+        return UMICOM_FAT16_UPDATE_INVALID_ARGUMENT;
+    if (!UmicomUpdateDomainValid(domain)) return UMICOM_FAT16_UPDATE_BAD_STATE;
+    if (!UmicomUpdateDomainIndependent(domain, (UmicomAddress)owner, sizeof(*owner)))
+        return UMICOM_FAT16_UPDATE_INVALID_ARGUMENT;
+    if (owner->busy || owner->commit.busy || owner->commit.updater.busy || owner->workspace.busy ||
+        owner->commit.updater.workspace.busy || owner->commit.updater.volume.busy || domain->busy)
+        return UMICOM_FAT16_UPDATE_BUSY;
+    if ((!owner->self && !UmicomUpdateZero(owner, sizeof(*owner))) ||
+        (owner->self && owner->self != owner) || owner->commit.state != UMICOM_FAT16_COMMIT_UNUSED ||
+        owner->committedOperations) return UMICOM_FAT16_UPDATE_BAD_STATE;
+    owner->self = owner;
+    owner->busy = UMICOM_TRUE;
+    const UmicomKernelFat16UpdateStatus status = UmicomKernelFat16CommitOpen(&owner->commit,
+        domain, slot, partition, timeoutTicks);
+    owner->busy = UMICOM_FALSE;
+    return status;
+}
+static UmicomBoolean UmicomLifecycleSectorRange(const UmicomKernelFat16LifecycleCommitter *owner,
+    UmicomU64 sector, UmicomU64 first)
+{
+    const UmicomKernelFat16Updater *const base = &owner->commit.updater;
+    return sector >= first && sector >= base->info.firstSector && sector < base->sectors &&
+        sector - base->info.firstSector < base->info.volumeSectors;
+}
+static UmicomBoolean UmicomLifecyclePlanValid(const UmicomKernelFat16LifecycleCommitter *owner)
+{
+    const UmicomKernelFat16LifecyclePlan *const plan = &owner->plan;
+    const UmicomKernelFat16Updater *const base = &owner->commit.updater;
+    if (plan->operation < UMICOM_FAT16_LIFECYCLE_CREATE || plan->operation > UMICOM_FAT16_LIFECYCLE_DELETE ||
+        !plan->fatSectorCount || plan->fatSectorCount > UMICOM_FAT16_LIFECYCLE_FAT_SECTORS ||
+        !plan->directorySectorCount || plan->directorySectorCount > UMICOM_FAT16_LIFECYCLE_DIRECTORY_SECTORS ||
+        plan->dataSectorCount > UMICOM_FAT16_LIFECYCLE_DATA_SECTORS ||
+        plan->requestedBytes > UMICOM_FAT16_UPDATE_BYTES || plan->entryOffset > 480U || plan->entryOffset % 32U ||
+        plan->allocatedClusters > UMICOM_FAT16_LIFECYCLE_NEW_CLUSTERS || plan->freedClusters > UMICOM_FAT16_CHAIN_LIMIT ||
+        plan->fatSectors[0].primarySector != owner->commit.headerSectors[0] ||
+        plan->fatSectors[0].mirrorSector != owner->commit.headerSectors[1] ||
+        plan->fatSectors[0].original[2] != 0xffU || plan->fatSectors[0].original[3] != 0xffU ||
+        plan->fatSectors[0].data[2] != 0xffU || plan->fatSectors[0].data[3] != 0xffU)
+        return UMICOM_FALSE;
+    if (plan->chainBoundaryPresent && (plan->chainBoundaryFatIndex >= plan->fatSectorCount ||
+        !plan->fatSectors[plan->chainBoundaryFatIndex].changed ||
+        (plan->operation != UMICOM_FAT16_LIFECYCLE_APPEND && plan->operation != UMICOM_FAT16_LIFECYCLE_TRUNCATE)))
+        return UMICOM_FALSE;
+    for (UmicomSize i = 0U; i < plan->fatSectorCount; ++i) {
+        const UmicomKernelFat16LifecycleFatSector *const fat = &plan->fatSectors[i];
+        if (fat->primarySector < owner->commit.headerSectors[0] ||
+            fat->primarySector - owner->commit.headerSectors[0] >= base->info.sectorsPerFat ||
+            fat->mirrorSector != owner->commit.headerSectors[1] + fat->primarySector - owner->commit.headerSectors[0] ||
+            !UmicomLifecycleSectorRange(owner, fat->mirrorSector, owner->commit.headerSectors[1]) ||
+            fat->changed == UmicomCommitEqual(fat->original, fat->data, UMICOM_DISK_SECTOR_BYTES))
+            return UMICOM_FALSE;
+        for (UmicomSize j = 0U; j < i; ++j)
+            if (fat->primarySector == plan->fatSectors[j].primarySector) return UMICOM_FALSE;
+    }
+    const UmicomU64 root = owner->commit.headerSectors[1] + base->info.sectorsPerFat;
+    const UmicomU64 data = root + (UmicomU64)base->info.rootEntries / 16U;
+    for (UmicomSize i = 0U; i < plan->directorySectorCount; ++i) {
+        if (!UmicomLifecycleSectorRange(owner, plan->directorySectors[i].sector, root)) return UMICOM_FALSE;
+        for (UmicomSize j = 0U; j < i; ++j)
+            if (plan->directorySectors[i].sector == plan->directorySectors[j].sector) return UMICOM_FALSE;
+    }
+    UmicomSize payload = 0U;
+    for (UmicomSize i = 0U; i < plan->dataSectorCount; ++i) {
+        const UmicomKernelFat16UpdateSector *const sector = &plan->dataSectors[i];
+        if (!UmicomLifecycleSectorRange(owner, sector->sector, data) || sector->offset > UMICOM_DISK_SECTOR_BYTES ||
+            sector->bytes > UMICOM_DISK_SECTOR_BYTES - sector->offset ||
+            sector->bytes > plan->requestedBytes - payload || (sector->bytes && sector->inputOffset != payload))
+            return UMICOM_FALSE;
+        payload += sector->bytes;
+        for (UmicomSize j = 0U; j < i; ++j)
+            if (sector->sector == plan->dataSectors[j].sector) return UMICOM_FALSE;
+        for (UmicomSize j = 0U; j < plan->directorySectorCount; ++j)
+            if (sector->sector == plan->directorySectors[j].sector) return UMICOM_FALSE;
+    }
+    return payload == plan->requestedBytes;
+}
+static void UmicomLifecyclePlannedResult(UmicomKernelFat16LifecycleCommitter *owner,
+    UmicomKernelFat16LifecycleResult *result)
+{
+    const UmicomKernelFat16LifecyclePlan *const plan = &owner->plan;
+    result->planned = UMICOM_TRUE;
+    result->operation = plan->operation;
+    result->commit.offset = plan->offset;
+    result->commit.requestedBytes = plan->requestedBytes;
+    result->originalEntryPresent = plan->originalEntryPresent;
+    result->updatedEntryPresent = plan->updatedEntryPresent;
+    UmicomUpdateCopy(&result->originalEntry, &plan->originalEntry, sizeof(result->originalEntry));
+    UmicomUpdateCopy(&result->updatedEntry, &plan->updatedEntry, sizeof(result->updatedEntry));
+    result->requestedTime = plan->requestedTime;
+    result->encodedTime = plan->encodedTime;
+    result->allocatedClusters = plan->allocatedClusters;
+    result->freedClusters = plan->freedClusters;
+    result->plannedDataSectors = plan->dataSectorCount;
+    result->plannedFatSectors = plan->fatSectorCount;
+    result->plannedDirectorySectors = plan->directorySectorCount;
+    result->directorySector = plan->directorySectors[0].sector;
+    result->entryOffset = plan->entryOffset;
+    for (UmicomSize i = 0U; i < plan->fatSectorCount; ++i)
+        if (plan->fatSectors[i].changed) ++result->changedFatSectors;
+}
+static UmicomKernelFat16UpdateStatus UmicomLifecyclePlan(UmicomKernelFat16LifecycleCommitter *owner,
+    UmicomKernelFat16LifecycleResult *result)
+{
+    UmicomKernelFat16Committer *const commit = &owner->commit;
+    UmicomKernelFat16Updater *const base = &commit->updater;
+    const UmicomKernelDiskReader reader = {base->sectors, UmicomUpdateReadSector, base};
+    base->lastDiskStatus = UmicomKernelFat16Open(&base->volume, &reader, base->partition);
+    UmicomKernelFat16UpdateStatus status = UmicomUpdateFromDisk(base, base->lastDiskStatus);
+    if (status == UMICOM_FAT16_UPDATE_OK) {
+        base->lastDiskStatus = UmicomKernelFat16PlanLifecycle(&base->volume, &owner->request,
+            &base->workspace, &owner->workspace, &owner->plan);
+        status = UmicomUpdateFromDisk(base, base->lastDiskStatus);
+    }
+    if (status == UMICOM_FAT16_UPDATE_OK) {
+        commit->headerSectors[0] = base->volume.info.firstSector + base->volume.fatStart;
+        commit->headerSectors[1] = commit->headerSectors[0] + base->volume.info.sectorsPerFat;
+        if (!UmicomLifecyclePlanValid(owner)) {
+            base->lastDiskStatus = UMICOM_DISK_CORRUPT;
+            status = UMICOM_FAT16_UPDATE_FILESYSTEM_ERROR;
+        }
+    }
+    if (status == UMICOM_FAT16_UPDATE_OK) {
+        UmicomLifecyclePlannedResult(owner, result);
+        UmicomUpdateCopy(commit->cleanHeader, owner->plan.fatSectors[0].original, sizeof(commit->cleanHeader));
+        UmicomUpdateCopy(commit->dirtyHeader, commit->cleanHeader, sizeof(commit->dirtyHeader));
+        commit->dirtyHeader[3] &= (UmicomU8)~(UMICOM_FAT16_CLEAN_MASK >> 8U);
+        UmicomUpdateCopy(owner->finalDirtyHeader, owner->plan.fatSectors[0].data, sizeof(owner->finalDirtyHeader));
+        owner->finalDirtyHeader[3] &= (UmicomU8)~(UMICOM_FAT16_CLEAN_MASK >> 8U);
+    }
+    for (UmicomSize i = 0U; status == UMICOM_FAT16_UPDATE_OK && i < owner->plan.fatSectorCount; ++i) {
+        const UmicomKernelFat16LifecycleFatSector *const fat = &owner->plan.fatSectors[i];
+        status = UmicomCommitVerify(commit, fat->primarySector, fat->original);
+        if (status == UMICOM_FAT16_UPDATE_OK) status = UmicomCommitVerify(commit, fat->mirrorSector, fat->original);
+    }
+    for (UmicomSize i = 0U; status == UMICOM_FAT16_UPDATE_OK && i < owner->plan.directorySectorCount; ++i)
+        status = UmicomCommitVerify(commit, owner->plan.directorySectors[i].sector, owner->plan.directorySectors[i].original);
+    return UmicomUpdateInspectorClose(base, status);
+}
+static UmicomKernelFat16UpdateStatus UmicomLifecycleVerifyData(UmicomKernelFat16LifecycleCommitter *owner)
+{
+    for (UmicomSize i = 0U; i < owner->plan.dataSectorCount; ++i) {
+        const UmicomKernelFat16UpdateSector *const sector = &owner->plan.dataSectors[i];
+        const UmicomKernelFat16UpdateStatus status = UmicomCommitVerify(&owner->commit, sector->sector, sector->data);
+        if (status != UMICOM_FAT16_UPDATE_OK) return status;
+    }
+    return UMICOM_FAT16_UPDATE_OK;
+}
+static UmicomKernelFat16UpdateStatus UmicomLifecycleVerifyFat(UmicomKernelFat16LifecycleCommitter *owner,
+    UmicomBoolean mirror)
+{
+    for (UmicomSize i = 0U; i < owner->plan.fatSectorCount; ++i) {
+        const UmicomKernelFat16LifecycleFatSector *const fat = &owner->plan.fatSectors[i];
+        const UmicomKernelFat16UpdateStatus status = UmicomCommitVerify(&owner->commit,
+            mirror ? fat->mirrorSector : fat->primarySector, i ? fat->data : owner->finalDirtyHeader);
+        if (status != UMICOM_FAT16_UPDATE_OK) return status;
+    }
+    return UMICOM_FAT16_UPDATE_OK;
+}
+static UmicomKernelFat16UpdateStatus UmicomLifecycleVerifyDirectory(UmicomKernelFat16LifecycleCommitter *owner)
+{
+    for (UmicomSize i = 0U; i < owner->plan.directorySectorCount; ++i) {
+        const UmicomKernelFat16LifecycleDirectorySector *const sector = &owner->plan.directorySectors[i];
+        const UmicomKernelFat16UpdateStatus status = UmicomCommitVerify(&owner->commit, sector->sector, sector->data);
+        if (status != UMICOM_FAT16_UPDATE_OK) return status;
+    }
+    return UMICOM_FAT16_UPDATE_OK;
+}
+static UmicomKernelFat16UpdateStatus UmicomLifecycleData(UmicomKernelFat16LifecycleCommitter *owner,
+    UmicomKernelFat16LifecycleResult *result)
+{
+    if (!owner->plan.dataSectorCount) return UMICOM_FAT16_UPDATE_OK;
+    UmicomKernelFat16UpdateStatus status = UMICOM_FAT16_UPDATE_OK;
+    for (UmicomSize i = 0U; status == UMICOM_FAT16_UPDATE_OK && i < owner->plan.dataSectorCount; ++i) {
+        const UmicomKernelFat16UpdateSector *const sector = &owner->plan.dataSectors[i];
+        status = UmicomCommitWriteSector(&owner->commit, &result->commit, UMICOM_FAT16_COMMIT_DATA_WRITE,
+            sector->sector, sector->data, sector);
+        /* Payload completion can precede zero-only initialisation sectors.
+         * Evidence must cover every planned sector, including that suffix. */
+        if (result->commit.dataOutcome != UMICOM_FAT16_UPDATE_SUBMITTED_UNCONFIRMED)
+            result->commit.dataOutcome = result->commit.completedDataSectors == owner->plan.dataSectorCount ?
+                UMICOM_FAT16_UPDATE_COMPLETED : result->commit.completedDataSectors ?
+                UMICOM_FAT16_UPDATE_PARTIAL_CONFIRMED : UMICOM_FAT16_UPDATE_NOT_SUBMITTED;
+    }
+    if (status == UMICOM_FAT16_UPDATE_OK)
+        status = UmicomCommitFlush(&owner->commit, &result->commit, UMICOM_FAT16_COMMIT_DATA_FLUSH);
+    if (status == UMICOM_FAT16_UPDATE_OK) {
+        result->commit.phase = UMICOM_FAT16_COMMIT_DATA_VERIFY;
+        status = UmicomLifecycleVerifyData(owner);
+        if (status == UMICOM_FAT16_UPDATE_OK) result->commit.dataVerified = UMICOM_TRUE;
+    }
+    return status;
+}
+static UmicomKernelFat16UpdateStatus UmicomLifecycleFat(UmicomKernelFat16LifecycleCommitter *owner,
+    UmicomKernelFat16LifecycleResult *result, UmicomBoolean mirror)
+{
+    const UmicomKernelFat16LifecyclePlan *const plan = &owner->plan;
+    const UmicomBoolean boundaryFirst = plan->chainBoundaryPresent && plan->operation == UMICOM_FAT16_LIFECYCLE_TRUNCATE;
+    UmicomKernelFat16UpdateStatus status = UMICOM_FAT16_UPDATE_OK;
+    /* A bridge is last when growing; a retained tail is first when shrinking.
+     * The extra pass changes order only, never repeats the boundary sector. */
+    for (UmicomSize pass = 0U; status == UMICOM_FAT16_UPDATE_OK && pass < 2U; ++pass) {
+        for (UmicomSize i = 0U; status == UMICOM_FAT16_UPDATE_OK && i < plan->fatSectorCount; ++i) {
+            const UmicomBoolean boundary = plan->chainBoundaryPresent && i == plan->chainBoundaryFatIndex;
+            if ((pass == 0U) != (boundaryFirst ? boundary : !boundary) || !plan->fatSectors[i].changed) continue;
+            const UmicomKernelFat16LifecycleFatSector *const fat = &plan->fatSectors[i];
+            const UmicomSize submitted = result->commit.submittedMetadataSectors;
+            const UmicomSize completed = result->commit.completedMetadataSectors;
+            status = UmicomCommitWriteSector(&owner->commit, &result->commit,
+                mirror ? UMICOM_FAT16_COMMIT_FAT_MIRROR_WRITE : UMICOM_FAT16_COMMIT_FAT_PRIMARY_WRITE,
+                mirror ? fat->mirrorSector : fat->primarySector, i ? fat->data : owner->finalDirtyHeader, 0);
+            result->submittedFatSectors += result->commit.submittedMetadataSectors - submitted;
+            result->completedFatSectors += result->commit.completedMetadataSectors - completed;
+        }
+    }
+    if (status == UMICOM_FAT16_UPDATE_OK && result->changedFatSectors) {
+        const UmicomSize flushes = result->commit.completedFlushes;
+        status = UmicomCommitFlush(&owner->commit, &result->commit,
+            mirror ? UMICOM_FAT16_COMMIT_FAT_MIRROR_FLUSH : UMICOM_FAT16_COMMIT_FAT_PRIMARY_FLUSH);
+        if (result->commit.completedFlushes > flushes) {
+            if (mirror) result->fatMirrorDurable = UMICOM_TRUE;
+            else result->fatPrimaryDurable = UMICOM_TRUE;
+        }
+    }
+    if (status == UMICOM_FAT16_UPDATE_OK) {
+        result->commit.phase = mirror ? UMICOM_FAT16_COMMIT_FAT_MIRROR_VERIFY : UMICOM_FAT16_COMMIT_FAT_PRIMARY_VERIFY;
+        status = UmicomLifecycleVerifyFat(owner, mirror);
+        if (status == UMICOM_FAT16_UPDATE_OK) {
+            if (mirror) result->fatMirrorVerified = UMICOM_TRUE;
+            else result->fatPrimaryVerified = UMICOM_TRUE;
+        }
+    }
+    return status;
+}
+static UmicomKernelFat16UpdateStatus UmicomLifecycleDirectory(UmicomKernelFat16LifecycleCommitter *owner,
+    UmicomKernelFat16LifecycleResult *result)
+{
+    UmicomKernelFat16UpdateStatus status = UMICOM_FAT16_UPDATE_OK;
+    /* Persist and verify a successor end marker before exposing its preceding
+     * live entry. This prevents earlier hidden records becoming visible even
+     * if the target-entry request is the point at which publication fails. */
+    for (UmicomSize left = owner->plan.directorySectorCount; status == UMICOM_FAT16_UPDATE_OK && left > 0U; --left) {
+        const UmicomKernelFat16LifecycleDirectorySector *const sector = &owner->plan.directorySectors[left - 1U];
+        const UmicomSize submitted = result->commit.submittedMetadataSectors;
+        const UmicomSize completed = result->commit.completedMetadataSectors;
+        status = UmicomCommitWriteSector(&owner->commit, &result->commit, UMICOM_FAT16_COMMIT_DIRECTORY_WRITE,
+            sector->sector, sector->data, 0);
+        result->submittedDirectorySectors += result->commit.submittedMetadataSectors - submitted;
+        result->completedDirectorySectors += result->commit.completedMetadataSectors - completed;
+        if (status == UMICOM_FAT16_UPDATE_OK) {
+            const UmicomSize flushes = result->commit.completedFlushes;
+            status = UmicomCommitFlush(&owner->commit, &result->commit, UMICOM_FAT16_COMMIT_DIRECTORY_FLUSH);
+            result->completedDirectoryFlushes += result->commit.completedFlushes - flushes;
+            if (result->completedDirectoryFlushes == owner->plan.directorySectorCount)
+                result->directoryDurable = UMICOM_TRUE;
+        }
+        if (status == UMICOM_FAT16_UPDATE_OK) {
+            result->commit.phase = UMICOM_FAT16_COMMIT_DIRECTORY_VERIFY;
+            status = UmicomCommitVerify(&owner->commit, sector->sector, sector->data);
+        }
+    }
+    if (status == UMICOM_FAT16_UPDATE_OK) result->directoryVerified = UMICOM_TRUE;
+    return status;
+}
+UmicomKernelFat16UpdateStatus UmicomKernelFat16LifecycleStage(
+    UmicomKernelFat16LifecycleCommitter *owner, const UmicomKernelFat16LifecycleRequest *request,
+    UmicomKernelFat16LifecycleResult *outResult)
+{
+    UmicomKernelFat16UpdateStatus status = UmicomLifecycleLive(owner, UMICOM_FALSE);
+    if (status != UMICOM_FAT16_UPDATE_OK) return status;
+    if (owner->committedOperations == ~(UmicomU64)0U) return UMICOM_FAT16_UPDATE_RANGE;
+    if (owner->commit.updater.needsFlush || owner->commit.updater.writeUncertain)
+        return UMICOM_FAT16_UPDATE_BAD_STATE;
+    status = UmicomLifecycleBuffers(owner, request, outResult);
+    if (status != UMICOM_FAT16_UPDATE_OK) return status;
+    status = UmicomLifecycleEnter(owner);
+    if (status != UMICOM_FAT16_UPDATE_OK) return status;
+    UmicomKernelFat16LifecycleResult result;
+    UmicomUpdateClear(&result, sizeof(result));
+    result.operation = request->operation;
+    result.commit.phase = UMICOM_FAT16_COMMIT_PREFLIGHT;
+    result.commit.requestedBytes = request->bytes;
+    result.commit.dataOutcome = UMICOM_FAT16_UPDATE_NOT_SUBMITTED;
+    UmicomUpdateClear(&owner->plan, sizeof(owner->plan));
+    UmicomUpdateClear(&owner->commit.updater.plan, sizeof(owner->commit.updater.plan));
+    UmicomLifecycleScrubRequest(owner);
+    UmicomUpdateCopy(&owner->request, request, sizeof(*request));
+    for (UmicomSize i = 0U; i < UMICOM_FAT16_PATH_BYTES; ++i) {
+        owner->path[i] = request->path[i];
+        if (!request->path[i]) break;
+    }
+    if (request->bytes) UmicomUpdateCopy(owner->input, request->input, request->bytes);
+    owner->request.path = owner->path;
+    owner->request.input = request->bytes ? owner->input : 0;
+    UmicomUpdateBeginIo(&owner->commit.updater);
+    status = UmicomLifecyclePlan(owner, &result);
+    if (status == UMICOM_FAT16_UPDATE_OK) {
+        const UmicomSize remaining = 2U + owner->plan.dataSectorCount +
+            2U * owner->plan.fatSectorCount + owner->plan.directorySectorCount;
+        if (owner->commit.updater.operationReads > UMICOM_FAT16_IO_LIMIT - remaining) {
+            owner->commit.updater.lastDiskStatus = UMICOM_DISK_LIMIT;
+            status = UMICOM_FAT16_UPDATE_INSPECTION_LIMIT;
+        }
+    }
+    if (status == UMICOM_FAT16_UPDATE_OK)
+        status = UmicomCommitWriteSector(&owner->commit, &result.commit, UMICOM_FAT16_COMMIT_DIRTY_MIRROR,
+            owner->commit.headerSectors[1], owner->commit.dirtyHeader, 0);
+    if (status == UMICOM_FAT16_UPDATE_OK)
+        status = UmicomCommitFlush(&owner->commit, &result.commit, UMICOM_FAT16_COMMIT_DIRTY_MIRROR_FLUSH);
+    if (status == UMICOM_FAT16_UPDATE_OK)
+        status = UmicomCommitWriteSector(&owner->commit, &result.commit, UMICOM_FAT16_COMMIT_DIRTY_PRIMARY,
+            owner->commit.headerSectors[0], owner->commit.dirtyHeader, 0);
+    if (status == UMICOM_FAT16_UPDATE_OK)
+        status = UmicomCommitFlush(&owner->commit, &result.commit, UMICOM_FAT16_COMMIT_DIRTY_PRIMARY_FLUSH);
+    if (status == UMICOM_FAT16_UPDATE_OK) {
+        result.commit.phase = UMICOM_FAT16_COMMIT_DIRTY_VERIFY;
+        status = UmicomCommitVerifyHeaders(&owner->commit, owner->commit.dirtyHeader);
+        if (status == UMICOM_FAT16_UPDATE_OK) result.commit.dirtyVerified = UMICOM_TRUE;
+    }
+    const UmicomBoolean release = result.operation == UMICOM_FAT16_LIFECYCLE_TRUNCATE ||
+        result.operation == UMICOM_FAT16_LIFECYCLE_DELETE;
+    if (status == UMICOM_FAT16_UPDATE_OK && !release) status = UmicomLifecycleData(owner, &result);
+    if (status == UMICOM_FAT16_UPDATE_OK && release) status = UmicomLifecycleDirectory(owner, &result);
+    if (status == UMICOM_FAT16_UPDATE_OK) status = UmicomLifecycleFat(owner, &result, UMICOM_TRUE);
+    if (status == UMICOM_FAT16_UPDATE_OK) status = UmicomLifecycleFat(owner, &result, UMICOM_FALSE);
+    if (status == UMICOM_FAT16_UPDATE_OK && !release) status = UmicomLifecycleDirectory(owner, &result);
+    if (status == UMICOM_FAT16_UPDATE_OK && !UmicomUpdateClock(&owner->commit.updater))
+        status = UmicomUpdateFromBlock(owner->commit.updater.lastBlockStatus);
+    owner->commit.state = status == UMICOM_FAT16_UPDATE_OK ? UMICOM_FAT16_COMMIT_STAGED :
+        result.commit.mediaTouched ? UMICOM_FAT16_COMMIT_FAILED : UMICOM_FAT16_COMMIT_READY;
+    if (owner->commit.state == UMICOM_FAT16_COMMIT_READY) {
+        UmicomUpdateClear(&owner->plan, sizeof(owner->plan));
+        UmicomUpdateClear(owner->finalDirtyHeader, sizeof(owner->finalDirtyHeader));
+    }
+    return UmicomLifecyclePublish(owner, &result, outResult, status);
+}
+UmicomKernelFat16UpdateStatus UmicomKernelFat16LifecycleFinish(
+    UmicomKernelFat16LifecycleCommitter *owner, UmicomKernelFat16LifecycleResult *outResult)
+{
+    UmicomKernelFat16UpdateStatus status = UmicomLifecycleLive(owner, UMICOM_TRUE);
+    if (status != UMICOM_FAT16_UPDATE_OK) return status;
+    status = UmicomLifecycleResultBuffer(owner, outResult);
+    if (status != UMICOM_FAT16_UPDATE_OK) return status;
+    const UmicomKernelFat16LifecycleResult *const previous = &owner->lastResult;
+    const UmicomKernelFat16LifecyclePlan *const plan = &owner->plan;
+    if (!UmicomLifecyclePlanValid(owner) || !previous->planned || previous->operation != plan->operation ||
+        previous->committedOperations != owner->committedOperations || owner->committedOperations == ~(UmicomU64)0U ||
+        previous->commit.status != UMICOM_FAT16_UPDATE_OK || !previous->commit.mediaTouched ||
+        !previous->commit.dirtyDurable || !previous->commit.dirtyVerified ||
+        !previous->directoryDurable || !previous->directoryVerified ||
+        !previous->fatMirrorVerified || !previous->fatPrimaryVerified ||
+        (previous->changedFatSectors && (!previous->fatMirrorDurable || !previous->fatPrimaryDurable)) ||
+        (!previous->changedFatSectors && (previous->fatMirrorDurable || previous->fatPrimaryDurable)) ||
+        previous->plannedDataSectors != plan->dataSectorCount || previous->plannedFatSectors != plan->fatSectorCount ||
+        previous->plannedDirectorySectors != plan->directorySectorCount ||
+        previous->commit.requestedBytes != plan->requestedBytes || previous->commit.offset != plan->offset ||
+        previous->commit.submittedBytes != plan->requestedBytes || previous->commit.confirmedBytes != plan->requestedBytes ||
+        previous->commit.submittedDataSectors != plan->dataSectorCount || previous->commit.completedDataSectors != plan->dataSectorCount ||
+        previous->submittedDirectorySectors != plan->directorySectorCount || previous->completedDirectorySectors != plan->directorySectorCount ||
+        previous->completedDirectoryFlushes != plan->directorySectorCount ||
+        previous->submittedFatSectors != 2U * previous->changedFatSectors || previous->completedFatSectors != previous->submittedFatSectors ||
+        owner->commit.updater.needsFlush || owner->commit.updater.writeUncertain ||
+        !UmicomUpdateZero(&owner->commit.updater.plan, sizeof(owner->commit.updater.plan)))
+        return UMICOM_FAT16_UPDATE_BAD_STATE;
+    UmicomSize changed = 0U;
+    for (UmicomSize i = 0U; i < plan->fatSectorCount; ++i) if (plan->fatSectors[i].changed) ++changed;
+    if (changed != previous->changedFatSectors ||
+        previous->commit.completedMetadataSectors != 2U + 2U * changed + plan->directorySectorCount ||
+        previous->commit.submittedMetadataSectors != previous->commit.completedMetadataSectors ||
+        previous->commit.completedFlushes != 2U + plan->directorySectorCount +
+            (plan->dataSectorCount ? 1U : 0U) + (changed ? 2U : 0U) ||
+        (plan->dataSectorCount ? (!previous->commit.dataDurable || !previous->commit.dataVerified ||
+            previous->commit.dataOutcome != UMICOM_FAT16_UPDATE_COMPLETED) :
+            (previous->commit.dataDurable || previous->commit.dataVerified ||
+             previous->commit.dataOutcome != UMICOM_FAT16_UPDATE_NOT_SUBMITTED)))
+        return UMICOM_FAT16_UPDATE_BAD_STATE;
+    status = UmicomLifecycleEnter(owner);
+    if (status != UMICOM_FAT16_UPDATE_OK) return status;
+    UmicomKernelFat16LifecycleResult result;
+    UmicomUpdateCopy(&result, previous, sizeof(result));
+    UmicomUpdateBeginIo(&owner->commit.updater);
+    result.commit.phase = UMICOM_FAT16_COMMIT_FINISH_VERIFY;
+    status = UmicomLifecycleVerifyData(owner);
+    if (status == UMICOM_FAT16_UPDATE_OK) status = UmicomLifecycleVerifyFat(owner, UMICOM_TRUE);
+    if (status == UMICOM_FAT16_UPDATE_OK) status = UmicomLifecycleVerifyFat(owner, UMICOM_FALSE);
+    if (status == UMICOM_FAT16_UPDATE_OK) status = UmicomLifecycleVerifyDirectory(owner);
+    if (status == UMICOM_FAT16_UPDATE_OK)
+        status = UmicomCommitWriteSector(&owner->commit, &result.commit, UMICOM_FAT16_COMMIT_CLEAN_MIRROR,
+            owner->commit.headerSectors[1], plan->fatSectors[0].data, 0);
+    if (status == UMICOM_FAT16_UPDATE_OK)
+        status = UmicomCommitFlush(&owner->commit, &result.commit, UMICOM_FAT16_COMMIT_CLEAN_MIRROR_FLUSH);
+    if (status == UMICOM_FAT16_UPDATE_OK)
+        status = UmicomCommitWriteSector(&owner->commit, &result.commit, UMICOM_FAT16_COMMIT_CLEAN_PRIMARY,
+            owner->commit.headerSectors[0], plan->fatSectors[0].data, 0);
+    if (status == UMICOM_FAT16_UPDATE_OK)
+        status = UmicomCommitFlush(&owner->commit, &result.commit, UMICOM_FAT16_COMMIT_CLEAN_PRIMARY_FLUSH);
+    if (status == UMICOM_FAT16_UPDATE_OK) {
+        result.commit.phase = UMICOM_FAT16_COMMIT_CLEAN_VERIFY;
+        status = UmicomCommitVerifyHeaders(&owner->commit, plan->fatSectors[0].data);
+        if (status == UMICOM_FAT16_UPDATE_OK) result.commit.cleanVerified = UMICOM_TRUE;
+    }
+    if (status == UMICOM_FAT16_UPDATE_OK && !UmicomUpdateClock(&owner->commit.updater))
+        status = UmicomUpdateFromBlock(owner->commit.updater.lastBlockStatus);
+    if (status == UMICOM_FAT16_UPDATE_OK) {
+        ++owner->committedOperations;
+        owner->commit.state = UMICOM_FAT16_COMMIT_COMMITTED;
+        result.commit.phase = UMICOM_FAT16_COMMIT_COMPLETE;
+        result.commit.commitAccepted = UMICOM_TRUE;
+    } else owner->commit.state = UMICOM_FAT16_COMMIT_FAILED;
+    return UmicomLifecyclePublish(owner, &result, outResult, status);
+}
+UmicomKernelFat16UpdateStatus UmicomKernelFat16LifecycleClose(UmicomKernelFat16LifecycleCommitter *owner)
+{
+    if (!owner || (UmicomAddress)owner % alignof(UmicomKernelFat16LifecycleCommitter) ||
+        !UmicomUpdateSpan((UmicomAddress)owner, sizeof(*owner))) return UMICOM_FAT16_UPDATE_INVALID_ARGUMENT;
+    if (owner->busy || owner->workspace.busy || owner->commit.busy || owner->commit.updater.busy ||
+        owner->commit.updater.workspace.busy || owner->commit.updater.volume.busy) return UMICOM_FAT16_UPDATE_BUSY;
+    if (!owner->self) return UmicomUpdateZero(owner, sizeof(*owner)) ? UMICOM_FAT16_UPDATE_OK : UMICOM_FAT16_UPDATE_BAD_STATE;
+    if (owner->self != owner) return UMICOM_FAT16_UPDATE_BAD_STATE;
+    if (owner->commit.state != UMICOM_FAT16_COMMIT_UNUSED && owner->commit.state != UMICOM_FAT16_COMMIT_CLOSED &&
+        (!UmicomUpdateDomainValid(owner->commit.updater.domain) ||
+         !UmicomUpdateDomainIndependent(owner->commit.updater.domain, (UmicomAddress)owner, sizeof(*owner))))
+        return UMICOM_FAT16_UPDATE_BAD_STATE;
+    owner->busy = UMICOM_TRUE;
+    const UmicomKernelFat16UpdateStatus status = UmicomKernelFat16CommitClose(&owner->commit);
+    if (status == UMICOM_FAT16_UPDATE_OK) {
+        UmicomLifecycleScrubRequest(owner);
+        UmicomUpdateClear(&owner->plan, sizeof(owner->plan));
+        UmicomUpdateClear(&owner->workspace, sizeof(owner->workspace));
+        owner->workspace.self = &owner->workspace;
+        UmicomUpdateClear(owner->finalDirtyHeader, sizeof(owner->finalDirtyHeader));
+    }
+    owner->busy = UMICOM_FALSE;
+    return status;
+}
+const char *UmicomKernelFat16LifecycleOperationName(UmicomKernelFat16LifecycleOperation operation)
+{
+    switch (operation) {
+    case UMICOM_FAT16_LIFECYCLE_NONE: return "none";
+    case UMICOM_FAT16_LIFECYCLE_CREATE: return "create";
+    case UMICOM_FAT16_LIFECYCLE_APPEND: return "append";
+    case UMICOM_FAT16_LIFECYCLE_TRUNCATE: return "truncate";
+    case UMICOM_FAT16_LIFECYCLE_DELETE: return "delete";
+    default: return "unknown-fat16-lifecycle-operation";
+    }
 }

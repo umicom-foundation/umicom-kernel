@@ -535,10 +535,16 @@ static UmicomKernelFat16UpdateStatus UmicomFatRenameConsoleClose(UmicomKernelCon
 static UmicomBoolean UmicomFatRenameShellMatches(const UmicomKernelConsoleShell *shell);
 static UmicomKernelShellStatus UmicomFatRenameCommand(UmicomKernelConsoleShell *shell,
     const UmicomKernelShellCommand *command, UmicomBoolean *handled);
+static UmicomKernelFat16UpdateStatus UmicomFatLifecycleConsoleClose(UmicomKernelConsoleShell *shell);
+static UmicomBoolean UmicomFatLifecycleShellMatches(const UmicomKernelConsoleShell *shell);
+static UmicomKernelShellStatus UmicomFatLifecycleCommand(UmicomKernelConsoleShell *shell,
+    const UmicomKernelShellCommand *command, UmicomBoolean *handled);
 UmicomKernelFat16UpdateStatus UmicomKernelFat16FileCommitConsoleClose(UmicomKernelConsoleShell *shell)
 {
     if (!shell || !shell->output) return UMICOM_FAT16_UPDATE_INVALID_ARGUMENT;
     if (umicomFatFileCommitConsoleBusy) return UMICOM_FAT16_UPDATE_BUSY;
+    const UmicomKernelFat16UpdateStatus lifecycleStatus = UmicomFatLifecycleConsoleClose(shell);
+    if (lifecycleStatus != UMICOM_FAT16_UPDATE_OK) return lifecycleStatus;
     /* The shared shell shutdown releases every private file-mutation owner.
      * Each Close remains resource-only; an unfinished rename stays dirty. */
     const UmicomKernelFat16UpdateStatus renameStatus = UmicomFatRenameConsoleClose(shell);
@@ -560,6 +566,9 @@ UmicomKernelShellStatus UmicomKernelFat16FileCommitCommand(UmicomKernelConsoleSh
     *handled = UMICOM_FALSE;
     if (!command->count) return UMICOM_SHELL_OK;
     const char *const name = command->bytes + command->offsets[0];
+    UmicomBoolean lifecycleHandled = UMICOM_FALSE;
+    const UmicomKernelShellStatus lifecycleStatus = UmicomFatLifecycleCommand(shell, command, &lifecycleHandled);
+    if (lifecycleHandled) { *handled = UMICOM_TRUE; return lifecycleStatus; }
     UmicomBoolean renameHandled = UMICOM_FALSE;
     const UmicomKernelShellStatus renameStatus = UmicomFatRenameCommand(shell, command, &renameHandled);
     if (renameHandled) { *handled = UMICOM_TRUE; return renameStatus; }
@@ -578,6 +587,7 @@ UmicomKernelShellStatus UmicomKernelFat16FileCommitCommand(UmicomKernelConsoleSh
     if (command->count != (open ? 3U : calendar ? 2U : stage ? 4U : 1U)) return UMICOM_SHELL_INVALID_ARGUMENT;
     if (umicomFatFileCommitConsoleBusy) return UMICOM_SHELL_BUSY;
     if (!UmicomFatRenameShellMatches(shell)) return UMICOM_SHELL_BAD_STATE;
+    if (!UmicomFatLifecycleShellMatches(shell)) return UMICOM_SHELL_BAD_STATE;
     if (umicomFatFileCommitConsole && umicomFatFileCommitConsole != shell) return UMICOM_SHELL_BAD_STATE;
     umicomFatFileCommitConsoleBusy = UMICOM_TRUE;
     UmicomKernelFat16UpdateStatus status = UMICOM_FAT16_UPDATE_OK;
@@ -668,6 +678,245 @@ UmicomKernelShellStatus UmicomKernelFat16FileCommitCommand(UmicomKernelConsoleSh
         UmicomFatFileCommitReport(shell, "fat.file.status", umicomFatFileConsoleCommitter.commit.updater.lastStatus);
         if (umicomFatFileConsoleCommitter.lastResult.commit.requestedBytes)
             UmicomFatFileCommitResult(shell, "fat.file.last-result", &umicomFatFileConsoleCommitter.lastResult);
+    }
+    umicomFatFileCommitConsoleBusy = UMICOM_FALSE;
+    return status == UMICOM_FAT16_UPDATE_OK ? UMICOM_SHELL_OK : UMICOM_SHELL_IO_ERROR;
+}
+
+/*-----------------------------------------------------------------------------
+ * Persistent regular-file lifecycle commands.
+ *
+ * One exclusive owner admits the next operation only after the preceding
+ * explicit Finish. Calendar input is deliberate; deletion has no timestamp.
+ * The shared file-mutation guard covers binding, callbacks and diagnostics.
+ *---------------------------------------------------------------------------*/
+#include "umicom/kernel/fat16_lifecycle_commit.h"
+static UmicomKernelFat16LifecycleCommitter umicomFatLifecycleConsoleCommitter;
+static UmicomKernelConsoleShell *umicomFatLifecycleConsole;
+static UmicomKernelFat16FileTime umicomFatLifecycleConsoleTime;
+static UmicomBoolean umicomFatLifecycleConsoleTimeSet;
+
+static UmicomBoolean UmicomFatLifecycleShellMatches(const UmicomKernelConsoleShell *shell)
+{
+    return !umicomFatLifecycleConsole || umicomFatLifecycleConsole == shell;
+}
+static void UmicomFatLifecycleReport(UmicomKernelConsoleShell *shell, const char *operation,
+    UmicomKernelFat16UpdateStatus status)
+{
+    const UmicomKernelFat16Updater *const base = &umicomFatLifecycleConsoleCommitter.commit.updater;
+    UmicomFatConsoleText(shell, operation); UmicomFatConsoleText(shell, "=");
+    UmicomFatConsoleText(shell, UmicomKernelFat16UpdateStatusName(status));
+    UmicomFatConsoleText(shell, " last-cleanup=");
+    UmicomFatConsoleText(shell, UmicomKernelBlockStatusName(base->lastCleanupStatus));
+    UmicomFatConsoleText(shell, " last-disk=");
+    UmicomFatConsoleText(shell, UmicomKernelDiskStatusName(base->lastDiskStatus));
+    UmicomFatConsoleText(shell, " last-block=");
+    UmicomFatConsoleText(shell, UmicomKernelBlockStatusName(base->lastBlockStatus));
+    UmicomFatConsoleText(shell, "\r\nfat.lifecycle-state=");
+    UmicomFatConsoleText(shell, UmicomKernelFat16CommitStateName(umicomFatLifecycleConsoleCommitter.commit.state));
+    UmicomFatCommitField(shell, " slot=", base->slot);
+    UmicomFatCommitField(shell, " partition=", base->partition);
+    UmicomFatCommitField(shell, " needs-flush=", base->needsFlush ? 1U : 0U);
+    UmicomFatCommitField(shell, " write-uncertain=", base->writeUncertain ? 1U : 0U);
+    UmicomFatCommitField(shell, "\r\nfat.lifecycle.committed-operations=", umicomFatLifecycleConsoleCommitter.committedOperations);
+    UmicomFatConsoleText(shell, "\r\n");
+}
+static void UmicomFatLifecycleResult(UmicomKernelConsoleShell *shell, const char *label,
+    const UmicomKernelFat16LifecycleResult *result)
+{
+    UmicomFatCommitResult(shell, label, &result->commit);
+    UmicomFatConsoleText(shell, "fat.lifecycle.operation=");
+    UmicomFatConsoleText(shell, UmicomKernelFat16LifecycleOperationName(result->operation));
+    UmicomFatCommitField(shell, " planned=", result->planned ? 1U : 0U);
+    UmicomFatCommitField(shell, " accepted-operations=", result->committedOperations);
+    if (result->planned) {
+        UmicomFatCommitField(shell, "\r\nfat.lifecycle.original-present=", result->originalEntryPresent ? 1U : 0U);
+        if (result->originalEntryPresent) {
+            UmicomFatConsoleText(shell, " name="); UmicomFatConsoleText(shell, result->originalEntry.name);
+            UmicomFatCommitField(shell, " bytes=", result->originalEntry.bytes);
+            UmicomFatCommitField(shell, " first-cluster=", result->originalEntry.firstCluster);
+        }
+        UmicomFatCommitField(shell, "\r\nfat.lifecycle.updated-present=", result->updatedEntryPresent ? 1U : 0U);
+        if (result->updatedEntryPresent) {
+            UmicomFatConsoleText(shell, " name="); UmicomFatConsoleText(shell, result->updatedEntry.name);
+            UmicomFatCommitField(shell, " bytes=", result->updatedEntry.bytes);
+            UmicomFatCommitField(shell, " first-cluster=", result->updatedEntry.firstCluster);
+        }
+        UmicomFatCommitField(shell, "\r\nfat.lifecycle.allocated-clusters=", result->allocatedClusters);
+        UmicomFatCommitField(shell, " freed-clusters=", result->freedClusters);
+        UmicomFatCommitField(shell, " data-sectors=", result->plannedDataSectors);
+        UmicomFatCommitField(shell, " fat-sectors=", result->plannedFatSectors);
+        UmicomFatCommitField(shell, " changed-fat-sectors=", result->changedFatSectors);
+        UmicomFatCommitField(shell, " directory-sectors=", result->plannedDirectorySectors);
+        UmicomFatCommitField(shell, " directory-sector=", result->directorySector);
+        UmicomFatCommitField(shell, " entry-offset=", result->entryOffset);
+        if (result->operation != UMICOM_FAT16_LIFECYCLE_DELETE) {
+            UmicomFatConsoleText(shell, "\r\nfat.lifecycle.requested-time=");
+            UmicomFatFileTime(shell, &result->requestedTime);
+            UmicomKernelFat16FileTime stored = result->requestedTime;
+            stored.second = result->encodedTime.storedSecond;
+            UmicomFatConsoleText(shell, " stored-time="); UmicomFatFileTime(shell, &stored);
+            UmicomFatCommitField(shell, " fat-write-date=", result->encodedTime.writeDate);
+            UmicomFatCommitField(shell, " fat-write-time=", result->encodedTime.writeTime);
+        }
+    }
+    UmicomFatCommitField(shell, "\r\nfat.lifecycle.fat-submitted=", result->submittedFatSectors);
+    UmicomFatCommitField(shell, " completed=", result->completedFatSectors);
+    UmicomFatCommitField(shell, " mirror-durable=", result->fatMirrorDurable ? 1U : 0U);
+    UmicomFatCommitField(shell, " primary-durable=", result->fatPrimaryDurable ? 1U : 0U);
+    UmicomFatCommitField(shell, " mirror-verified=", result->fatMirrorVerified ? 1U : 0U);
+    UmicomFatCommitField(shell, " primary-verified=", result->fatPrimaryVerified ? 1U : 0U);
+    UmicomFatCommitField(shell, "\r\nfat.lifecycle.directory-submitted=", result->submittedDirectorySectors);
+    UmicomFatCommitField(shell, " completed=", result->completedDirectorySectors);
+    UmicomFatCommitField(shell, " flushes=", result->completedDirectoryFlushes);
+    UmicomFatCommitField(shell, " durable=", result->directoryDurable ? 1U : 0U);
+    UmicomFatCommitField(shell, " verified=", result->directoryVerified ? 1U : 0U);
+    UmicomFatConsoleText(shell, "\r\n");
+}
+static UmicomKernelFat16UpdateStatus UmicomFatLifecycleClose(UmicomKernelConsoleShell *shell)
+{
+    const UmicomKernelFat16UpdateStatus status = UmicomKernelFat16LifecycleClose(&umicomFatLifecycleConsoleCommitter);
+    if (status == UMICOM_FAT16_UPDATE_OK && umicomFatLifecycleConsoleCommitter.lastResult.commit.mediaTouched &&
+        !umicomFatLifecycleConsoleCommitter.lastResult.commit.commitAccepted)
+        UmicomFatConsoleText(shell, "fat.lifecycle.close=resources-released; operation not accepted; no flush or flag repair submitted\r\n");
+    if (status == UMICOM_FAT16_UPDATE_OK) {
+        UmicomFatConsoleClear(&umicomFatLifecycleConsoleTime, sizeof(umicomFatLifecycleConsoleTime));
+        umicomFatLifecycleConsoleTimeSet = UMICOM_FALSE;
+    }
+    return status;
+}
+static UmicomKernelFat16UpdateStatus UmicomFatLifecycleConsoleClose(UmicomKernelConsoleShell *shell)
+{
+    if (!umicomFatLifecycleConsole) return UMICOM_FAT16_UPDATE_OK;
+    if (umicomFatLifecycleConsole != shell) return UMICOM_FAT16_UPDATE_BAD_STATE;
+    if (umicomFatFileCommitConsoleBusy) return UMICOM_FAT16_UPDATE_BUSY;
+    umicomFatFileCommitConsoleBusy = UMICOM_TRUE;
+    const UmicomKernelFat16UpdateStatus status = UmicomFatLifecycleClose(shell);
+    umicomFatFileCommitConsoleBusy = UMICOM_FALSE;
+    return status;
+}
+static UmicomKernelShellStatus UmicomFatLifecycleCommand(UmicomKernelConsoleShell *shell,
+    const UmicomKernelShellCommand *command, UmicomBoolean *handled)
+{
+    const char *const name = command->bytes + command->offsets[0];
+    const UmicomBoolean open = UmicomFatConsoleEqual(name, "fatfsopen");
+    const UmicomBoolean calendar = UmicomFatConsoleEqual(name, "fatfstime");
+    const UmicomBoolean create = UmicomFatConsoleEqual(name, "fatcreate");
+    const UmicomBoolean append = UmicomFatConsoleEqual(name, "fatappend");
+    const UmicomBoolean truncate = UmicomFatConsoleEqual(name, "fattruncate");
+    const UmicomBoolean remove = UmicomFatConsoleEqual(name, "fatdelete");
+    const UmicomBoolean finish = UmicomFatConsoleEqual(name, "fatfscommit");
+    const UmicomBoolean info = UmicomFatConsoleEqual(name, "fatfsinfo");
+    const UmicomBoolean close = UmicomFatConsoleEqual(name, "fatfsclose");
+    const UmicomBoolean stage = create || append || truncate || remove;
+    *handled = open || calendar || stage || finish || info || close;
+    if (!*handled) return UMICOM_SHELL_OK;
+    if (command->count != (open || create || append || truncate ? 3U : calendar || remove ? 2U : 1U))
+        return UMICOM_SHELL_INVALID_ARGUMENT;
+    if (umicomFatFileCommitConsoleBusy) return UMICOM_SHELL_BUSY;
+    if (!UmicomFatLifecycleShellMatches(shell) || !UmicomFatRenameShellMatches(shell) ||
+        (umicomFatFileCommitConsole && umicomFatFileCommitConsole != shell)) return UMICOM_SHELL_BAD_STATE;
+    umicomFatFileCommitConsoleBusy = UMICOM_TRUE;
+    UmicomKernelFat16UpdateStatus status = UMICOM_FAT16_UPDATE_OK;
+    if (open) {
+        UmicomU64 slot = 0U, partition = 0U;
+        if (!UmicomKernelShellUnsigned(command->bytes + command->offsets[1], &slot) ||
+            !UmicomKernelShellUnsigned(command->bytes + command->offsets[2], &partition) ||
+            slot >= UMICOM_BLOCK_SLOT_LIMIT || partition >= UMICOM_DISK_PRIMARY_PARTITIONS) {
+            umicomFatFileCommitConsoleBusy = UMICOM_FALSE;
+            return UMICOM_SHELL_INVALID_ARGUMENT;
+        }
+        UmicomKernelBlockDomain *domain = (UmicomKernelBlockDomain *)0;
+        const UmicomKernelBlockStatus block = UmicomPlatformBlockDomainGet(&domain);
+        if (block != UMICOM_BLOCK_OK) {
+            UmicomFatConsoleText(shell, "fat.lifecycle.transport=");
+            UmicomFatConsoleText(shell, UmicomKernelBlockStatusName(block));
+            UmicomFatConsoleText(shell, "\r\n");
+            status = UMICOM_FAT16_UPDATE_TRANSPORT_ERROR;
+        } else {
+            umicomFatLifecycleConsole = shell;
+            status = UmicomKernelFat16LifecycleOpen(&umicomFatLifecycleConsoleCommitter, domain,
+                slot, partition, 10000000U);
+        }
+        UmicomFatLifecycleReport(shell, "fat.lifecycle.open", status);
+        if (status == UMICOM_FAT16_UPDATE_OK)
+            UmicomFatConsoleText(shell, "Select fatfstime YYYY-MM-DDTHH:MM:SS for create, append or truncate. Stage one operation, then fatfscommit before the next. Deletion needs no calendar.\r\n");
+    } else if (calendar) {
+        UmicomKernelFat16FileTime time;
+        UmicomFatConsoleClear(&time, sizeof(time));
+        if (!UmicomFatFileCalendar(command->bytes + command->offsets[1], &time)) {
+            UmicomFatConsoleText(shell, "fat.lifecycle.time=invalid-argument; expected a valid 1980..2107 calendar as YYYY-MM-DDTHH:MM:SS\r\n");
+            umicomFatFileCommitConsoleBusy = UMICOM_FALSE;
+            return UMICOM_SHELL_INVALID_ARGUMENT;
+        }
+        const UmicomKernelFat16CommitState state = umicomFatLifecycleConsoleCommitter.commit.state;
+        if (umicomFatLifecycleConsoleCommitter.self != &umicomFatLifecycleConsoleCommitter ||
+            (state != UMICOM_FAT16_COMMIT_READY && state != UMICOM_FAT16_COMMIT_COMMITTED)) {
+            status = UMICOM_FAT16_UPDATE_BAD_STATE;
+        } else {
+            umicomFatLifecycleConsoleTime = time;
+            umicomFatLifecycleConsoleTimeSet = UMICOM_TRUE;
+        }
+        UmicomFatLifecycleReport(shell, "fat.lifecycle.time", status);
+        if (status == UMICOM_FAT16_UPDATE_OK) {
+            UmicomFatConsoleText(shell, "fat.lifecycle.selected-time="); UmicomFatFileTime(shell, &time);
+            time.second = (UmicomU16)((time.second / 2U) * 2U);
+            UmicomFatConsoleText(shell, " stored-time="); UmicomFatFileTime(shell, &time);
+            UmicomFatConsoleText(shell, "\r\n");
+        }
+        UmicomFatConsoleClear(&time, sizeof(time));
+    } else if (stage || finish) {
+        UmicomKernelFat16LifecycleRequest request;
+        UmicomFatConsoleClear(&request, sizeof(request));
+        UmicomU64 size = 0U;
+        if (truncate && (!UmicomKernelShellUnsigned(command->bytes + command->offsets[2], &size) ||
+            size > 0xffffffffU)) {
+            umicomFatFileCommitConsoleBusy = UMICOM_FALSE;
+            return UMICOM_SHELL_INVALID_ARGUMENT;
+        }
+        if (stage && !remove && !umicomFatLifecycleConsoleTimeSet) {
+            UmicomFatConsoleText(shell, "fat.lifecycle.stage=bad-state; select an explicit calendar with fatfstime first; previous evidence retained\r\n");
+            umicomFatFileCommitConsoleBusy = UMICOM_FALSE;
+            return UMICOM_SHELL_IO_ERROR;
+        }
+        if (stage) {
+            request.operation = create ? UMICOM_FAT16_LIFECYCLE_CREATE : append ? UMICOM_FAT16_LIFECYCLE_APPEND :
+                truncate ? UMICOM_FAT16_LIFECYCLE_TRUNCATE : UMICOM_FAT16_LIFECYCLE_DELETE;
+            request.path = command->bytes + command->offsets[1];
+            request.size = (UmicomU32)size;
+            if (!remove) request.time = umicomFatLifecycleConsoleTime;
+            if (create || append) {
+                const char *const input = command->bytes + command->offsets[2];
+                while (input[request.bytes]) ++request.bytes;
+                request.input = request.bytes ? input : (const void *)0;
+            }
+        }
+        UmicomKernelFat16LifecycleResult result;
+        UmicomFatConsoleClear(&result, sizeof(result));
+        result.commit.requestedBytes = ~(UmicomSize)0U;
+        status = stage ? UmicomKernelFat16LifecycleStage(&umicomFatLifecycleConsoleCommitter, &request, &result) :
+            UmicomKernelFat16LifecycleFinish(&umicomFatLifecycleConsoleCommitter, &result);
+        UmicomFatLifecycleReport(shell, stage ? "fat.lifecycle.stage" : "fat.lifecycle.finish", status);
+        if (result.commit.requestedBytes != ~(UmicomSize)0U)
+            UmicomFatLifecycleResult(shell, "fat.lifecycle.result", &result);
+        else {
+            UmicomFatConsoleText(shell, "fat.lifecycle.result=not-admitted; previous evidence retained\r\n");
+            if (umicomFatLifecycleConsoleCommitter.lastResult.commit.phase != UMICOM_FAT16_COMMIT_NONE)
+                UmicomFatLifecycleResult(shell, "fat.lifecycle.previous-result", &umicomFatLifecycleConsoleCommitter.lastResult);
+        }
+        if (stage && status == UMICOM_FAT16_UPDATE_OK)
+            UmicomFatConsoleText(shell, "The planned file and allocation changes were flushed and verified. The volume remains dirty until fatfscommit succeeds.\r\n");
+        if (finish && status == UMICOM_FAT16_UPDATE_OK)
+            UmicomFatConsoleText(shell, "The operation was accepted. You can stage another file operation in this session.\r\n");
+        UmicomFatConsoleClear(&result, sizeof(result));
+        UmicomFatConsoleClear(&request, sizeof(request));
+    } else if (close) {
+        status = UmicomFatLifecycleClose(shell);
+        UmicomFatLifecycleReport(shell, "fat.lifecycle.release", status);
+    } else {
+        UmicomFatLifecycleReport(shell, "fat.lifecycle.status", umicomFatLifecycleConsoleCommitter.commit.updater.lastStatus);
+        if (umicomFatLifecycleConsoleCommitter.lastResult.commit.phase != UMICOM_FAT16_COMMIT_NONE)
+            UmicomFatLifecycleResult(shell, "fat.lifecycle.last-result", &umicomFatLifecycleConsoleCommitter.lastResult);
     }
     umicomFatFileCommitConsoleBusy = UMICOM_FALSE;
     return status == UMICOM_FAT16_UPDATE_OK ? UMICOM_SHELL_OK : UMICOM_SHELL_IO_ERROR;
@@ -767,6 +1016,7 @@ static UmicomKernelShellStatus UmicomFatRenameCommand(UmicomKernelConsoleShell *
     if (umicomFatFileCommitConsoleBusy) return UMICOM_SHELL_BUSY;
     if (umicomFatFileCommitConsole && umicomFatFileCommitConsole != shell) return UMICOM_SHELL_BAD_STATE;
     if (umicomFatRenameConsole && umicomFatRenameConsole != shell) return UMICOM_SHELL_BAD_STATE;
+    if (!UmicomFatLifecycleShellMatches(shell)) return UMICOM_SHELL_BAD_STATE;
     umicomFatFileCommitConsoleBusy = UMICOM_TRUE;
     UmicomKernelFat16UpdateStatus status = UMICOM_FAT16_UPDATE_OK;
     if (open) {
@@ -833,6 +1083,7 @@ static UmicomKernelShellStatus UmicomFatFileAppendCommand(UmicomKernelConsoleShe
     if (command->count != 3U) return UMICOM_SHELL_INVALID_ARGUMENT;
     if (umicomFatFileCommitConsoleBusy) return UMICOM_SHELL_BUSY;
     if (!UmicomFatRenameShellMatches(shell)) return UMICOM_SHELL_BAD_STATE;
+    if (!UmicomFatLifecycleShellMatches(shell)) return UMICOM_SHELL_BAD_STATE;
     if (umicomFatFileCommitConsole && umicomFatFileCommitConsole != shell)
         return UMICOM_SHELL_BAD_STATE;
     umicomFatFileCommitConsoleBusy = UMICOM_TRUE;

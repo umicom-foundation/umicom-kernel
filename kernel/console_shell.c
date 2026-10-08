@@ -537,6 +537,9 @@ UmicomKernelShellStatus UmicomKernelConsoleShellExecute(UmicomKernelConsoleShell
         UmicomShellText(shell, "File commits set ARCHIVE and the supplied write time. Stage leaves dirty flags; only fatfilecommit finishes.\r\n");
         UmicomShellText(shell, "fatrenameopen SLOT PART | fatrenamestage PATH NEWNAME | fatrenamecommit | fatrenameinfo | fatrenameclose\r\n");
         UmicomShellText(shell, "Rename preserves file data, attributes and calendar fields and refuses existing names. Stage leaves the volume dirty until fatrenamecommit succeeds.\r\n");
+        UmicomShellText(shell, "fatfsopen SLOT PART | fatfstime YYYY-MM-DDTHH:MM:SS | fatfscommit | fatfsinfo | fatfsclose\r\n");
+        UmicomShellText(shell, "fatcreate PATH \"TEXT\" | fatappend PATH \"TEXT\" | fattruncate PATH SIZE | fatdelete PATH\r\n");
+        UmicomShellText(shell, "File lifecycle commands can allocate and free clusters. Finish each staged operation with fatfscommit before the next operation in the same session.\r\n");
 #endif
 #ifdef UMICOM_KERNEL_FAT16_UPDATE
         UmicomShellText(shell, "fatwriteopen SLOT PART | fatwrite PATH OFFSET \"TEXT\" | fatflush | fatwriteinfo | fatwriteclose\r\n");

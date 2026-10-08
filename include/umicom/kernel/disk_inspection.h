@@ -47,6 +47,8 @@ typedef enum UmicomKernelDiskStatus {
     UMICOM_DISK_READ_ONLY
     /* Keep every established status value while adding rename collisions. */
     , UMICOM_DISK_EXISTS
+    /* Allocation and fixed-directory capacity exhaustion are explicit. */
+    , UMICOM_DISK_NO_SPACE
 } UmicomKernelDiskStatus;
 
 /* A successful callback fills exactly one sector. Its capacity is fixed by the

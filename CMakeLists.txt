@@ -565,6 +565,10 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/Fat16Append.cmake")
 # data and metadata; fresh readers qualify complete and unfinished results.
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/Fat16Rename.cmake")
 
+# Qualify persistent creation, allocating append, truncation, deletion and reuse
+# across fresh guest processes, with separate dirty forks for each operation.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/Fat16Lifecycle.cmake")
+
 # Preserve the linked Kernel entry while supporting QEMU firmware reset at RAM base.
 # Apply the same verified bridge to every Kernel-linked image after cloning.
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/FirmwareEntry.cmake")

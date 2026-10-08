@@ -175,3 +175,15 @@ retain partial writes and final-acknowledgement uncertainty. See
 This remains a bounded existing-file data utility. Timestamp/ordinary directory
 metadata updates, allocation changes, general writable VFS access and recovery
 remain further work towards the persistent-system release gate.
+
+## Persistent FAT16 regular-file lifecycle
+
+The dedicated file lifecycle owner can create regular files, append with new
+allocation, truncate and delete, then reuse freed clusters. Each operation
+requires an explicit Finish, and several accepted operations can share one
+exclusive live session. The trusted console exposes `fatfsopen`, `fatcreate`,
+`fatappend`, `fattruncate`, `fatdelete` and `fatfscommit`. See
+[Persistent FAT16 file lifecycle](docs/FAT16_FILE_LIFECYCLE.md) for exact
+metadata and allocation rules, bounds, interruption semantics, reboot tests
+and disposable-disk instructions. General writable VFS access and recovery
+remain outside this interface.
