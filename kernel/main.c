@@ -53,6 +53,7 @@
 #include "umicom/kernel/fat16_rename_commit.h"
 #include "umicom/kernel/fat16_lifecycle_commit.h"
 #include "umicom/kernel/fat16_directory_validation.h"
+#include "umicom/kernel/disk_writable_filesystem_validation.h"
 #include "umicom/kernel/virtio_block.h"
 
 /* Read firmware descriptions without probing or binding devices. */
@@ -1434,6 +1435,13 @@ static void RunHardwareAddressTranslationTest(void)
 
 void UmicomKernelMain(UmicomU64 hartId, UmicomAddress deviceTreeAddress)
 {
+/* Native file-service qualification owns its selected disposable disk and
+ * returns through the real U-mode scheduler before persistent VFS work. */
+#if defined(UMICOM_KERNEL_DISK_WRITABLE_FILESYSTEM_TEST) || \
+    defined(UMICOM_KERNEL_DISK_WRITABLE_FILESYSTEM_READBACK_TEST) || \
+    defined(UMICOM_KERNEL_DISK_WRITABLE_FILESYSTEM_READ_ONLY_TEST)
+    UmicomKernelDiskWritableFilesystemBoot(hartId, deviceTreeAddress);
+#endif
 /* Dedicated directory guests never enter the ordinary interactive startup.
  * Each role owns only the disposable image supplied by its qualification run. */
 #if defined(UMICOM_KERNEL_FAT16_DIRECTORY_TEST) || defined(UMICOM_KERNEL_FAT16_DIRECTORY_READBACK_TEST) || \

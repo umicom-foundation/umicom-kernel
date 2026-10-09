@@ -39,6 +39,10 @@
 /* This mounted domain does not replace the shell's writable RAMFS owner. */
 #include "umicom/kernel/disk_filesystem_console.h"
 #endif
+#ifdef UMICOM_KERNEL_DISK_WRITABLE_FILESYSTEM
+/* A selected writable domain commits through the existing lifecycle owner. */
+#include "umicom/kernel/disk_writable_filesystem_console.h"
+#endif
 #ifdef UMICOM_KERNEL_FAT16_UPDATE
 /* Explicit bounded file updates have a separate exclusive transport lifetime. */
 #include "umicom/kernel/fat16_update_console.h"
@@ -511,6 +515,12 @@ UmicomKernelShellStatus UmicomKernelConsoleShellExecute(UmicomKernelConsoleShell
         &command, &filesystemHandled);
     if (filesystemHandled) { shell->busy = UMICOM_FALSE; return filesystemResult; }
 #endif
+#ifdef UMICOM_KERNEL_DISK_WRITABLE_FILESYSTEM
+    UmicomBoolean writableFilesystemHandled = UMICOM_FALSE;
+    const UmicomKernelShellStatus writableFilesystemResult = UmicomKernelDiskWritableFilesystemCommand(
+        shell, &command, &writableFilesystemHandled);
+    if (writableFilesystemHandled) { shell->busy = UMICOM_FALSE; return writableFilesystemResult; }
+#endif
 #ifdef UMICOM_KERNEL_FAT16_UPDATE
     UmicomBoolean updateHandled = UMICOM_FALSE;
     const UmicomKernelShellStatus updateResult = UmicomKernelFat16UpdateCommand(shell,
@@ -556,6 +566,12 @@ UmicomKernelShellStatus UmicomKernelConsoleShellExecute(UmicomKernelConsoleShell
 #endif
 #ifdef UMICOM_KERNEL_DISK_FILESYSTEM
         UmicomShellText(shell, "mountdisk SLOT PART | mountinfo | diskls PATH | diskcat PATH | unmountdisk\r\n");
+#endif
+#ifdef UMICOM_KERNEL_DISK_WRITABLE_FILESYSTEM
+        UmicomShellText(shell, "mountdiskrw SLOT PART YYYY-MM-DDTHH:MM:SS | diskrwtime YYYY-MM-DDTHH:MM:SS | diskrwinfo | unmountdiskrw\r\n");
+        UmicomShellText(shell, "diskrwls PATH | diskrwcat PATH | diskcreate PATH | diskmkdir PATH | diskdelete PATH | diskrmdir PATH\r\n");
+        UmicomShellText(shell, "diskwrite PATH OFFSET \"TEXT\" | diskappend PATH \"TEXT\" | diskresize PATH SIZE\r\n");
+        UmicomShellText(shell, "Writable VFS commands finish each mutation before success. No separate commit command; close never repairs a failed operation.\r\n");
 #endif
 #ifdef UMICOM_KERNEL_DISK_INSPECTION
         UmicomShellText(shell, "partitions SLOT | fatinfo SLOT PART | fatls SLOT PART PATH | fatcat SLOT PART PATH | diskclose\r\n");
@@ -866,6 +882,14 @@ UmicomKernelShellStatus UmicomKernelConsoleShellClose(UmicomKernelConsoleShell *
     /* Close this console's disk client before unmounting its separate domain.
      * Pending device reset remains owned, and poweroff retries this same path. */
     if (UmicomKernelDiskFilesystemConsoleClose(shell) != UMICOM_VFS_OK) {
+        shell->busy = UMICOM_FALSE;
+        return UMICOM_SHELL_CLEANUP_FAILED;
+    }
+#endif
+#ifdef UMICOM_KERNEL_DISK_WRITABLE_FILESYSTEM
+    /* Release descriptors and the writable root before retiring its lease.
+     * Failure retains ownership; shutdown cannot silently finish a commit. */
+    if (UmicomKernelDiskWritableFilesystemConsoleClose(shell) != UMICOM_VFS_OK) {
         shell->busy = UMICOM_FALSE;
         return UMICOM_SHELL_CLEANUP_FAILED;
     }

@@ -575,3 +575,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/FirmwareEntry.cmake")
 
 # Independent directory lifecycle guests reuse the Kernel source graph.
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/Fat16Directory.cmake")
+
+# Admit explicit writable disk VFS domains and exercise native process file
+# services against persistent storage, with independent fresh-boot readback.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/DiskWritableFilesystem.cmake")

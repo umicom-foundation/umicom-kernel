@@ -30,7 +30,9 @@ typedef enum UmicomKernelFat16LifecycleOperation {
     /* Directory operations share the same exclusive owner and explicit finish. */
     UMICOM_FAT16_LIFECYCLE_CREATE_DIRECTORY,
     UMICOM_FAT16_LIFECYCLE_REMOVE_DIRECTORY,
-    UMICOM_FAT16_LIFECYCLE_MOVE
+    UMICOM_FAT16_LIFECYCLE_MOVE,
+    /* Appended so the existing operation values remain stable. */
+    UMICOM_FAT16_LIFECYCLE_WRITE
 } UmicomKernelFat16LifecycleOperation;
 
 typedef struct UmicomKernelFat16LifecycleRequest {
@@ -42,6 +44,8 @@ typedef struct UmicomKernelFat16LifecycleRequest {
     UmicomKernelFat16FileTime time;
     /* MOVE alone reads this absolute destination. Other operations ignore it. */
     const char *destination;
+    /* WRITE alone reads this byte offset. Older operations ignore it. */
+    UmicomU64 offset;
 } UmicomKernelFat16LifecycleRequest;
 
 typedef struct UmicomKernelFat16LifecycleFatSector {
@@ -120,6 +124,22 @@ typedef struct UmicomKernelFat16LifecycleWorkspace {
  * subject to all existing bounds. The FAT16 fixed root never grows.
  * The regular-file description below records the original narrower contract;
  * its no-extension statement is superseded by this documented extension. */
+
+/* WRITE supplies an explicit position for 1..4096 payload bytes and requires
+ * size zero and a valid calendar. offset may be anywhere from zero through the
+ * existing EOF; a position beyond EOF is refused rather than creating a hole.
+ * The checked offset + bytes must fit FAT16's 32-bit file size. A write keeps
+ * the larger of the original size and that end position, and can initialise up
+ * to eight additional clusters through the same bounded allocation proof.
+ * Existing bytes and allocation slack outside the written span are preserved;
+ * every newly allocated cluster is zeroed before overlaying caller payload.
+ * WRITE sets ARCHIVE and the supplied write calendar, preserving creation and
+ * access fields. Its offset, payload and calendar are snapshotted before I/O.
+ * Stage orders dirty guards, complete data images, new links and metadata;
+ * Finish alone accepts the change. This is not power-loss atomicity: a failed
+ * write may have changed existing file bytes, and release performs no rollback.
+ * destination is ignored for WRITE. All earlier operations ignore offset.
+ * The regular-file description below remains the original narrower contract. */
 
 /* CREATE accepts 0..4096 initial bytes, input NULL exactly when bytes is zero,
  * size zero and a valid explicit calendar. APPEND accepts 1..4096 bytes, size

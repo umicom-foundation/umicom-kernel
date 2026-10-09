@@ -183,9 +183,16 @@ retain partial writes and final-acknowledgement uncertainty. See
 [Ordered FAT16 commits](docs/FAT16_ORDERED_COMMITS.md) and
 [Commit validation and integration](docs/FAT16_COMMIT_VALIDATION.md).
 
+<!-- Original ordered-commit scope, retained from before the lifecycle and VFS
+extensions described below:
 This remains a bounded existing-file data utility. Timestamp/ordinary directory
 metadata updates, allocation changes, general writable VFS access and recovery
 remain further work towards the persistent-system release gate.
+-->
+The `fatcommit` utility remains a bounded existing-file data interface. The
+lifecycle and writable VFS interfaces below add metadata, allocation and native
+file-service access using the same persistence engine. Recovery remains further
+work towards the persistent-system release gate.
 
 ## Persistent FAT16 regular-file lifecycle
 
@@ -209,3 +216,20 @@ See [Creating and removing FAT16 directories](docs/FAT16_DIRECTORY_LIFECYCLE.md)
 for `fatmkdir`, `fatrmdir`, publication ordering and refusal rules.
 
 For same-parent rename and cross-parent moves, see [Moving FAT16 files and directories](docs/FAT16_FILE_MOVES.md). The lifecycle session preserves data and calendars and requires an explicit Finish for every move.
+
+## Writable FAT16 VFS and native process file services
+
+An explicitly selected writable mount now connects the persistent lifecycle
+engine to the existing VFS and copied native file-service requests. It supports
+bounded positional writes and EOF growth, append, zero-extension, truncation,
+file/directory creation and removal of closed objects. Each successful mutation
+includes an accepted clean Finish before returning to the caller. Node identities,
+descriptor positions, rights, namespace iteration and retained failure cleanup
+follow the documented mutable-provider contract.
+
+See [Writable FAT16 through native file services](docs/WRITABLE_FAT16_VFS.md) for
+the APIs, `mountdiskrw` console workflow, same-lease reads, independent whole-disk
+tests and fresh-boot validation. The older read-only mount and manually staged
+console paths remain available. Automatic persistent program routing, an
+installer and recovery remain separate roadmap work; this native Kernel code
+does not depend on Umicom Framework.

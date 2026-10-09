@@ -100,6 +100,16 @@ UmicomKernelFat16UpdateStatus UmicomKernelFat16LifecycleOpen(
  * The original regular-file protocol description below is retained for review;
  * its per-directory-write statement is superseded for that extension case. */
 
+/* WRITE uses the same owner and publication phases as allocating APPEND, with
+ * an explicit snapshotted offset and no shrinking. An in-place WRITE may have
+ * no changed FAT sectors: their verified flags still describe the checked
+ * allocation, and their durable flags remain false without new link writes.
+ * Payload counters describe caller bytes, including overwrites; whole-sector
+ * initialisation beyond those bytes remains visible in the sector counters.
+ * A failed Stage or Finish does not roll back already submitted overwrites.
+ * The protocol below applies unchanged to its data and metadata publication.
+ */
+
 /* Admit a request in READY or after the preceding accepted Finish. Snapshot
  * request/path/payload before media callbacks; re-open the clean inspector,
  * prove the complete plan, verify original FAT/directory sectors and close

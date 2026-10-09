@@ -1756,6 +1756,7 @@ static UmicomKernelDiskStatus UmicomFatLifecycleArguments(UmicomKernelFat16 *vol
     case UMICOM_FAT16_LIFECYCLE_CREATE:
         if (request->size) return UMICOM_DISK_INVALID_ARGUMENT;
         break;
+    case UMICOM_FAT16_LIFECYCLE_WRITE:
     case UMICOM_FAT16_LIFECYCLE_APPEND:
         if (!request->bytes || request->size) return UMICOM_DISK_INVALID_ARGUMENT;
         break;
@@ -2668,10 +2669,25 @@ UmicomKernelDiskStatus UmicomKernelFat16PlanLifecycle(UmicomKernelFat16 *volume,
                 stage->updatedEntry = stage->originalEntry;
                 if (!move) stage->updatedEntry.attributes |= 0x20U;
             }
+            /* The original implicit-EOF calculation is retained for review.
+             * Positional writes now share its checked growth calculation while
+             * refusing holes and retaining the old size for an overwrite. */
+#if 0
             if (selected.operation == UMICOM_FAT16_LIFECYCLE_APPEND) {
                 stage->offset = stage->originalEntry.bytes;
                 if (selected.bytes > (UmicomU64)0xffffffffU - stage->offset) status = UMICOM_DISK_RANGE;
                 else stage->updatedEntry.bytes = (UmicomU32)(stage->offset + selected.bytes);
+            } else if (selected.operation == UMICOM_FAT16_LIFECYCLE_TRUNCATE) {
+#endif
+            if (selected.operation == UMICOM_FAT16_LIFECYCLE_APPEND ||
+                selected.operation == UMICOM_FAT16_LIFECYCLE_WRITE) {
+                stage->offset = selected.operation == UMICOM_FAT16_LIFECYCLE_WRITE ?
+                    selected.offset : stage->originalEntry.bytes;
+                if (stage->offset > stage->originalEntry.bytes ||
+                    selected.bytes > (UmicomU64)0xffffffffU - stage->offset)
+                    status = UMICOM_DISK_RANGE;
+                else if (stage->offset + selected.bytes > stage->originalEntry.bytes)
+                    stage->updatedEntry.bytes = (UmicomU32)(stage->offset + selected.bytes);
             } else if (selected.operation == UMICOM_FAT16_LIFECYCLE_TRUNCATE) {
                 if (selected.size > stage->originalEntry.bytes) status = UMICOM_DISK_RANGE;
                 else stage->updatedEntry.bytes = selected.size;

@@ -1,0 +1,783 @@
+{
+  "title": "Umicom Kernel writable FAT16 VFS qualification",
+  "date_utc": "2026-10-09",
+  "author": "Sammy Hegab, Umicom Foundation",
+  "licence": "MIT",
+  "repository": "https://github.com/umicom-foundation/umicom-kernel.git",
+  "baseline_main": "063a758095b48bb818d41aaa23191f3b055c44a3",
+  "remote_main_rechecked": "063a758095b48bb818d41aaa23191f3b055c44a3",
+  "delivery_is_uncommitted": true,
+  "branch_commit_push_performed": false,
+  "scope": "Positional lifecycle WRITE, mutable FAT16 VFS, owned mount, console, real process integration",
+  "toolchain": {
+    "host": "Linux",
+    "clang_lld": "18.1.3",
+    "gcc": "13.3.0",
+    "cmake": "4.4.4",
+    "ninja": "1.13.2",
+    "qemu_riscv64": "8.2.2"
+  },
+  "sanitizers": {
+    "address": true,
+    "undefined_behaviour": true,
+    "leak_detection": false,
+    "ASAN_OPTIONS": "detect_leaks=0:halt_on_error=1",
+    "UBSAN_OPTIONS": "halt_on_error=1:print_stacktrace=1",
+    "LSAN_OPTIONS": "detect_leaks=0"
+  },
+  "counts": {
+    "baseline_tracked_files": 501,
+    "updated_files": 13,
+    "new_files": 23,
+    "archive_files": 524,
+    "clang_native_unique_tests": 715,
+    "new_native_cases_tested_with_gcc": 144,
+    "rv64_preset_tests_including_fixtures": 194,
+    "new_rv64_tests": 5,
+    "focused_rv64_group_including_shared_fixture": 6,
+    "guest_accepted_mutations": 12,
+    "normal_disk_boots": 2
+  },
+  "test_evidence": [
+    {
+      "name": "Clang lifecycle ASan/UBSan",
+      "log": "build/validation-write/full-clang-asan-ubsan.log",
+      "sha256": "605e696fb76260a941b65dba5c1b0e148d6fb63b22ea859263fab8e80216bbf4",
+      "passed_tests": 661,
+      "ctest_seconds": 59.26,
+      "final_excerpt": [
+        "        Start 631: fat16-lifecycle.transport.write.fault.write_overwrite.dropped_writes",
+        "659/661 Test #631: fat16-lifecycle.transport.write.fault.write_overwrite.dropped_writes ...........   Passed    0.43 sec",
+        "        Start 632: fat16-lifecycle.transport.write.fault.write_overwrite.altered_writes",
+        "660/661 Test #632: fat16-lifecycle.transport.write.fault.write_overwrite.altered_writes ...........   Passed    0.19 sec",
+        "661/661 Test #627: fat16-lifecycle.transport.write.fault.write_overwrite.read_errors ..............   Passed    4.07 sec",
+        "",
+        "100% tests passed out of 661",
+        "",
+        "Total Test time (real) =  59.26 sec"
+      ]
+    },
+    {
+      "name": "Clang writable VFS ASan/UBSan",
+      "log": "build/native-disk-writable/qualification-clang.log",
+      "sha256": "10b937a1830920edda41d773247020592bdb2fa8e897f4dc58f05d8f0524ff80",
+      "passed_tests": 54,
+      "ctest_seconds": 2.89,
+      "final_excerpt": [
+        "52/54 Test #52: disk-writable-filesystem.console.failure-close .......   Passed    0.04 sec",
+        "      Start 53: disk-writable-filesystem.console.reentry",
+        "53/54 Test #53: disk-writable-filesystem.console.reentry .............   Passed    0.15 sec",
+        "      Start 54: disk-writable-filesystem.console.binary",
+        "54/54 Test #54: disk-writable-filesystem.console.binary ..............   Passed    0.04 sec",
+        "",
+        "100% tests passed out of 54",
+        "",
+        "Total Test time (real) =   2.89 sec"
+      ]
+    },
+    {
+      "name": "GCC new positional WRITE cases",
+      "log": "build/validation-write-gcc/write-gcc-console.log",
+      "sha256": "bb32095637bf30ab4bb244817734f8b76ac8d07d61b6dec465d3583fc619a9b8",
+      "passed_tests": 90,
+      "ctest_seconds": 5.79,
+      "final_excerpt": [
+        "      Start 660: fat16-lifecycle.transport.write.success.snapshot",
+        "88/90 Test #658: fat16-lifecycle.transport.write.success.full-volume-overwrite ...........   Passed    0.06 sec",
+        "      Start 661: fat16-lifecycle.transport.write.success.reentry",
+        "89/90 Test #661: fat16-lifecycle.transport.write.success.reentry .........................   Passed    0.04 sec",
+        "90/90 Test #660: fat16-lifecycle.transport.write.success.snapshot ........................   Passed    0.05 sec",
+        "",
+        "100% tests passed out of 90",
+        "",
+        "Total Test time (real) =   5.79 sec"
+      ]
+    },
+    {
+      "name": "GCC writable VFS",
+      "log": "build/native-disk-writable-gcc/qualification-gcc.log",
+      "sha256": "ed078b99be90771b30a59dd4bac79aa2632b1ab6b872d8321c2f37ae67687dcd",
+      "passed_tests": 54,
+      "ctest_seconds": 1.93,
+      "final_excerpt": [
+        "52/54 Test #52: disk-writable-filesystem.console.failure-close .......   Passed    0.03 sec",
+        "      Start 53: disk-writable-filesystem.console.reentry",
+        "53/54 Test #53: disk-writable-filesystem.console.reentry .............   Passed    0.09 sec",
+        "      Start 54: disk-writable-filesystem.console.binary",
+        "54/54 Test #54: disk-writable-filesystem.console.binary ..............   Passed    0.02 sec",
+        "",
+        "100% tests passed out of 54",
+        "",
+        "Total Test time (real) =   1.93 sec"
+      ]
+    },
+    {
+      "name": "Full RV64 preset",
+      "log": "build/validation-guest/test-rv64-full.log",
+      "sha256": "32fe5b2d952043f15f463680d8a7a94381c0646d246f7cb1f2f904c12634f63d",
+      "passed_tests": 194,
+      "ctest_seconds": 213.16,
+      "final_excerpt": [
+        "        Start 186: kernel.riscv64.fat16_directory_move_file_fork_cleanup",
+        "192/194 Test #186: kernel.riscv64.fat16_directory_move_file_fork_cleanup ......   Passed    0.02 sec",
+        "        Start 189: kernel.riscv64.fat16_directory_cleanup",
+        "193/194 Test #189: kernel.riscv64.fat16_directory_cleanup .....................   Passed    0.01 sec",
+        "194/194 Test  #61: kernel.riscv64.fat16_metadata ..............................   Passed    2.54 sec",
+        "",
+        "100% tests passed out of 194",
+        "",
+        "Total Test time (real) = 213.16 sec"
+      ]
+    },
+    {
+      "name": "Focused RV64 writable group, overlaps full preset",
+      "log": "build/validation-guest/test-new-guest-processes.log",
+      "sha256": "bad0c7355aa24248cc1a42f6ad7054f7df56b28d37cdc10457aebe4a4e91ea0e",
+      "passed_tests": 6,
+      "ctest_seconds": 2.63,
+      "final_excerpt": [
+        "4/6 Test #192: kernel.riscv64.disk_writable_filesystem_writer ......   Passed    0.70 sec",
+        "    Start 193: kernel.riscv64.disk_writable_filesystem_readback",
+        "5/6 Test #193: kernel.riscv64.disk_writable_filesystem_readback ....   Passed    1.11 sec",
+        "    Start 194: kernel.riscv64.disk_writable_filesystem_cleanup",
+        "6/6 Test #194: kernel.riscv64.disk_writable_filesystem_cleanup .....   Passed    0.01 sec",
+        "",
+        "100% tests passed out of 6",
+        "",
+        "Total Test time (real) =   2.63 sec"
+      ]
+    }
+  ],
+  "build_and_guest_records": {
+    "build/validation-guest/build-results.json": [
+      {
+        "step": "configure",
+        "command": [
+          "cmake",
+          "--preset",
+          "riscv64-clang-debug"
+        ],
+        "exit_code": 0,
+        "seconds": 1.067,
+        "log": "build/validation-guest/configure-rv64.log",
+        "tail": [
+          "-- The C compiler identification is Clang 18.1.3",
+          "-- The ASM compiler identification is Clang with GNU-like command-line",
+          "-- Found assembler: /workspace/scratch/731ae0373859/toolchain_durable/bin/clang",
+          "-- Detecting C compiler ABI info",
+          "-- Detecting C compiler ABI info - done",
+          "-- Check for working C compiler: /workspace/scratch/731ae0373859/toolchain_durable/bin/clang - skipped",
+          "-- Detecting C compile features",
+          "-- Detecting C compile features - done",
+          "-- Configuring done (0.6s)",
+          "-- Generating done (0.4s)",
+          "-- Build files have been written to: build/riscv64-clang-debug"
+        ]
+      },
+      {
+        "step": "build",
+        "command": [
+          "cmake",
+          "--build",
+          "--preset",
+          "riscv64-clang-debug",
+          "--parallel",
+          "2"
+        ],
+        "exit_code": 0,
+        "seconds": 159.626,
+        "log": "build/validation-guest/build-rv64.log",
+        "tail": [
+          "[5536/5555] Building C object CMakeFiles/umicom-kernel.dir/kernel/block_console.c.obj",
+          "[5537/5555] Building C object CMakeFiles/umicom-kernel.dir/kernel/virtio_block_validation.c.obj",
+          "[5538/5555] Building C object CMakeFiles/umicom-kernel.dir/platform/qemu-riscv64/block_device.c.obj",
+          "[5539/5555] Building C object CMakeFiles/umicom-kernel.dir/kernel/disk_partitions.c.obj",
+          "[5540/5555] Building C object CMakeFiles/umicom-kernel.dir/kernel/disk_console.c.obj",
+          "[5541/5555] Building C object CMakeFiles/umicom-kernel.dir/kernel/disk_inspection_validation.c.obj",
+          "[5542/5555] Building C object CMakeFiles/umicom-kernel.dir/kernel/disk_inspection_boot.c.obj",
+          "[5543/5555] Building C object CMakeFiles/umicom-kernel.dir/kernel/fat16_provider.c.obj",
+          "[5544/5555] Building C object CMakeFiles/umicom-kernel.dir/kernel/fat16_inspector.c.obj",
+          "[5545/5555] Building C object CMakeFiles/umicom-kernel.dir/kernel/disk_filesystem.c.obj",
+          "[5546/5555] Building C object CMakeFiles/umicom-kernel.dir/kernel/disk_filesystem_console.c.obj",
+          "[5547/5555] Building C object CMakeFiles/umicom-kernel.dir/kernel/disk_filesystem_boot.c.obj",
+          "[5548/5555] Building C object CMakeFiles/umicom-kernel.dir/kernel/disk_filesystem_validation.c.obj",
+          "[5549/5555] Building C object CMakeFiles/umicom-kernel.dir/kernel/fat16_update.c.obj",
+          "[5550/5555] Building ASM object CMakeFiles/umicom-kernel.dir/arch/riscv64/firmware_entry.S.obj",
+          "[5551/5555] Building C object CMakeFiles/umicom-kernel.dir/kernel/fat16_update_console.c.obj",
+          "[5552/5555] Building C object CMakeFiles/umicom-kernel.dir/kernel/disk_writable_filesystem.c.obj",
+          "[5553/5555] Building C object CMakeFiles/umicom-kernel.dir/kernel/disk_writable_filesystem_console.c.obj",
+          "[5554/5555] Building C object CMakeFiles/umicom-kernel.dir/kernel/fat16_writable_provider.c.obj",
+          "[5555/5555] Linking C executable bin/umicom-kernel.elf"
+        ]
+      }
+    ],
+    "build/validation-guest/build-no-tests-results.json": [
+      {
+        "step": "configure-no-tests",
+        "command": [
+          "cmake",
+          "-S",
+          ".",
+          "-B",
+          "build/riscv64-clang-no-tests",
+          "-G",
+          "Ninja",
+          "-DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/riscv64-clang.cmake",
+          "-DCMAKE_BUILD_TYPE=Debug",
+          "-DBUILD_TESTING=OFF"
+        ],
+        "exit_code": 0,
+        "seconds": 0.416,
+        "log": "build/validation-guest/configure-no-tests.log",
+        "tail": [
+          "-- The C compiler identification is Clang 18.1.3",
+          "-- The ASM compiler identification is Clang with GNU-like command-line",
+          "-- Found assembler: /workspace/scratch/731ae0373859/toolchain_durable/bin/clang",
+          "-- Detecting C compiler ABI info",
+          "-- Detecting C compiler ABI info - done",
+          "-- Check for working C compiler: /workspace/scratch/731ae0373859/toolchain_durable/bin/clang - skipped",
+          "-- Detecting C compile features",
+          "-- Detecting C compile features - done",
+          "-- qemu-system-riscv64 not found: the Kernel will build, but real QEMU CTests are not registered. Install QEMU and re-run the configure step.",
+          "-- Configuring done (0.3s)",
+          "-- Generating done (0.1s)",
+          "-- Build files have been written to: build/riscv64-clang-no-tests"
+        ]
+      },
+      {
+        "step": "build-no-tests",
+        "command": [
+          "cmake",
+          "--build",
+          "build/riscv64-clang-no-tests",
+          "--parallel",
+          "2"
+        ],
+        "exit_code": 0,
+        "seconds": 19.382,
+        "log": "build/validation-guest/build-no-tests.log",
+        "tail": [
+          "[147/645] Building C object CMakeFiles/umicom-trap-nested-image.dir/kernel/fat16_writable_provider.c.obj",
+          "[148/645] Building C object CMakeFiles/umicom-trap-nested-image.dir/kernel/disk_writable_filesystem_console.c.obj",
+          "[149/645] Linking C executable tests/umicom-trap-nested.elf",
+          "[150/645] Building ASM object CMakeFiles/umicom-console-image.dir/arch/riscv64/mmu.S.obj",
+          "[151/645] Building ASM object CMakeFiles/umicom-console-image.dir/arch/riscv64/boot.S.obj",
+          "[152/645] Building ASM object CMakeFiles/umicom-console-image.dir/arch/riscv64/user_execution.S.obj",
+          "[153/645] Building ASM object CMakeFiles/umicom-console-image.dir/arch/riscv64/supervisor.S.obj",
+          "[154/645] Building C object CMakeFiles/umicom-console-image.dir/arch/riscv64/trap.c.obj",
+          "[155/645] Building ASM object CMakeFiles/umicom-console-image.dir/arch/riscv64/trap.S.obj",
+          "[156/645] Building C object CMakeFiles/umicom-console-image.dir/kernel/address.c.obj",
+          "[157/645] Building C object CMakeFiles/umicom-console-image.dir/kernel/console.c.obj",
+          "[158/645] Building C object CMakeFiles/umicom-console-image.dir/kernel/device_tree.c.obj",
+          "[159/645] Building C object CMakeFiles/umicom-console-image.dir/kernel/supervisor_payload.c.obj",
+          "[160/645] Building C object CMakeFiles/umicom-console-image.dir/kernel/main.c.obj",
+          "[161/645] Building C object CMakeFiles/umicom-console-image.dir/kernel/supervisor_validation.c.obj"
+        ]
+      }
+    ],
+    "build/validation-guest/test-new-guest-processes.json": {
+      "command": [
+        "ctest",
+        "--preset",
+        "riscv64-clang-debug",
+        "--output-on-failure",
+        "--no-tests=error",
+        "--parallel",
+        "2",
+        "-R",
+        "kernel.riscv64.disk_writable_filesystem"
+      ],
+      "exit_code": 0,
+      "seconds": 2.671,
+      "log": "build/validation-guest/test-new-guest-processes.log",
+      "tail": [
+        "Test project build/riscv64-clang-debug",
+        "    Start   8: kernel.build.current",
+        "1/6 Test   #8: kernel.build.current ................................   Passed    0.56 sec",
+        "    Start 190: kernel.riscv64.disk_writable_filesystem_prepare",
+        "2/6 Test #190: kernel.riscv64.disk_writable_filesystem_prepare .....   Passed    0.09 sec",
+        "    Start 191: kernel.riscv64.disk_writable_filesystem_read_only",
+        "3/6 Test #191: kernel.riscv64.disk_writable_filesystem_read_only ...   Passed    0.15 sec",
+        "    Start 192: kernel.riscv64.disk_writable_filesystem_writer",
+        "4/6 Test #192: kernel.riscv64.disk_writable_filesystem_writer ......   Passed    0.70 sec",
+        "    Start 193: kernel.riscv64.disk_writable_filesystem_readback",
+        "5/6 Test #193: kernel.riscv64.disk_writable_filesystem_readback ....   Passed    1.11 sec",
+        "    Start 194: kernel.riscv64.disk_writable_filesystem_cleanup",
+        "6/6 Test #194: kernel.riscv64.disk_writable_filesystem_cleanup .....   Passed    0.01 sec",
+        "",
+        "100% tests passed out of 6",
+        "",
+        "Total Test time (real) =   2.63 sec"
+      ]
+    },
+    "build/validation-guest/rv64-full-results.json": [
+      {
+        "step": "build-before-regression",
+        "command": [
+          "cmake",
+          "--build",
+          "--preset",
+          "riscv64-clang-debug",
+          "--parallel",
+          "2"
+        ],
+        "exit_code": 0,
+        "seconds": 0.115,
+        "log": "build/validation-guest/build-before-regression.log",
+        "tail": [
+          "ninja: no work to do."
+        ]
+      },
+      {
+        "step": "test-rv64-full",
+        "command": [
+          "ctest",
+          "--preset",
+          "riscv64-clang-debug",
+          "--output-on-failure",
+          "--no-tests=error",
+          "--parallel",
+          "2"
+        ],
+        "exit_code": 0,
+        "seconds": 213.196,
+        "log": "build/validation-guest/test-rv64-full.log",
+        "tail": [
+          "166/194 Test  #48: kernel.riscv64.fat16_commit_cleanup ........................   Passed    0.01 sec",
+          "        Start  52: kernel.riscv64.fat16_commit_interrupted_cleanup",
+          "167/194 Test  #52: kernel.riscv64.fat16_commit_interrupted_cleanup ............   Passed    0.01 sec",
+          "        Start  56: kernel.riscv64.fat16_file_commit_cleanup",
+          "168/194 Test  #56: kernel.riscv64.fat16_file_commit_cleanup ...................   Passed    0.01 sec",
+          "        Start  60: kernel.riscv64.fat16_file_commit_interrupted_cleanup",
+          "169/194 Test  #60: kernel.riscv64.fat16_file_commit_interrupted_cleanup .......   Passed    0.01 sec",
+          "        Start  61: kernel.riscv64.fat16_metadata",
+          "170/194 Test  #30: kernel.riscv64.read_only_block .............................   Passed    4.94 sec",
+          "        Start  67: kernel.riscv64.fat16_append_cleanup",
+          "171/194 Test  #67: kernel.riscv64.fat16_append_cleanup ........................   Passed    0.01 sec",
+          "        Start  71: kernel.riscv64.fat16_append_interrupted_cleanup",
+          "172/194 Test  #71: kernel.riscv64.fat16_append_interrupted_cleanup ............   Passed    0.01 sec",
+          "        Start  75: kernel.riscv64.fat16_rename_cleanup",
+          "173/194 Test  #75: kernel.riscv64.fat16_rename_cleanup ........................   Passed    0.01 sec",
+          "        Start  79: kernel.riscv64.fat16_rename_interrupted_cleanup",
+          "174/194 Test  #79: kernel.riscv64.fat16_rename_interrupted_cleanup ............   Passed    0.01 sec",
+          "        Start  84: kernel.riscv64.fat16_lifecycle_create_fork_cleanup",
+          "175/194 Test  #84: kernel.riscv64.fat16_lifecycle_create_fork_cleanup .........   Passed    0.01 sec",
+          "        Start  90: kernel.riscv64.fat16_lifecycle_append_fork_cleanup",
+          "176/194 Test  #90: kernel.riscv64.fat16_lifecycle_append_fork_cleanup .........   Passed    0.01 sec",
+          "        Start  96: kernel.riscv64.fat16_lifecycle_truncate_fork_cleanup",
+          "177/194 Test  #96: kernel.riscv64.fat16_lifecycle_truncate_fork_cleanup .......   Passed    0.01 sec",
+          "        Start 102: kernel.riscv64.fat16_lifecycle_delete_fork_cleanup",
+          "178/194 Test #102: kernel.riscv64.fat16_lifecycle_delete_fork_cleanup .........   Passed    0.06 sec",
+          "        Start 109: kernel.riscv64.fat16_lifecycle_cleanup",
+          "179/194 Test #109: kernel.riscv64.fat16_lifecycle_cleanup .....................   Passed    0.01 sec",
+          "        Start 114: kernel.riscv64.fat16_directory_mkdir_fork_cleanup",
+          "180/194 Test #114: kernel.riscv64.fat16_directory_mkdir_fork_cleanup ..........   Passed    0.01 sec",
+          "        Start 120: kernel.riscv64.fat16_directory_nested_fork_cleanup",
+          "181/194 Test #120: kernel.riscv64.fat16_directory_nested_fork_cleanup .........   Passed    0.01 sec",
+          "        Start 126: kernel.riscv64.fat16_directory_create_fork_cleanup",
+          "182/194 Test #126: kernel.riscv64.fat16_directory_create_fork_cleanup .........   Passed    0.01 sec",
+          "        Start 132: kernel.riscv64.fat16_directory_append_fork_cleanup",
+          "183/194 Test #132: kernel.riscv64.fat16_directory_append_fork_cleanup .........   Passed    0.04 sec",
+          "        Start 138: kernel.riscv64.fat16_directory_delete_fork_cleanup",
+          "184/194 Test #138: kernel.riscv64.fat16_directory_delete_fork_cleanup .........   Passed    0.01 sec",
+          "        Start 144: kernel.riscv64.fat16_directory_rmdir_nested_fork_cleanup",
+          "185/194 Test #144: kernel.riscv64.fat16_directory_rmdir_nested_fork_cleanup ...   Passed    0.01 sec",
+          "        Start 150: kernel.riscv64.fat16_directory_rmdir_fork_cleanup",
+          "186/194 Test #150: kernel.riscv64.fat16_directory_rmdir_fork_cleanup ..........   Passed    0.01 sec",
+          "        Start 156: kernel.riscv64.fat16_directory_reuse_fork_cleanup",
+          "187/194 Test #156: kernel.riscv64.fat16_directory_reuse_fork_cleanup ..........   Passed    0.02 sec",
+          "        Start 162: kernel.riscv64.fat16_directory_growth_fork_cleanup",
+          "188/194 Test #162: kernel.riscv64.fat16_directory_growth_fork_cleanup .........   Passed    0.01 sec",
+          "        Start 168: kernel.riscv64.fat16_directory_move_tree_fork_cleanup",
+          "189/194 Test #168: kernel.riscv64.fat16_directory_move_tree_fork_cleanup ......   Passed    0.01 sec",
+          "        Start 174: kernel.riscv64.fat16_directory_move_root_fork_cleanup",
+          "190/194 Test #174: kernel.riscv64.fat16_directory_move_root_fork_cleanup ......   Passed    0.01 sec",
+          "        Start 180: kernel.riscv64.fat16_directory_rename_tree_fork_cleanup",
+          "191/194 Test #180: kernel.riscv64.fat16_directory_rename_tree_fork_cleanup ....   Passed    0.01 sec",
+          "        Start 186: kernel.riscv64.fat16_directory_move_file_fork_cleanup",
+          "192/194 Test #186: kernel.riscv64.fat16_directory_move_file_fork_cleanup ......   Passed    0.02 sec",
+          "        Start 189: kernel.riscv64.fat16_directory_cleanup",
+          "193/194 Test #189: kernel.riscv64.fat16_directory_cleanup .....................   Passed    0.01 sec",
+          "194/194 Test  #61: kernel.riscv64.fat16_metadata ..............................   Passed    2.54 sec",
+          "",
+          "100% tests passed out of 194",
+          "",
+          "Total Test time (real) = 213.16 sec"
+        ]
+      }
+    ],
+    "build/validation-guest/build-final-comment-sync.json": {
+      "command": [
+        "cmake",
+        "--build",
+        "--preset",
+        "riscv64-clang-debug",
+        "--parallel",
+        "2"
+      ],
+      "exit_code": 0,
+      "seconds": 5.669,
+      "log": "build/validation-guest/build-final-comment-sync.log",
+      "tail": [
+        "[73/88] Building C object CMakeFiles/umicom-fat16-directory-image.dir/kernel/disk_writable_filesystem_console.c.obj",
+        "[74/88] Building C object CMakeFiles/umicom-fat16-directory-readback-image.dir/kernel/disk_writable_filesystem_console.c.obj",
+        "[75/88] Building C object CMakeFiles/umicom-fat16-directory-rejected-image.dir/kernel/disk_writable_filesystem_console.c.obj",
+        "[76/88] Building C object CMakeFiles/umicom-fat16-directory-interrupted-image.dir/kernel/disk_writable_filesystem_console.c.obj",
+        "[77/88] Linking C executable tests/umicom-fat16-directory.elf",
+        "[78/88] Linking C executable tests/umicom-fat16-directory-readback.elf",
+        "[79/88] Linking C executable tests/umicom-fat16-directory-interrupted.elf",
+        "[80/88] Linking C executable tests/umicom-fat16-directory-rejected.elf",
+        "[81/88] Building C object CMakeFiles/umicom-disk-writable-filesystem-image.dir/kernel/disk_writable_filesystem_console.c.obj",
+        "[82/88] Building C object CMakeFiles/umicom-disk-writable-filesystem-readback-image.dir/kernel/disk_writable_filesystem_console.c.obj",
+        "[83/88] Building C object CMakeFiles/umicom-disk-writable-filesystem-read-only-image.dir/kernel/disk_writable_filesystem_console.c.obj",
+        "[84/88] Linking C executable tests/umicom-disk-writable-filesystem.elf",
+        "[85/88] Linking C executable tests/umicom-disk-writable-filesystem-readback.elf",
+        "[86/88] Linking C executable tests/umicom-disk-writable-filesystem-read-only.elf",
+        "[87/88] Building C object CMakeFiles/umicom-kernel.dir/kernel/disk_writable_filesystem_console.c.obj",
+        "[88/88] Linking C executable bin/umicom-kernel.elf"
+      ]
+    },
+    "build/validation-guest/normal-firmware-boot.json": {
+      "passed": true,
+      "command": [
+        "qemu-system-riscv64",
+        "-machine",
+        "virt,aclint=off",
+        "-bios",
+        "build/riscv64-clang-no-tests/bin/umicom-system.elf",
+        "-display",
+        "none",
+        "-monitor",
+        "none",
+        "-chardev",
+        "stdio,id=console,signal=off",
+        "-serial",
+        "chardev:console",
+        "-m",
+        "128M",
+        "-smp",
+        "1",
+        "-no-reboot"
+      ],
+      "returncode": 0,
+      "prompt_sequence": [
+        "umicom> ",
+        "umicom> "
+      ],
+      "commands": [
+        "help",
+        "poweroff"
+      ]
+    },
+    "build/validation-guest/manual-console-results.json": {
+      "command": [
+        "qemu-system-riscv64",
+        "-machine",
+        "virt,aclint=off",
+        "-bios",
+        "build/riscv64-clang-debug/bin/umicom-system.elf",
+        "-display",
+        "none",
+        "-monitor",
+        "none",
+        "-chardev",
+        "stdio,id=console,signal=off",
+        "-serial",
+        "chardev:console",
+        "-m",
+        "128M",
+        "-smp",
+        "1",
+        "-no-reboot",
+        "-global",
+        "virtio-mmio.force-legacy=false",
+        "-drive",
+        "file=build/fixtures/umicom-writable-vfs-manual.raw,if=none,format=raw,id=umicomdisk,readonly=off,cache=writeback,rerror=report,werror=report",
+        "-device",
+        "virtio-blk-device,drive=umicomdisk,write-cache=on,logical_block_size=512,physical_block_size=512,num-queues=1"
+      ],
+      "source": "tests/fat16_file_commit/fixture.raw",
+      "disk": "build/fixtures/umicom-writable-vfs-manual.raw",
+      "source_hash": "538d4c1def74b0241a91a350362038a85934a9a5d522f86bd7c5347b44c3e1b5",
+      "runs": [
+        {
+          "role": "writer",
+          "passed": true,
+          "returncode": 0,
+          "slot": 7,
+          "commands": [
+            "disks",
+            "mountdiskrw 7 0 2044-02-29T23:58:56",
+            "diskmkdir /WORK",
+            "diskcreate /WORK/NOTE.TXT",
+            "diskwrite /WORK/NOTE.TXT 0 \"hello\"",
+            "diskappend /WORK/NOTE.TXT \" world\"",
+            "diskrwcat /WORK/NOTE.TXT",
+            "diskrwls /WORK",
+            "diskrwinfo",
+            "unmountdiskrw",
+            "poweroff"
+          ],
+          "image_before": "538d4c1def74b0241a91a350362038a85934a9a5d522f86bd7c5347b44c3e1b5",
+          "image_after": "c489e9efeaa997e88ba424000a887c20a79e7022dd1659f288e8e46ab61db67d",
+          "backing_image_unchanged": false
+        },
+        {
+          "role": "readback",
+          "passed": true,
+          "returncode": 0,
+          "slot": 7,
+          "commands": [
+            "disks",
+            "mountdiskrw 7 0 2044-02-29T23:58:56",
+            "diskrwcat /WORK/NOTE.TXT",
+            "diskrwls /WORK",
+            "diskrwinfo",
+            "unmountdiskrw",
+            "poweroff"
+          ],
+          "image_before": "c489e9efeaa997e88ba424000a887c20a79e7022dd1659f288e8e46ab61db67d",
+          "image_after": "c489e9efeaa997e88ba424000a887c20a79e7022dd1659f288e8e46ab61db67d",
+          "backing_image_unchanged": true
+        }
+      ]
+    }
+  },
+  "media_sha256": {
+    "source_fixture": "538d4c1def74b0241a91a350362038a85934a9a5d522f86bd7c5347b44c3e1b5",
+    "independent_process_result": "2456136d78ce5956bd25672323fc792da9d670582431b52ada9a88cf6ed74847",
+    "normal_console_result": "c489e9efeaa997e88ba424000a887c20a79e7022dd1659f288e8e46ab61db67d"
+  },
+  "source_inventory_note": "All changed files except this self-referential qualification JSON are hashed. Git metadata and generated build directories are excluded.",
+  "changed_files": [
+    {
+      "path": "CMakeLists.txt",
+      "change": "updated",
+      "sha256": "8f96e3dca2b485e22fc79fb77a006432313b1f0b873ef59e623a2a7c3169a678",
+      "purpose": "Include the writable filesystem build/qualification module."
+    },
+    {
+      "path": "README.md",
+      "change": "updated",
+      "sha256": "4559cfffd44c3da7a1b9c519430b1d0bbacab61c823e9edd5796d9f680a50552",
+      "purpose": "Advertise the native writable interface; preserve historical scope text."
+    },
+    {
+      "path": "cmake/DiskWritableFilesystem.cmake",
+      "change": "new",
+      "sha256": "afb31462b8102bb1215b08b9099bda4b750e8d1c5134addb7f4284882a576cc1",
+      "purpose": "Common-source integration, process images and disposable-disk CTests."
+    },
+    {
+      "path": "cmake/EmbeddedDiskFileProgram.S.in",
+      "change": "new",
+      "sha256": "1ca20bd962980fe22c0a9f683191b2af44335fc4a9e73daa2fde271db5083aeb",
+      "purpose": "Embed the dedicated executable in diagnostic images."
+    },
+    {
+      "path": "docs/CURRENT_CAPABILITIES.html",
+      "change": "updated",
+      "sha256": "9c2ad85522e1e5f37eb2dce44fbf8eb36f8e915fa2309b86c83282dea1af19a0",
+      "purpose": "Record writable VFS scope and remaining OS work."
+    },
+    {
+      "path": "docs/KERNEL_AND_OS_RELEASE_ROADMAP.md",
+      "change": "updated",
+      "sha256": "1d6785f348962a65eba969fc5bee4246b3590678db1ce01d8e0ef454fd268b1b",
+      "purpose": "Append the qualified storage checkpoint and next integration objective."
+    },
+    {
+      "path": "docs/WRITABLE_FAT16_VFS.md",
+      "change": "new",
+      "sha256": "362ee1b8be3998f0a17d026a63e27abd0050ca3598b5c4a14e0d8dcff4912528",
+      "purpose": "API, lifetime, failure, identity and console contract."
+    },
+    {
+      "path": "docs/WRITABLE_FAT16_VFS_QUALIFICATION.json",
+      "change": "new",
+      "sha256": null,
+      "purpose": "Machine-readable evidence, hashes and changed-source inventory."
+    },
+    {
+      "path": "docs/WRITABLE_FAT16_VFS_REVIEW.html",
+      "change": "new",
+      "sha256": "809c38b35a56098249a9e55c0aa8924f896d35feb20713f0f73ac0db22d0d928",
+      "purpose": "Complete engineering review and reproduction instructions."
+    },
+    {
+      "path": "include/umicom/kernel/disk_writable_filesystem.h",
+      "change": "new",
+      "sha256": "7733b2c9c9e9eb02b33fb0f7b442b2b32d1f020ec8b99328830e490f83c9b9d2",
+      "purpose": "Owned mutable-mount public API."
+    },
+    {
+      "path": "include/umicom/kernel/disk_writable_filesystem_console.h",
+      "change": "new",
+      "sha256": "a966602511d66800bfbc2098d2f8c8096ebea95d2a112374242acda58b8f1b92",
+      "purpose": "Trusted command interface."
+    },
+    {
+      "path": "include/umicom/kernel/disk_writable_filesystem_validation.h",
+      "change": "new",
+      "sha256": "4849260feef96b4098c6e51ffb74190a072179b1350fb1cc4b35b76dfab76b45",
+      "purpose": "Guest qualification entry points."
+    },
+    {
+      "path": "include/umicom/kernel/fat16_lifecycle.h",
+      "change": "updated",
+      "sha256": "d8bd65b935ffd63f3454c1e27bc14ffecd18a9b57b117b51bd51c287df3bf4a9",
+      "purpose": "Append WRITE and trailing offset; retain earlier operation values."
+    },
+    {
+      "path": "include/umicom/kernel/fat16_lifecycle_commit.h",
+      "change": "updated",
+      "sha256": "133a3c22a0bce4f9fc907000ae6fad41ca595748ff741c5a0d5ca6c5663ab3a4",
+      "purpose": "Document positional-write Stage/Finish semantics."
+    },
+    {
+      "path": "include/umicom/kernel/fat16_writable_provider.h",
+      "change": "new",
+      "sha256": "7af8c8565ed6573bb0b730eaa265dda643a1ee4b4abedd4f5f34d87edd4fcc72",
+      "purpose": "Mutable provider, nodes and lifetime state."
+    },
+    {
+      "path": "kernel/console_shell.c",
+      "change": "updated",
+      "sha256": "86d022c42ea066697f4d2154f071a38775484a4a3f7f1fdb090a8e91a0ce332a",
+      "purpose": "Guarded dispatch/help/close integration."
+    },
+    {
+      "path": "kernel/disk_writable_filesystem.c",
+      "change": "new",
+      "sha256": "ae065f519fb50c8f29a032d6e172d10da44f7476fb2cb87300c32c17e4b386dc",
+      "purpose": "Compose and release lifecycle/provider/VFS ownership."
+    },
+    {
+      "path": "kernel/disk_writable_filesystem_boot.c",
+      "change": "new",
+      "sha256": "13c1a1a7b3708c84f85df5811203e30dd0f840d980a1280d21bf9965a2d90a36",
+      "purpose": "Real guest entry and parked-timer contract."
+    },
+    {
+      "path": "kernel/disk_writable_filesystem_console.c",
+      "change": "new",
+      "sha256": "04bbf0fe628d3489729d0334fda425fe4a69f58b26bdf08622f73be5760e24b2",
+      "purpose": "13 writable-mount, data and namespace commands."
+    },
+    {
+      "path": "kernel/disk_writable_filesystem_validation.c",
+      "change": "new",
+      "sha256": "1962f42a11714d495cf6d39cccaea5dd0ade7cc59650ddde15c66967aa4d9a75",
+      "purpose": "Real processes, rights, cleanup and complete-image verification."
+    },
+    {
+      "path": "kernel/fat16_inspector.c",
+      "change": "updated",
+      "sha256": "01434b54278245bd6be7689864ef31513158d7dd045b7e288c2d0893c1612df1",
+      "purpose": "Plan bounded positional writes; preserve superseded predicates."
+    },
+    {
+      "path": "kernel/fat16_update.c",
+      "change": "updated",
+      "sha256": "bfb41b022c91165b234e1824c3166ee26795816e3768896fe8dcd9502549776b",
+      "purpose": "Accept WRITE and reuse ordered whole-sector commit machinery."
+    },
+    {
+      "path": "kernel/fat16_writable_provider.c",
+      "change": "new",
+      "sha256": "55214b4a864f72214e02d402546d1c258a6e00b82d34d02cbc9d9df4c3edf130",
+      "purpose": "Mutable VFS callbacks, accepted metadata, pins and epochs."
+    },
+    {
+      "path": "kernel/main.c",
+      "change": "updated",
+      "sha256": "82db88a105db6b510b86703c89b0e1566b83574f738f96fe7bd98eb9b4450103",
+      "purpose": "Guarded early dispatch for dedicated qualification images."
+    },
+    {
+      "path": "programs/disk_file_client/entry.S",
+      "change": "new",
+      "sha256": "90e37be4b5082faa8389ecaef0fd5f8c9a43840560b763f8c3c4a5c18b8408d7",
+      "purpose": "Minimal native userspace entry."
+    },
+    {
+      "path": "programs/disk_file_client/linker.ld",
+      "change": "new",
+      "sha256": "18f107aba5ed3e1608aac9122c42ac2de86d956b67e9df6729357a1ef356beec",
+      "purpose": "Dedicated native-process executable layout."
+    },
+    {
+      "path": "programs/disk_file_client/main.c",
+      "change": "new",
+      "sha256": "8ac1eb257e3956e1c818c2edbbbf76b8ede7f3c3cc57a964ef74e635164fdd34",
+      "purpose": "Writer, namespace and reduced-rights reader roles."
+    },
+    {
+      "path": "tests/disk_writable_filesystem/CMakeLists.txt",
+      "change": "new",
+      "sha256": "805c388daf52c9fe9bed81d1d00e40b25327d8ed27b1fb6ebc4b730a20053def",
+      "purpose": "Register 54 native cases and the independent image verifier."
+    },
+    {
+      "path": "tests/disk_writable_filesystem/guest_fixture.h",
+      "change": "new",
+      "sha256": "38f514bca3dac0434a2e6d077c9a01782e7bf14b40e8b11632ce3f2bed21c808",
+      "purpose": "Independent complete-media expected bytes."
+    },
+    {
+      "path": "tests/disk_writable_filesystem/image_verify.c",
+      "change": "new",
+      "sha256": "721a231411d3df2cf97b4851e8f8c323f92db23916ee7f7f2dbfb7b1f14bbf71",
+      "purpose": "Standalone original/committed image verifier."
+    },
+    {
+      "path": "tests/disk_writable_filesystem/writable_tests.c",
+      "change": "new",
+      "sha256": "ae5992f347f003919167fd6cf968f45ba585e882c043bc86cb153a3b44fb6273",
+      "purpose": "Provider, VFS, owner, failure and console tests."
+    },
+    {
+      "path": "tests/fat16_lifecycle/CMakeLists.txt",
+      "change": "updated",
+      "sha256": "c4838fdba40131535f5c965d11307398d9d49f1de37af66afd17604dec013e6e",
+      "purpose": "Register 90 new positional-WRITE cases."
+    },
+    {
+      "path": "tests/fat16_lifecycle/lifecycle_plan_tests.c",
+      "change": "updated",
+      "sha256": "440da5fe8afed36b12977bd47a30b7849a709a6f90083c8229c15ed021ebe478",
+      "purpose": "Add the new planner-case dispatch."
+    },
+    {
+      "path": "tests/fat16_lifecycle/lifecycle_tests.c",
+      "change": "updated",
+      "sha256": "75d9f07aad8df9c9f1fa9ac1c54e70e2d66be765474fd1f70feda32513eddda3",
+      "purpose": "Add the new transport-case dispatch."
+    },
+    {
+      "path": "tests/fat16_lifecycle/write_cases.inc",
+      "change": "new",
+      "sha256": "4d32721d7f6d4789b8b44cf7824728850cb6e33e3288d7deb42597ddc9dedbdd",
+      "purpose": "Transport, persistence, failure and byte-preservation cases."
+    },
+    {
+      "path": "tests/fat16_lifecycle/write_plan_cases.inc",
+      "change": "new",
+      "sha256": "cef8e574382dba15b4aa3c703cc01f0e809502c2521182816b4b9c0b278d8628",
+      "purpose": "Plan, refusal and allocation-proof cases."
+    }
+  ],
+  "limitations": [
+    "Windows instructions supplied; executed host was Linux.",
+    "No physical hardware or composed OS installation qualified.",
+    "ASan leak detection disabled.",
+    "No journal, rollback, automatic repair, power-loss or sector atomicity claim.",
+    "Zero accepted VFS bytes on failure does not prove media unchanged.",
+    "One stable admitted owner lifetime; serialized access; one console attempt per boot.",
+    "64 node records; bounded short names and proofs; up to 4096 write bytes and eight new clusters per operation.",
+    "Create does not reserve a later Open identity; pinned targets cannot be removed.",
+    "No sparse holes, persistent orphan files, path ACLs, async I/O, mount crossing or SMP writer protocol.",
+    "Ordinary run/runrw remains RAMFS; process disk binding is explicit.",
+    "Focused tests overlap the full preset; baseline evidence is separate."
+  ]
+}

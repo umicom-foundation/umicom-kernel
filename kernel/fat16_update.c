@@ -1750,6 +1750,7 @@ static UmicomBoolean UmicomLifecycleRequestFields(const UmicomKernelFat16Lifecyc
         if (request->size || request->bytes > UMICOM_FAT16_UPDATE_BYTES ||
             (request->bytes ? !request->input : request->input != 0)) return UMICOM_FALSE;
         break;
+    case UMICOM_FAT16_LIFECYCLE_WRITE:
     case UMICOM_FAT16_LIFECYCLE_APPEND:
         if (request->size || !request->bytes || request->bytes > UMICOM_FAT16_UPDATE_BYTES ||
             !request->input) return UMICOM_FALSE;
@@ -2053,7 +2054,11 @@ static UmicomBoolean UmicomLifecyclePlanValid(const UmicomKernelFat16LifecycleCo
 {
     const UmicomKernelFat16LifecyclePlan *const plan = &owner->plan;
     const UmicomKernelFat16Updater *const base = &owner->commit.updater;
+    /* Preserve the previous admitted-operation bound beside its extension. */
+#if 0
     if (plan->operation < UMICOM_FAT16_LIFECYCLE_CREATE || plan->operation > UMICOM_FAT16_LIFECYCLE_MOVE ||
+#endif
+    if (plan->operation < UMICOM_FAT16_LIFECYCLE_CREATE || plan->operation > UMICOM_FAT16_LIFECYCLE_WRITE ||
         !plan->fatSectorCount || plan->fatSectorCount > UMICOM_FAT16_LIFECYCLE_FAT_SECTORS ||
         !plan->directorySectorCount || plan->directorySectorCount > UMICOM_FAT16_LIFECYCLE_DIRECTORY_SECTORS ||
         plan->dataSectorCount > UMICOM_FAT16_LIFECYCLE_DATA_SECTORS ||
@@ -2066,8 +2071,27 @@ static UmicomBoolean UmicomLifecyclePlanValid(const UmicomKernelFat16LifecycleCo
         return UMICOM_FALSE;
     if (plan->chainBoundaryPresent && (plan->chainBoundaryFatIndex >= plan->fatSectorCount ||
         !plan->fatSectors[plan->chainBoundaryFatIndex].changed ||
+        /* A positional write can grow through the same old-tail bridge. */
+#if 0
         (plan->operation != UMICOM_FAT16_LIFECYCLE_APPEND && plan->operation != UMICOM_FAT16_LIFECYCLE_TRUNCATE && !plan->parentGrown)))
+#endif
+        (plan->operation != UMICOM_FAT16_LIFECYCLE_APPEND &&
+         plan->operation != UMICOM_FAT16_LIFECYCLE_WRITE &&
+         plan->operation != UMICOM_FAT16_LIFECYCLE_TRUNCATE && !plan->parentGrown)))
         return UMICOM_FALSE;
+    if (plan->operation == UMICOM_FAT16_LIFECYCLE_WRITE) {
+        /* Recheck scalar extent evidence at Stage and Finish. Existing data
+         * may be overwritten, but WRITE never shrinks, frees or creates holes. */
+        if (!plan->originalEntryPresent || !plan->updatedEntryPresent ||
+            plan->originalEntry.directory || plan->updatedEntry.directory ||
+            !plan->requestedBytes || plan->offset > plan->originalEntry.bytes ||
+            plan->requestedBytes > (UmicomU64)0xffffffffU - plan->offset ||
+            plan->freedClusters || plan->parentGrown)
+            return UMICOM_FALSE;
+        const UmicomU64 end = plan->offset + plan->requestedBytes;
+        if (plan->updatedEntry.bytes != (end > plan->originalEntry.bytes ?
+            end : plan->originalEntry.bytes)) return UMICOM_FALSE;
+    }
     for (UmicomSize i = 0U; i < plan->fatSectorCount; ++i) {
         const UmicomKernelFat16LifecycleFatSector *const fat = &plan->fatSectors[i];
         if (fat->primarySector < owner->commit.headerSectors[0] ||
@@ -2778,6 +2802,7 @@ const char *UmicomKernelFat16LifecycleOperationName(UmicomKernelFat16LifecycleOp
     case UMICOM_FAT16_LIFECYCLE_CREATE_DIRECTORY: return "create-directory";
     case UMICOM_FAT16_LIFECYCLE_REMOVE_DIRECTORY: return "remove-directory";
     case UMICOM_FAT16_LIFECYCLE_MOVE: return "move";
+    case UMICOM_FAT16_LIFECYCLE_WRITE: return "write";
     case UMICOM_FAT16_LIFECYCLE_NONE: return "none";
     case UMICOM_FAT16_LIFECYCLE_CREATE: return "create";
     case UMICOM_FAT16_LIFECYCLE_APPEND: return "append";

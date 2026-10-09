@@ -315,3 +315,36 @@ Do not announce a supported release date before the scheduling, persistent
 storage and first application-provider integration risks have been measured.
 Publish named previews and their exact limitations in the meantime. The goal is
 a functioning, maintainable free system—not a version label ahead of the code.
+
+## Qualified checkpoint: writable FAT16 native file services
+
+**Engineering checkpoint:** 9 October 2026, developed from remote `main` at
+`063a758095b48bb818d41aaa23191f3b055c44a3`. The earlier next-checkpoint section
+above is retained as the original planning record.
+
+The storage lane now includes an explicitly owned writable FAT16 VFS mount,
+bounded positional writes and zero-extension, append, truncation, file and
+directory creation, and removal of closed objects. The native process
+file-service ABI can use this mounted domain under granted descriptor and
+namespace rights. The normal console provides a separate `mountdiskrw` workflow.
+Each successful mutation completes the existing Stage and accepted Finish.
+
+The delivered qualification includes 661 lifecycle and 54 writable-provider
+native tests under Clang with address/undefined-behaviour sanitizers, the 144
+new native cases under GCC, all 194 RV64 preset tests, and two normal console
+boots that write and then read the same persisted file. The RV64 process journey
+also verifies the complete 8 MiB image against an independent expected result.
+These are separate native, cross-build and virtual-machine results; they do not
+qualify physical hardware or a composed OS installation. See
+[the provider contract](WRITABLE_FAT16_VFS.md),
+[the engineering review](WRITABLE_FAT16_VFS_REVIEW.html) and
+[the qualification record](WRITABLE_FAT16_VFS_QUALIFICATION.json).
+
+The persistent-system alpha gate remains open. A useful next substantial
+integration is bounded executable/configuration loading from an explicitly
+selected persistent mount, with normal process ownership and rights, followed
+by fresh-boot validation. Ordinary console `run`/`runrw` currently retain their
+RAMFS binding. Persistent boot policy, safe installation, authenticated identity,
+networking, recovery and update/rollback still require their own work and gates.
+The new provider does not add journalling, automatic repair or power-loss
+atomicity, and introduces no dependency on Umicom Framework or an OS Data Server.

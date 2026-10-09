@@ -59,6 +59,15 @@ parent read-only flags, subtree depth and whole-image preservation are checked.
 A move requires an existing destination slot and explicit Finish.
 See <a href="FAT16_FILE_MOVES.md">Moving FAT16 files and directories</a>.
 This remains a trusted Kernel interface, without journalling or automatic recovery.
+</td></tr>
+<tr><td>Writable disk VFS and native file services</td><td>
+<a href="WRITABLE_FAT16_VFS.md">Writable FAT16 through native file services</a></td><td>
+An explicit writable mount supports positional writes, EOF growth, append,
+zero-extension, truncation, file and directory creation, and removal of closed
+objects through the existing VFS and process file-service ABI. Every successful
+mutation includes accepted clean finalisation. Mutable node identities, pins,
+rights and namespace epochs are checked. The console RAMFS binding remains
+independent; persistent boot, mount crossing and recovery require further work.
 </td></tr></table>
 <h2>Understand persistence before extending it</h2>
 <p>The FAT16 editing source stages bounded updates behind persistent dirty guards and performs explicit
@@ -72,6 +81,8 @@ directory creation and extension, long filenames, broader driver coverage, netwo
 desktop integration require their own implementation and qualification. Read the lifecycle guide's
 limits before increasing capacities or granting an untrusted process a write handle.</p>
 -->
+<!-- Retained scope statement from before the writable provider. The bounded
+VFS and native-process integration below now supplies that part of the work.
 <p>Directory creation, empty removal and bounded parent extension use the same
 explicit Stage and Finish protocol as regular-file changes. Do not describe that
 protocol as journalling or automatic crash recovery. General writable VFS access,
@@ -79,6 +90,13 @@ long filenames, broader driver coverage, networking and graphical desktop
 integration still require their own implementation and qualification. Read the
 directory guide's limits before changing capacities or granting an untrusted
 process a write handle.</p>
+-->
+<p>The writable provider reuses the same Stage and Finish protocol and returns
+success only after acceptance. Its bounded API is qualified separately from a
+complete persistent OS. Long filenames, persistent boot policy, recovery,
+broader drivers, networking and graphical desktop integration remain further
+work. Read the writable-provider and lifecycle limits before increasing
+capacities or granting namespace rights to an untrusted process.</p>
 <h2>Keep OS integration deliberate</h2>
 <p>The RISC-V research profile is a native-kernel execution route. An installable Umicom OS distribution
 and its existing kernel choice remain separate products. Adding a native-kernel profile should preserve

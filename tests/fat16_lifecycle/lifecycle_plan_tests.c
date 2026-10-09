@@ -63,8 +63,14 @@ static void LifeDefaults(UmicomKernelFat16LifecycleOperation operation)
         .operation=operation, .path=path,
         .time={2044U,2U,29U,23U,58U,57U}};
 
+    /* WRITE exercises the existing allocation and transport oracle as well. */
+#if 0
     if(operation==UMICOM_FAT16_LIFECYCLE_CREATE||operation==UMICOM_FAT16_LIFECYCLE_APPEND) {
+#endif
+    if(operation==UMICOM_FAT16_LIFECYCLE_CREATE||operation==UMICOM_FAT16_LIFECYCLE_APPEND||
+       operation==UMICOM_FAT16_LIFECYCLE_WRITE) {
         lifeRequest.input=lifeInput;lifeRequest.bytes=operation==UMICOM_FAT16_LIFECYCLE_CREATE?700U:900U;
+        if(operation==UMICOM_FAT16_LIFECYCLE_WRITE) lifeRequest.offset=1020U;
     } else if(operation==UMICOM_FAT16_LIFECYCLE_TRUNCATE) lifeRequest.size=513U;
     else memset(&lifeRequest.time,0,sizeof(lifeRequest.time));
 }
@@ -88,6 +94,10 @@ static void LifeOracle(void)
     UmicomU32 newSize=0U;
     if(create) newSize=(UmicomU32)lifeRequest.bytes;
     else if(lifeRequest.operation==UMICOM_FAT16_LIFECYCLE_APPEND) newSize=oldSize+(UmicomU32)lifeRequest.bytes;
+    else if(lifeRequest.operation==UMICOM_FAT16_LIFECYCLE_WRITE) {
+        const UmicomU64 end=lifeRequest.offset+lifeRequest.bytes;
+        newSize=end>oldSize?(UmicomU32)end:oldSize;
+    }
     else if(lifeRequest.operation==UMICOM_FAT16_LIFECYCLE_TRUNCATE) newSize=lifeRequest.size;
     const UmicomSize required=((UmicomSize)newSize+511U)/512U;
     const UmicomSize originalCount=count;
@@ -99,7 +109,12 @@ static void LifeOracle(void)
     for(UmicomSize i=0U;i<required;++i) LifeFatPut(lifeExpected,chain[i],i+1U<required?chain[i+1U]:0xffffU);
     for(UmicomSize i=required;i<originalCount;++i) {LifeFatPut(lifeExpected,chain[i],0U);++lifeExpectedFreed;}
     if(lifeRequest.input) {
+        /* Preserve the former EOF-only overlay beside its positional form. */
+#if 0
         const UmicomSize offset=create?0U:oldSize;
+#endif
+        const UmicomSize offset=create?0U:(lifeRequest.operation==UMICOM_FAT16_LIFECYCLE_WRITE?
+            (UmicomSize)lifeRequest.offset:oldSize);
         for(UmicomSize i=0U;i<lifeRequest.bytes;++i)
             lifeExpected[((UmicomSize)UMICOM_DISK_FIXTURE_DATA+chain[(offset+i)/512U]-2U)*512U+(offset+i)%512U]=lifeInput[i];
     }
@@ -365,9 +380,14 @@ int main(int argc,char **argv)
 
 /* Direct API checks complement the transport and console journeys. */
 #include "move_plan_cases.inc"
+#include "write_plan_cases.inc"
 int main(int argc,char **argv)
 {
     CHECK(argc==3);Setup(argv[2]);
+    if (!strncmp(argv[1], "write.", 6U)) {
+        UmicomKernelFat16WritePlanCase(argv[1] + 6U);
+        printf("fat16-lifecycle.plan.%s: ok\n", argv[1]); return 0;
+    }
     if (!strncmp(argv[1], "move.", 5U)) {
         LifeMove(argv[1] + 5U); printf("fat16-lifecycle.plan.%s: ok\n", argv[1]); return 0;
     }

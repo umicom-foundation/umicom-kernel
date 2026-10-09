@@ -54,6 +54,10 @@ static void LCOracle(void)
     UmicomU32 newSize=0U;
     if(create) newSize=(UmicomU32)lcRequest.bytes;
     else if(lcRequest.operation==UMICOM_FAT16_LIFECYCLE_APPEND) newSize=oldSize+(UmicomU32)lcRequest.bytes;
+    else if(lcRequest.operation==UMICOM_FAT16_LIFECYCLE_WRITE) {
+        const UmicomU64 end=lcRequest.offset+lcRequest.bytes;
+        newSize=end>oldSize?(UmicomU32)end:oldSize;
+    }
     else if(lcRequest.operation==UMICOM_FAT16_LIFECYCLE_TRUNCATE) newSize=lcRequest.size;
     const UmicomSize required=((UmicomSize)newSize+clusterBytes-1U)/clusterBytes;
     const UmicomSize originalCount=count;
@@ -66,7 +70,12 @@ static void LCOracle(void)
     for(UmicomSize i=0U;i<required;++i) LCFatPut(lcExpected,chain[i],i+1U<required?chain[i+1U]:0xffffU);
     for(UmicomSize i=required;i<originalCount;++i) {LCFatPut(lcExpected,chain[i],0U);++lcExpectedFreed;}
     if(lcRequest.input) {
+        /* Preserve the former EOF-only overlay beside its positional form. */
+#if 0
         const UmicomSize offset=create?0U:oldSize;
+#endif
+        const UmicomSize offset=create?0U:(lcRequest.operation==UMICOM_FAT16_LIFECYCLE_WRITE?
+            (UmicomSize)lcRequest.offset:oldSize);
         for(UmicomSize i=0U;i<lcRequest.bytes;++i)
             lcExpected[((UmicomSize)UMICOM_DISK_FIXTURE_DATA+(chain[(offset+i)/clusterBytes]-2U)*sectorsPerCluster)*512U+(offset+i)%clusterBytes]=lcInput[i];
     }
@@ -110,7 +119,8 @@ static void LCReserveBelow(UmicomU16 stop)
 static void LCFixture(const char *name)
 {
     UmicomU8 *const root=LCSector(UMICOM_DISK_FIXTURE_ROOT);
-    if(!strcmp(name,"empty")) {
+    if(!strcmp(name,"write_overwrite")) {lcRequest.offset=17U;lcRequest.bytes=97U;}
+    else if(!strcmp(name,"empty")) {
         if(lcRequest.operation==UMICOM_FAT16_LIFECYCLE_CREATE) {lcRequest.bytes=0U;lcRequest.input=NULL;}
         else {memcpy(lcPath,"/EMPTY.TXT",11U);lcEntry=128U;if(lcRequest.operation==UMICOM_FAT16_LIFECYCLE_TRUNCATE) lcRequest.size=0U;}
     } else if(!strcmp(name,"one")) lcRequest.bytes=1U;
@@ -226,7 +236,13 @@ static void LCWriteRegister(void *context,UmicomAddress address,UmicomU32 value)
             } else {
                 CHECK(!(CommitFlags(commitDurable,COMMIT_PRIMARY)&UMICOM_FAT16_CLEAN_MASK)||
                     (CommitFlags(commitDurable,COMMIT_MIRROR)&UMICOM_FAT16_CLEAN_MASK));
+                /* WRITE follows growth ordering even when every link stays unchanged. */
+#if 0
                 const UmicomBoolean allocation=lcRequest.operation==UMICOM_FAT16_LIFECYCLE_CREATE||lcRequest.operation==UMICOM_FAT16_LIFECYCLE_APPEND?UMICOM_TRUE:UMICOM_FALSE;
+#endif
+                const UmicomBoolean allocation=lcRequest.operation==UMICOM_FAT16_LIFECYCLE_CREATE||
+                    lcRequest.operation==UMICOM_FAT16_LIFECYCLE_APPEND||
+                    lcRequest.operation==UMICOM_FAT16_LIFECYCLE_WRITE?UMICOM_TRUE:UMICOM_FALSE;
                 if(directory && allocation) {LCAssertDataDurable();LCAssertFatDurable();}
                 if(sector==lcDirectory && lcNextDirectory!=lcDirectory &&
                     memcmp(commitInitial+(UmicomSize)lcNextDirectory*512U,lcExpected+(UmicomSize)lcNextDirectory*512U,512U))
@@ -259,8 +275,14 @@ static void LCDefaults(UmicomKernelFat16LifecycleOperation operation)
         .operation=operation, .path=lcPath,
         .time={2044U,2U,29U,23U,58U,57U}};
 
+    /* WRITE exercises the existing allocation and transport oracle as well. */
+#if 0
     if(operation==UMICOM_FAT16_LIFECYCLE_CREATE||operation==UMICOM_FAT16_LIFECYCLE_APPEND) {
+#endif
+    if(operation==UMICOM_FAT16_LIFECYCLE_CREATE||operation==UMICOM_FAT16_LIFECYCLE_APPEND||
+       operation==UMICOM_FAT16_LIFECYCLE_WRITE) {
         lcRequest.input=lcInput;lcRequest.bytes=operation==UMICOM_FAT16_LIFECYCLE_CREATE?700U:900U;
+        if(operation==UMICOM_FAT16_LIFECYCLE_WRITE) lcRequest.offset=1020U;
     } else if(operation==UMICOM_FAT16_LIFECYCLE_TRUNCATE) lcRequest.size=513U;
     else memset(&lcRequest.time,0,sizeof(lcRequest.time));
     lcBaseReads=commitReads;lcBaseWrites=commitWrites;lcBaseFlushes=commitFlushes;lcBaseEvents=commitEventCount;
@@ -406,6 +428,7 @@ static void LCSuccess(const char *name)
 static void LCAllFailures(const char *fixture,const char *name,UmicomKernelFat16LifecycleOperation operation)
 {
     const char *profile="ordinary";
+    if(!strncmp(name,"write_overwrite.",16U)) {profile="write_overwrite";name+=16U;}
     if(!strncmp(name,"fragmented_boundary.",20U)) {profile="fragmented_boundary";name+=20U;}
     else if(!strncmp(name,"spread_chain.",13U)) {profile="spread_chain";name+=13U;}
     LCFixture(profile);CommitRebase();
@@ -780,8 +803,13 @@ static void LCConsole(const char *name)
 /* Reuse the existing device fault model while keeping the directory oracle
  * independent of both the regular-file oracle and production plan decisions. */
 #include "directory_cases.inc"
+#include "write_cases.inc"
 int __wrap_main(int argc,char **argv)
 {
+    if (argc == 3 && !strncmp(argv[1], "write.", 6U)) {
+        UmicomKernelFat16WriteCase(argv[2], argv[1] + 6U);
+        printf("fat16-lifecycle.transport.%s: ok\n", argv[1]); return 0;
+    }
     if (argc == 3 && !strncmp(argv[1], "directory.", 10U))
         return DirectoryCase(argv[2], argv[1] + 10U);
     CHECK(argc==3);const char *name=argv[1];UmicomKernelFat16LifecycleOperation operation=UMICOM_FAT16_LIFECYCLE_CREATE;

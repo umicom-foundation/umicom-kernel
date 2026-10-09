@@ -656,3 +656,51 @@ foreach(UMICOM_MOVE_PLAN_CASE IN ITEMS success read-failures null volume workspa
         "${CMAKE_CURRENT_SOURCE_DIR}/../disk_inspection/fixture.raw")
     set_tests_properties("fat16-lifecycle.plan.move.${UMICOM_MOVE_PLAN_CASE}" PROPERTIES TIMEOUT 180)
 endforeach()
+
+# Positional writes keep their own coverage list so the unchanged lifecycle
+# cases remain individually selectable and their historical names stay stable.
+set(UMICOM_WRITE_SUCCESS_CASES
+    overwrite beginning fragmented whole-existing eof-slack extension empty
+    maximum preserved-fields nested fat-crossing full-volume-overwrite
+    append-ignores-offset snapshot reentry)
+set(UMICOM_WRITE_PLAN_CASES all-read-failures
+    refusal.hole refusal.offset-overflow refusal.size-overflow
+    refusal.readonly refusal.invalid_time refusal.zero_append
+    refusal.too_many_bytes refusal.unused_size refusal.null_input
+    refusal.no_clusters refusal.missing refusal.directory
+    guard.input_request guard.path_input guard.output_workspace guard.request_alignment)
+foreach(UMICOM_CASE IN LISTS UMICOM_WRITE_SUCCESS_CASES)
+    list(APPEND UMICOM_WRITE_PLAN_CASES "success.${UMICOM_CASE}")
+endforeach()
+foreach(UMICOM_CASE IN LISTS UMICOM_WRITE_PLAN_CASES)
+    add_test(NAME "fat16-lifecycle.plan.write.${UMICOM_CASE}"
+        COMMAND umicom-fat16-lifecycle-plan-tests "write.${UMICOM_CASE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../disk_inspection/fixture.raw")
+    set_tests_properties("fat16-lifecycle.plan.write.${UMICOM_CASE}" PROPERTIES TIMEOUT 180)
+endforeach()
+
+set(UMICOM_WRITE_TRANSPORT_CASES
+    success.eager success.policy-reentry sequence
+    refusal.hole refusal.offset-overflow refusal.size-overflow
+    refusal.readonly refusal.no-space refusal.missing refusal.directory
+    refusal.calendar refusal.zero refusal.too-many refusal.unused-size refusal.null-input
+    fault.read_errors fault.read_mismatches fault.write_errors fault.flush_errors
+    fault.dropped_writes fault.altered_writes cuts.cached cuts.eager
+    fault.write_overwrite.read_errors fault.write_overwrite.read_mismatches
+    fault.write_overwrite.write_errors fault.write_overwrite.flush_errors
+    fault.write_overwrite.dropped_writes fault.write_overwrite.altered_writes
+    guard.input_request guard.path_input guard.result_owner guard.request_alignment
+    finish-guard.result_owner finish-guard.result_alignment
+    clock.accept_stage_deadline clock.accept_stage_rollback
+    clock.accept_finish_deadline clock.accept_finish_rollback
+    geometry.two-sector-initialisation geometry.maximum-initialisation
+    geometry.suffix-before-submit geometry.suffix-write-failure)
+foreach(UMICOM_CASE IN LISTS UMICOM_WRITE_SUCCESS_CASES)
+    list(APPEND UMICOM_WRITE_TRANSPORT_CASES "success.${UMICOM_CASE}")
+endforeach()
+foreach(UMICOM_CASE IN LISTS UMICOM_WRITE_TRANSPORT_CASES)
+    add_test(NAME "fat16-lifecycle.transport.write.${UMICOM_CASE}"
+        COMMAND umicom-fat16-lifecycle-tests "write.${UMICOM_CASE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../disk_inspection/fixture.raw")
+    set_tests_properties("fat16-lifecycle.transport.write.${UMICOM_CASE}" PROPERTIES TIMEOUT 180)
+endforeach()

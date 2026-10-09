@@ -1,0 +1,10 @@
+/* Umicom Kernel immutable persistent-file client carrier. These ELF bytes are
+ * input to the independent process loader, never Kernel-callable text.
+ * Author: Sammy Hegab, Umicom Foundation. Licence: MIT. */
+    .section .rodata.umicom_kernel_disk_file_executable, "a", @progbits
+    .balign 16
+    .global UmicomKernelDiskFileExecutableStart
+    .global UmicomKernelDiskFileExecutableEnd
+UmicomKernelDiskFileExecutableStart:
+    .incbin "@UMICOM_KERNEL_DISK_FILE_EXECUTABLE_FILE@"
+UmicomKernelDiskFileExecutableEnd:
