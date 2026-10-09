@@ -233,3 +233,8 @@ tests and fresh-boot validation. The older read-only mount and manually staged
 console paths remain available. Automatic persistent program routing, an
 installer and recovery remain separate roadmap work; this native Kernel code
 does not depend on Umicom Framework.
+
+Use [Testing the writable disk console](docs/WRITABLE_CONSOLE_TESTING.md) for
+the PowerShell runner that creates a test disk, drives the normal console and
+verifies a file after reboot. The guide also explains mount argument errors,
+RAM and disk command namespaces, and host-terminal paste.

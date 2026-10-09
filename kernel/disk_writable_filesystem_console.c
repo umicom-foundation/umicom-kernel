@@ -95,6 +95,52 @@ static UmicomBoolean UmicomKernelWritableConsoleTime(const char *text,
     *time = selected;
     return UMICOM_TRUE;
 }
+static UmicomKernelShellStatus UmicomKernelWritableConsoleArgumentError(
+    UmicomKernelConsoleShell *shell, const char *operation, const char *usage,
+    const char *field, const char *explanation)
+{
+    /* Malformed arity historically wins over BUSY and foreign-shell checks.
+     * Keep that return contract, but never call an output callback recursively
+     * or publish another shell's diagnostics through this retained owner.
+     * Reporting does not select an owner or consume mount admission. */
+    if (umicomKernelConsoleWritableBusy ||
+        (umicomKernelConsoleWritableShell && umicomKernelConsoleWritableShell != shell))
+        return UMICOM_SHELL_INVALID_ARGUMENT;
+    umicomKernelConsoleWritableBusy = UMICOM_TRUE;
+    UmicomKernelWritableConsoleText(shell, operation);
+    UmicomKernelWritableConsoleText(shell, "=invalid-argument field=");
+    UmicomKernelWritableConsoleText(shell, field);
+    UmicomKernelWritableConsoleText(shell, "\r\n");
+    UmicomKernelWritableConsoleText(shell, explanation);
+    UmicomKernelWritableConsoleText(shell, "\r\nusage: ");
+    UmicomKernelWritableConsoleText(shell, operation);
+    if (*usage) {
+        UmicomKernelWritableConsoleText(shell, " ");
+        UmicomKernelWritableConsoleText(shell, usage);
+    }
+    UmicomKernelWritableConsoleText(shell, "\r\n");
+    umicomKernelConsoleWritableBusy = UMICOM_FALSE;
+    return UMICOM_SHELL_INVALID_ARGUMENT;
+}
+static void UmicomKernelWritableConsoleMountHint(UmicomKernelConsoleShell *shell)
+{
+    /* A never-admitted mount has no media result to diagnose. A closing or
+     * retired owner instead needs cleanup/restart, not a second Open attempt. */
+    if (umicomKernelConsoleWritableMount.state == UMICOM_VFS_UNUSED &&
+        !umicomKernelConsoleWritableMount.admitted)
+        UmicomKernelWritableConsoleText(shell,
+            "No writable disk is mounted. Run disks, then mountdiskrw SLOT PARTITION YYYY-MM-DDTHH:MM:SS.\r\n"
+            "PARTITION is decimal 0..3; use 0 for the first partition.\r\n");
+    else if (umicomKernelConsoleWritableMount.state == UMICOM_VFS_CLOSING)
+        UmicomKernelWritableConsoleText(shell,
+            "Writable disk cleanup is incomplete. Retry unmountdiskrw, then restart for a new mount.\r\n");
+    else if (umicomKernelConsoleWritableMount.state == UMICOM_VFS_CLOSED)
+        UmicomKernelWritableConsoleText(shell,
+            "This writable mount lifetime is closed. Restart for a new mount.\r\n");
+    else if (umicomKernelConsoleWritableMount.state == UMICOM_VFS_OPEN)
+        UmicomKernelWritableConsoleText(shell,
+            "A writable disk is already mounted. Use diskrwinfo; restart for a different mount.\r\n");
+}
 static void UmicomKernelWritableConsoleReport(UmicomKernelConsoleShell *shell,
     const char *operation, UmicomKernelVfsStatus status)
 {
@@ -104,7 +150,13 @@ static void UmicomKernelWritableConsoleReport(UmicomKernelConsoleShell *shell,
     UmicomKernelWritableConsoleText(shell, " committed-operations=");
     UmicomKernelWritableConsoleNumber(shell, umicomKernelConsoleWritableMount.lifecycle.committedOperations);
     UmicomKernelWritableConsoleText(shell, "\r\n");
+    /* SUPERSEDED CONDITION - RETAINED FOR ENGINEERING REVIEW
+     * Zero-filled status fields used to print media=ok before any mount had
+     * been attempted. Only an admitted owner has transport evidence to show. */
+#if 0
     if (status != UMICOM_VFS_OK) {
+#endif
+    if (status != UMICOM_VFS_OK && umicomKernelConsoleWritableMount.admitted) {
         const UmicomKernelFat16LifecycleCommitter *const lifecycle = &umicomKernelConsoleWritableMount.lifecycle;
         UmicomKernelWritableConsoleText(shell, "diskrw.media=");
         UmicomKernelWritableConsoleText(shell, UmicomKernelDiskStatusName(lifecycle->commit.updater.lastDiskStatus));
@@ -113,6 +165,9 @@ static void UmicomKernelWritableConsoleReport(UmicomKernelConsoleShell *shell,
         UmicomKernelWritableConsoleText(shell, " cleanup=");
         UmicomKernelWritableConsoleText(shell, UmicomKernelBlockStatusName(lifecycle->commit.updater.lastCleanupStatus));
         UmicomKernelWritableConsoleText(shell, "\r\n");
+        if (umicomKernelConsoleWritableMount.provider.mediaFailed)
+            UmicomKernelWritableConsoleText(shell,
+                "Writable disk I/O is unavailable after a media failure. Use unmountdiskrw for cleanup; restart before mounting again.\r\n");
     }
 }
 static UmicomKernelVfsStatus UmicomKernelWritableConsoleDescriptorClose(void)
@@ -140,7 +195,14 @@ static UmicomKernelVfsStatus UmicomKernelWritableConsoleClose(void)
 UmicomKernelVfsStatus UmicomKernelDiskWritableFilesystemConsoleClose(UmicomKernelConsoleShell *shell)
 {
     if (!shell) return UMICOM_VFS_INVALID_ARGUMENT;
+    /* SUPERSEDED GUARD - RETAINED FOR ENGINEERING REVIEW
+     * Argument diagnostics now invoke output before mount ownership exists.
+     * Their callbacks must observe BUSY without acquiring or closing an owner. */
+#if 0
     if (!umicomKernelConsoleWritableShell) return UMICOM_VFS_OK;
+#endif
+    if (!umicomKernelConsoleWritableShell)
+        return umicomKernelConsoleWritableBusy ? UMICOM_VFS_BUSY : UMICOM_VFS_OK;
     if (umicomKernelConsoleWritableShell != shell) return UMICOM_VFS_ACCESS_DENIED;
     if (umicomKernelConsoleWritableBusy) return UMICOM_VFS_BUSY;
     umicomKernelConsoleWritableBusy = UMICOM_TRUE;
@@ -253,6 +315,16 @@ UmicomKernelShellStatus UmicomKernelDiskWritableFilesystemCommand(UmicomKernelCo
     *handled = UMICOM_TRUE;
     const UmicomSize expected = mount || write ? 4U : append || resize ? 3U :
         unmount || info ? 1U : 2U;
+    const char *const usage = mount ? "SLOT PARTITION YYYY-MM-DDTHH:MM:SS" :
+        write ? "PATH OFFSET \"TEXT\"" : append ? "PATH \"TEXT\"" :
+        resize ? "PATH SIZE" : time ? "YYYY-MM-DDTHH:MM:SS" :
+        unmount || info ? "" : "PATH";
+    /* SUPERSEDED VALIDATION - RETAINED FOR ENGINEERING REVIEW
+     * These checks correctly refused invalid requests before admission, but
+     * returned silently because the console dispatcher had already handled
+     * the command. The active checks preserve status and admission ordering,
+     * while identifying the field and showing that command's exact usage. */
+#if 0
     if (command->count != expected) return UMICOM_SHELL_INVALID_ARGUMENT;
     if (umicomKernelConsoleWritableBusy) return UMICOM_SHELL_BUSY;
     if (umicomKernelConsoleWritableShell && umicomKernelConsoleWritableShell != shell)
@@ -268,6 +340,36 @@ UmicomKernelShellStatus UmicomKernelDiskWritableFilesystemCommand(UmicomKernelCo
     if (time && !UmicomKernelWritableConsoleTime(path, &calendar)) return UMICOM_SHELL_INVALID_ARGUMENT;
     if ((write || resize) && (!UmicomKernelShellUnsigned(command->bytes + command->offsets[2], &offset) ||
         offset > (UmicomU64)(~(UmicomSize)0U))) return UMICOM_SHELL_INVALID_ARGUMENT;
+#endif
+    if (command->count != expected)
+        return UmicomKernelWritableConsoleArgumentError(shell, name, usage,
+            "arguments", write || append ?
+                "Incorrect number of arguments. Quote TEXT when it contains spaces." :
+                "Incorrect number of arguments.");
+    if (umicomKernelConsoleWritableBusy) return UMICOM_SHELL_BUSY;
+    if (umicomKernelConsoleWritableShell && umicomKernelConsoleWritableShell != shell)
+        return UMICOM_SHELL_BAD_STATE;
+    const char *const path = expected > 1U ? command->bytes + command->offsets[1] : "";
+    UmicomKernelFat16FileTime calendar = {0};
+    UmicomU64 slot = 0U, partition = 0U, offset = 0U;
+    if (mount) {
+        if (!UmicomKernelShellUnsigned(path, &slot) || slot >= UMICOM_BLOCK_SLOT_LIMIT)
+            return UmicomKernelWritableConsoleArgumentError(shell, name, usage, "slot",
+                "SLOT must be a decimal number from 0 to 7. Use the device slot reported by disks.");
+        if (!UmicomKernelShellUnsigned(command->bytes + command->offsets[2], &partition) ||
+            partition >= UMICOM_DISK_PRIMARY_PARTITIONS)
+            return UmicomKernelWritableConsoleArgumentError(shell, name, usage, "partition",
+                "PARTITION must be decimal 0..3; use 0 for the first partition.");
+    }
+    if ((mount || time) && !UmicomKernelWritableConsoleTime(
+        mount ? command->bytes + command->offsets[3] : path, &calendar))
+        return UmicomKernelWritableConsoleArgumentError(shell, name, usage, "calendar",
+            "Use a valid calendar in YYYY-MM-DDTHH:MM:SS form, with year 1980..2107 and time 00:00:00..23:59:59.");
+    if ((write || resize) && (!UmicomKernelShellUnsigned(command->bytes + command->offsets[2], &offset) ||
+        offset > (UmicomU64)(~(UmicomSize)0U)))
+        return UmicomKernelWritableConsoleArgumentError(shell, name, usage, write ? "offset" : "size",
+            write ? "OFFSET must be a non-negative decimal byte offset that fits the native address size." :
+                "SIZE must be a non-negative decimal byte count that fits the native address size.");
     umicomKernelConsoleWritableBusy = UMICOM_TRUE;
     UmicomKernelVfsStatus status = UMICOM_VFS_OK;
     if (mount) {
@@ -294,9 +396,23 @@ UmicomKernelShellStatus UmicomKernelDiskWritableFilesystemCommand(UmicomKernelCo
         }
         if (status == UMICOM_VFS_OK)
             UmicomKernelWritableConsoleText(shell, "Writable disk mounted. Each successful mutation is flushed and verified.\r\n");
+        /* SUPERSEDED HINT - RETAINED FOR ENGINEERING REVIEW
+         * Distinguish never-admitted, already-open and pending-cleanup owners. */
+#if 0
         else if (umicomKernelConsoleWritableMount.state == UMICOM_VFS_CLOSED)
             UmicomKernelWritableConsoleText(shell, "This writable mount lifetime is closed. Restart for a new mount.\r\n");
+#endif
+        else UmicomKernelWritableConsoleMountHint(shell);
+    /* SUPERSEDED BRANCH - RETAINED FOR ENGINEERING REVIEW
+     * A retained teardown obligation now reports the specific retry command. */
+#if 0
     } else if (unmount) status = UmicomKernelWritableConsoleClose();
+#endif
+    } else if (unmount) {
+        status = UmicomKernelWritableConsoleClose();
+        if (status != UMICOM_VFS_OK && umicomKernelConsoleWritableMount.state == UMICOM_VFS_CLOSING)
+            UmicomKernelWritableConsoleMountHint(shell);
+    }
     else if (info) {
         UmicomKernelWritableConsoleText(shell, "diskrw.state=");
         UmicomKernelWritableConsoleText(shell, umicomKernelConsoleWritableMount.state == UMICOM_VFS_OPEN ? "mounted" :
@@ -307,7 +423,16 @@ UmicomKernelShellStatus UmicomKernelDiskWritableFilesystemCommand(UmicomKernelCo
         UmicomKernelWritableConsoleText(shell, " last-commit-accepted=");
         UmicomKernelWritableConsoleNumber(shell, umicomKernelConsoleWritableMount.lifecycle.lastResult.commit.commitAccepted);
         UmicomKernelWritableConsoleText(shell, "\r\n");
+    /* SUPERSEDED BRANCH - RETAINED FOR ENGINEERING REVIEW
+     * BAD_STATE remains the public result; the owner state now explains how
+     * to recover before the unchanged status report is printed. */
+#if 0
     } else if (umicomKernelConsoleWritableMount.state != UMICOM_VFS_OPEN) status = UMICOM_VFS_BAD_STATE;
+#endif
+    } else if (umicomKernelConsoleWritableMount.state != UMICOM_VFS_OPEN) {
+        status = UMICOM_VFS_BAD_STATE;
+        UmicomKernelWritableConsoleMountHint(shell);
+    }
     else if (time) status = UmicomKernelDiskWritableMountSetTime(&umicomKernelConsoleWritableMount, &calendar);
     else if (list || read) status = UmicomKernelWritableConsoleRead(shell, path, list);
     else if (create || makeDirectory) status = UmicomKernelVfsCreate(&umicomKernelConsoleWritableClient,

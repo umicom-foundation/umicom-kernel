@@ -174,6 +174,12 @@ automatic executable loading or routing from a persistent disk is future work.
 
 ## Qualification
 
+For a PowerShell test that drives the normal console, waits for each command
+and verifies the same file after reboot, see
+[Testing the writable disk console](WRITABLE_CONSOLE_TESTING.md).
+It discovers the device slot and uses a fresh disposable fixture copy, so the
+interactive test no longer depends on pasting into the serial prompt.
+
 `tests/disk_writable_filesystem` links the production provider, mount, VFS,
 lifecycle implementation, VirtIO driver and allocator to the established
 independent visible/durable media model. It checks byte preservation, descriptor

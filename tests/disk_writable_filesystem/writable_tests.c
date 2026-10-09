@@ -23,6 +23,7 @@ static UmicomU8 umicomKernelTestWritableBefore[4097];
 static UmicomKernelConsoleShell umicomKernelTestWritableShell;
 static UmicomBoolean umicomKernelTestWritableReentry;
 static UmicomU32 umicomKernelTestWritableReentries;
+static UmicomBoolean umicomKernelTestWritableArgumentReentry;
 
 static const UmicomKernelVfsOperations *UmicomKernelWritableTestOperations(void)
 {
@@ -460,14 +461,223 @@ static void UmicomKernelWritableTestOutput(void *context, const char *text, Umic
 {
     Output(context, text, bytes);
     if (umicomKernelTestWritableReentry) {
+        const UmicomSize before = transcriptBytes;
         CHECK(UmicomKernelWritableTestCommand("diskrwinfo") == UMICOM_SHELL_BUSY);
         CHECK(UmicomKernelDiskWritableFilesystemConsoleClose(&umicomKernelTestWritableShell) == UMICOM_VFS_BUSY);
+        if (umicomKernelTestWritableArgumentReentry) {
+            /* Preserve the original malformed-arity result while proving that
+             * the new diagnostics cannot recurse through their own output. */
+            CHECK(UmicomKernelWritableTestCommand("mountdiskrw") == UMICOM_SHELL_INVALID_ARGUMENT);
+            CHECK(UmicomKernelWritableTestCommand("mountdiskrw 7 @ 2044-02-29T23:58:56") == UMICOM_SHELL_BUSY);
+        }
+        CHECK(transcriptBytes == before);
         ++umicomKernelTestWritableReentries;
     }
+}
+static void UmicomKernelWritableTestArgumentDiagnostic(const char *text,
+    const char *field, const char *usage, const char *explanation)
+{
+    /* Check the whole transport model and lease domain, not just write counts:
+     * a malformed command must not probe, reset, allocate or consume admission. */
+    const BlockModel modelBefore = model;
+    const UmicomKernelBlockDomain domainBefore = domain;
+    const UmicomU32 events = commitEventCount;
+    const UmicomSize allocated = Allocated();
+    CommitClearTranscript();
+    CHECK(UmicomKernelWritableTestCommand(text) == UMICOM_SHELL_INVALID_ARGUMENT);
+    CHECK(strstr(transcript, "=invalid-argument field="));
+    CHECK(strstr(transcript, field) && strstr(transcript, usage) && strstr(transcript, explanation));
+    CHECK(!strstr(transcript, "diskrw.media=") && !strstr(transcript, "diskrw.transport="));
+    CommitEqual(&model, &modelBefore, sizeof(model));
+    CommitEqual(&domain, &domainBefore, sizeof(domain));
+    CHECK(commitEventCount == events && Allocated() == allocated);
+}
+static void UmicomKernelWritableTestUnusedConsole(void)
+{
+    CommitClearTranscript();
+    CHECK(UmicomKernelWritableTestCommand("diskrwinfo") == UMICOM_SHELL_OK);
+    CHECK(strstr(transcript, "diskrw.state=unused clients=0 last-commit-accepted=0\r\n"));
+    CHECK(strstr(transcript, "diskrwinfo=ok committed-operations=0\r\n"));
+    CHECK(!commitEventCount && !Allocated());
+}
+static void UmicomKernelWritableTestConsoleNumeric(void)
+{
+    const char *const numbers[] = {"-1", "+1", "0x0", "@", "1x", "18446744073709551616", "\"\""};
+    char command[128];
+    for (UmicomSize i = 0U; i < sizeof(numbers) / sizeof(numbers[0]); ++i) {
+        CHECK(snprintf(command, sizeof(command), "mountdiskrw %s 0 2044-02-29T23:58:56", numbers[i]) > 0);
+        UmicomKernelWritableTestArgumentDiagnostic(command, "field=slot", "usage: mountdiskrw SLOT PARTITION",
+            "SLOT must be a decimal number from 0 to 7.");
+        CHECK(snprintf(command, sizeof(command), "mountdiskrw 0 %s 2044-02-29T23:58:56", numbers[i]) > 0);
+        UmicomKernelWritableTestArgumentDiagnostic(command, "field=partition", "usage: mountdiskrw SLOT PARTITION",
+            "PARTITION must be decimal 0..3; use 0 for the first partition.");
+        CHECK(snprintf(command, sizeof(command), "diskwrite /A.TXT %s x", numbers[i]) > 0);
+        UmicomKernelWritableTestArgumentDiagnostic(command, "field=offset", "usage: diskwrite PATH OFFSET \"TEXT\"",
+            "OFFSET must be a non-negative decimal byte offset");
+        CHECK(snprintf(command, sizeof(command), "diskresize /A.TXT %s", numbers[i]) > 0);
+        UmicomKernelWritableTestArgumentDiagnostic(command, "field=size", "usage: diskresize PATH SIZE",
+            "SIZE must be a non-negative decimal byte count");
+    }
+    UmicomKernelWritableTestArgumentDiagnostic("mountdiskrw 8 0 2044-02-29T23:58:56",
+        "field=slot", "usage: mountdiskrw SLOT PARTITION", "0 to 7");
+    UmicomKernelWritableTestArgumentDiagnostic("mountdiskrw 0 4 2044-02-29T23:58:56",
+        "field=partition", "usage: mountdiskrw SLOT PARTITION", "0..3");
+}
+static void UmicomKernelWritableTestConsoleCalendar(void)
+{
+    const char *const calendars[] = {"2044-02-29", "2044-02-29t23:58:56", "2044/02/29T23:58:56",
+        "2044-02-29T23:58:56Z", "2044-02-29T23:58:5X", "1979-12-31T00:00:00", "2108-01-01T00:00:00",
+        "2100-02-29T00:00:00", "2044-00-01T00:00:00", "2044-13-01T00:00:00", "2044-02-00T00:00:00",
+        "2044-02-30T00:00:00", "2044-04-31T00:00:00", "2044-02-29T24:00:00", "2044-02-29T00:60:00",
+        "2044-02-29T00:00:60", "\"\""};
+    char command[128];
+    for (UmicomSize i = 0U; i < sizeof(calendars) / sizeof(calendars[0]); ++i) {
+        CHECK(snprintf(command, sizeof(command), "mountdiskrw 0 0 %s", calendars[i]) > 0);
+        UmicomKernelWritableTestArgumentDiagnostic(command, "field=calendar",
+            "usage: mountdiskrw SLOT PARTITION YYYY-MM-DDTHH:MM:SS", "year 1980..2107");
+        CHECK(snprintf(command, sizeof(command), "diskrwtime %s", calendars[i]) > 0);
+        UmicomKernelWritableTestArgumentDiagnostic(command, "field=calendar",
+            "usage: diskrwtime YYYY-MM-DDTHH:MM:SS", "time 00:00:00..23:59:59");
+    }
+}
+static UmicomBoolean UmicomKernelWritableTestConsoleDiagnostics(const char *name)
+{
+    if (!strcmp(name, "partition-typo") || !strcmp(name, "argument-reentry")) {
+        umicomKernelTestWritableReentry = !strcmp(name, "argument-reentry") ? UMICOM_TRUE : UMICOM_FALSE;
+        umicomKernelTestWritableArgumentReentry = umicomKernelTestWritableReentry;
+        /* The user supplied slot 7. Our model's real device is slot 0; the
+         * invalid partition must fail before either slot is consulted. */
+        UmicomKernelWritableTestArgumentDiagnostic("mountdiskrw 7 @ 2044-02-29T23:58:56",
+            "mountdiskrw=invalid-argument field=partition\r\n",
+            "usage: mountdiskrw SLOT PARTITION YYYY-MM-DDTHH:MM:SS\r\n",
+            "PARTITION must be decimal 0..3; use 0 for the first partition.\r\n");
+    } else if (!strcmp(name, "arity")) {
+        static const struct { const char *missing; const char *extra; const char *usage; } cases[] = {
+            {"mountdiskrw 0 0", NULL, "usage: mountdiskrw SLOT PARTITION YYYY-MM-DDTHH:MM:SS"},
+            {NULL, "unmountdiskrw extra", "usage: unmountdiskrw\r\n"},
+            {NULL, "diskrwinfo extra", "usage: diskrwinfo\r\n"},
+            {"diskrwtime", "diskrwtime 2044-02-29T23:58:56 extra", "usage: diskrwtime YYYY-MM-DDTHH:MM:SS"},
+            {"diskrwls", "diskrwls / extra", "usage: diskrwls PATH"},
+            {"diskrwcat", "diskrwcat /A.TXT extra", "usage: diskrwcat PATH"},
+            {"diskcreate", "diskcreate /A.TXT extra", "usage: diskcreate PATH"},
+            {"diskmkdir", "diskmkdir /WORK extra", "usage: diskmkdir PATH"},
+            {"diskdelete", "diskdelete /A.TXT extra", "usage: diskdelete PATH"},
+            {"diskrmdir", "diskrmdir /WORK extra", "usage: diskrmdir PATH"},
+            {"diskwrite /A.TXT 0", NULL, "usage: diskwrite PATH OFFSET \"TEXT\""},
+            {"diskappend /A.TXT", "diskappend /A.TXT unquoted words", "usage: diskappend PATH \"TEXT\""},
+            {"diskresize /A.TXT", "diskresize /A.TXT 0 extra", "usage: diskresize PATH SIZE"}
+        };
+        for (UmicomSize i = 0U; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+            if (cases[i].missing) UmicomKernelWritableTestArgumentDiagnostic(cases[i].missing,
+                "field=arguments", cases[i].usage, "Incorrect number of arguments.");
+            if (cases[i].extra) UmicomKernelWritableTestArgumentDiagnostic(cases[i].extra,
+                "field=arguments", cases[i].usage, "Incorrect number of arguments.");
+        }
+        /* Five tokens exceed the shared parser's four-token command storage.
+         * The outer console already reports a syntax error before dispatch;
+         * retain that bound rather than letting this adapter bypass it. */
+        const char *const overflow[] = {"mountdiskrw 0 0 2044-02-29T23:58:56 extra",
+            "diskwrite /A.TXT 0 unquoted words"};
+        for (UmicomSize i = 0U; i < sizeof(overflow) / sizeof(overflow[0]); ++i) {
+            UmicomKernelShellCommand command, before;
+            memset(&command, 0xa5, sizeof(command)); before = command;
+            CHECK(UmicomKernelShellParse(overflow[i], (UmicomSize)strlen(overflow[i]), &command) == UMICOM_SHELL_SYNTAX);
+            CommitEqual(&command, &before, sizeof(command));
+        }
+    } else if (!strcmp(name, "numeric")) UmicomKernelWritableTestConsoleNumeric();
+    else if (!strcmp(name, "calendar")) UmicomKernelWritableTestConsoleCalendar();
+    else if (!strcmp(name, "unmounted")) {
+        const char *const commands[] = {"diskrwtime 2044-02-29T23:58:56", "diskrwls /", "diskrwcat /A.TXT",
+            "diskcreate /A.TXT", "diskmkdir /WORK", "diskdelete /A.TXT", "diskrmdir /WORK",
+            "diskwrite /A.TXT 0 x", "diskappend /A.TXT x", "diskresize /A.TXT 0"};
+        const BlockModel modelBefore = model;
+        for (UmicomSize i = 0U; i < sizeof(commands) / sizeof(commands[0]); ++i) {
+            CommitClearTranscript();
+            CHECK(UmicomKernelWritableTestCommand(commands[i]) == UMICOM_SHELL_IO_ERROR);
+            CHECK(strstr(transcript, "=bad-state committed-operations=0\r\n"));
+            CHECK(strstr(transcript, "No writable disk is mounted. Run disks, then mountdiskrw"));
+            CHECK(strstr(transcript, "PARTITION is decimal 0..3; use 0 for the first partition."));
+            CHECK(!strstr(transcript, "diskrw.media=") && !strstr(transcript, "media failure"));
+            CommitEqual(&model, &modelBefore, sizeof(model));
+            CHECK(!commitEventCount && !Allocated());
+        }
+        CHECK(UmicomKernelWritableTestCommand("unmountdiskrw") == UMICOM_SHELL_OK);
+    } else if (!strcmp(name, "mounted-arguments")) {
+        CHECK(UmicomKernelWritableTestCommand("mountdiskrw 0 0 2044-02-29T23:58:56") == UMICOM_SHELL_OK);
+        UmicomKernelWritableTestConsoleNumeric();
+        UmicomKernelWritableTestConsoleCalendar();
+        CHECK(UmicomKernelWritableTestCommand("diskwrite /FRAG.BIN 0 x") == UMICOM_SHELL_OK);
+        CHECK(UmicomKernelWritableTestCommand("unmountdiskrw") == UMICOM_SHELL_OK);
+        CHECK(!Allocated()); return UMICOM_TRUE;
+    } else if (!strcmp(name, "owner-diagnostics")) {
+        CHECK(UmicomKernelWritableTestCommand("mountdiskrw 0 0 2044-02-29T23:58:56") == UMICOM_SHELL_OK);
+        UmicomKernelConsoleShell other = {0}; other.output = UmicomKernelWritableTestOutput;
+        const char *const requests[] = {"mountdiskrw", "mountdiskrw 7 @ 2044-02-29T23:58:56", "diskrwinfo"};
+        const BlockModel modelBefore = model;
+        for (UmicomSize i = 0U; i < sizeof(requests) / sizeof(requests[0]); ++i) {
+            UmicomKernelShellCommand command; UmicomBoolean handled = UMICOM_FALSE;
+            CHECK(UmicomKernelShellParse(requests[i], (UmicomSize)strlen(requests[i]), &command) == UMICOM_SHELL_OK);
+            CommitClearTranscript();
+            CHECK(UmicomKernelDiskWritableFilesystemCommand(&other, &command, &handled) ==
+                (i ? UMICOM_SHELL_BAD_STATE : UMICOM_SHELL_INVALID_ARGUMENT));
+            CHECK(handled && !transcriptBytes);
+        }
+        CHECK(UmicomKernelDiskWritableFilesystemConsoleClose(&other) == UMICOM_VFS_ACCESS_DENIED);
+        CommitEqual(&model, &modelBefore, sizeof(model));
+        CHECK(UmicomKernelWritableTestCommand("diskrwinfo") == UMICOM_SHELL_OK);
+        CHECK(UmicomKernelWritableTestCommand("unmountdiskrw") == UMICOM_SHELL_OK);
+        CHECK(!Allocated()); return UMICOM_TRUE;
+    } else if (!strcmp(name, "lifetime-hints")) {
+        CHECK(UmicomKernelWritableTestCommand("mountdiskrw 0 0 2044-02-29T23:58:56") == UMICOM_SHELL_OK);
+        CommitClearTranscript();
+        CHECK(UmicomKernelWritableTestCommand("mountdiskrw 0 0 2044-02-29T23:58:56") == UMICOM_SHELL_IO_ERROR);
+        CHECK(strstr(transcript, "A writable disk is already mounted."));
+        model.stuckReset = UMICOM_TRUE; model.step = 1000000U;
+        CommitClearTranscript();
+        CHECK(UmicomKernelWritableTestCommand("unmountdiskrw") == UMICOM_SHELL_IO_ERROR);
+        CHECK(strstr(transcript, "Writable disk cleanup is incomplete. Retry unmountdiskrw"));
+        CHECK(Allocated());
+        CommitClearTranscript();
+        CHECK(UmicomKernelWritableTestCommand("diskmkdir /WORK") == UMICOM_SHELL_IO_ERROR);
+        CHECK(strstr(transcript, "Writable disk cleanup is incomplete. Retry unmountdiskrw"));
+        CHECK(!strstr(transcript, "No writable disk is mounted."));
+        model.stuckReset = UMICOM_FALSE; model.step = 1U;
+        CHECK(UmicomKernelWritableTestCommand("unmountdiskrw") == UMICOM_SHELL_OK);
+        CommitClearTranscript();
+        CHECK(UmicomKernelWritableTestCommand("diskmkdir /WORK") == UMICOM_SHELL_IO_ERROR);
+        CHECK(strstr(transcript, "This writable mount lifetime is closed. Restart for a new mount."));
+        CHECK(UmicomKernelWritableTestCommand("mountdiskrw 0 0 2044-02-29T23:58:56") == UMICOM_SHELL_IO_ERROR);
+        CHECK(!Allocated() && !commitWrites && !commitFlushes); return UMICOM_TRUE;
+    } else if (!strcmp(name, "failed-admission-hint")) {
+        model.featuresLow |= UMICOM_VIRTIO_READ_ONLY;
+        CommitClearTranscript();
+        CHECK(UmicomKernelWritableTestCommand("mountdiskrw 0 0 2044-02-29T23:58:56") == UMICOM_SHELL_IO_ERROR);
+        CHECK(strstr(transcript, "mountdiskrw=read-only") && strstr(transcript, "diskrw.media="));
+        CHECK(strstr(transcript, "This writable mount lifetime is closed. Restart for a new mount."));
+        CHECK(!strstr(transcript, "No writable disk is mounted."));
+        model.featuresLow &= ~UMICOM_VIRTIO_READ_ONLY;
+        CHECK(UmicomKernelWritableTestCommand("mountdiskrw 0 0 2044-02-29T23:58:56") == UMICOM_SHELL_IO_ERROR);
+        CHECK(UmicomKernelWritableTestCommand("unmountdiskrw") == UMICOM_SHELL_OK);
+        CHECK(!Allocated() && !commitWrites && !commitFlushes); return UMICOM_TRUE;
+    } else return UMICOM_FALSE;
+    UmicomKernelWritableTestUnusedConsole();
+    CommitUnchanged();
+    /* Invalid input and pre-mount queries leave the one admitted attempt
+     * available. A corrected command then performs real filesystem work. */
+    CHECK(UmicomKernelWritableTestCommand("mountdiskrw 0 0 2044-02-29T23:58:56") == UMICOM_SHELL_OK);
+    CHECK(UmicomKernelWritableTestCommand("diskmkdir /WORK") == UMICOM_SHELL_OK);
+    CHECK(UmicomKernelWritableTestCommand("diskcreate /WORK/NOTE.TXT") == UMICOM_SHELL_OK);
+    CHECK(UmicomKernelWritableTestCommand("diskwrite /WORK/NOTE.TXT 0 hello") == UMICOM_SHELL_OK);
+    CHECK(UmicomKernelWritableTestCommand("diskrwcat /WORK/NOTE.TXT") == UMICOM_SHELL_OK);
+    CHECK(strstr(transcript, "hello\r\n") && strstr(transcript, "diskwrite=ok committed-operations=3"));
+    CHECK(UmicomKernelWritableTestCommand("unmountdiskrw") == UMICOM_SHELL_OK);
+    if (umicomKernelTestWritableReentry) CHECK(umicomKernelTestWritableReentries);
+    CHECK(!Allocated()); return UMICOM_TRUE;
 }
 static void UmicomKernelWritableTestConsole(const char *name)
 {
     umicomKernelTestWritableShell.output = UmicomKernelWritableTestOutput;
+    if (UmicomKernelWritableTestConsoleDiagnostics(name)) return;
     if (!strcmp(name, "arguments")) {
         const char *const invalid[] = {"mountdiskrw", "mountdiskrw 0 0 2100-02-29T00:00:00",
             "mountdiskrw -1 0 2044-02-29T23:58:57", "diskwrite /A.TXT -1 x", "diskresize /A.TXT -1",
@@ -480,8 +690,15 @@ static void UmicomKernelWritableTestConsole(const char *name)
     CHECK(UmicomKernelWritableTestCommand("mountdiskrw 0 0 2044-02-29T23:58:57") == UMICOM_SHELL_OK);
     if (!strcmp(name, "failure-close")) {
         commitFailWrite = 3U;
+        CommitClearTranscript();
         CHECK(UmicomKernelWritableTestCommand("diskwrite /FRAG.BIN 0 x") == UMICOM_SHELL_IO_ERROR);
+        CHECK(strstr(transcript, "diskrw.media=") && strstr(transcript, "block=") && strstr(transcript, "cleanup="));
+        CHECK(strstr(transcript, "Writable disk I/O is unavailable after a media failure."));
+        CHECK(!strstr(transcript, "No writable disk is mounted.") && !strstr(transcript, "usage:"));
+        CommitClearTranscript();
         CHECK(UmicomKernelWritableTestCommand("diskwrite /FRAG.BIN 0 x") == UMICOM_SHELL_IO_ERROR);
+        CHECK(strstr(transcript, "Writable disk I/O is unavailable after a media failure."));
+        CHECK(!strstr(transcript, "No writable disk is mounted."));
     } else if (!strcmp(name, "binary")) {
         CommitClearTranscript();
         CHECK(UmicomKernelWritableTestCommand("diskrwcat /FRAG.BIN") == UMICOM_SHELL_OK);

@@ -51,7 +51,10 @@ set(UMICOM_KERNEL_DISK_WRITABLE_CASES
     failure.read failure.timeout failure.write failure.flush failure.drop failure.cut-cached failure.cut-eager
     guards.provider-output guards.domain-output guards.dma-output guards.overlap guards.alignment
     guards.busy guards.drift guards.updater-state guards.slot-state guards.time
-    console.sequence console.arguments console.failure-close console.reentry console.binary)
+    console.sequence console.arguments console.failure-close console.reentry console.binary
+    console.partition-typo console.arity console.numeric console.calendar console.unmounted
+    console.argument-reentry console.mounted-arguments console.owner-diagnostics
+    console.lifetime-hints console.failed-admission-hint)
 foreach(UMICOM_KERNEL_DISK_WRITABLE_CASE IN LISTS UMICOM_KERNEL_DISK_WRITABLE_CASES)
     add_test(NAME "disk-writable-filesystem.${UMICOM_KERNEL_DISK_WRITABLE_CASE}"
         COMMAND umicom-disk-writable-filesystem-tests "${UMICOM_KERNEL_DISK_WRITABLE_CASE}"

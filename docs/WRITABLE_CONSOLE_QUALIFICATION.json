@@ -1,0 +1,382 @@
+{
+  "schema": "umicom.kernel.writable-console.qualification.v1",
+  "date_utc": "2026-10-09T11:56:46.075366+00:00",
+  "baseline": {
+    "repository": "https://github.com/umicom-foundation/umicom-kernel",
+    "branch": "main",
+    "commit": "ff8195fa4b6529684b08dc0b473d140e2abbc13f",
+    "subject": "feat(kernel): add writable FAT16 VFS and native process file access"
+  },
+  "scope": "Writable-console diagnostics and automatic normal-console persistence checks.",
+  "delivery": {
+    "source_files": 528,
+    "modified_existing_files": [
+      "README.md",
+      "docs/WRITABLE_FAT16_VFS.md",
+      "kernel/block_console.c",
+      "kernel/disk_writable_filesystem_console.c",
+      "tests/disk_writable_filesystem/CMakeLists.txt",
+      "tests/disk_writable_filesystem/writable_tests.c"
+    ],
+    "added_files": [
+      "docs/WRITABLE_CONSOLE_QUALIFICATION.json",
+      "docs/WRITABLE_CONSOLE_REVIEW.html",
+      "docs/WRITABLE_CONSOLE_TESTING.md",
+      "scripts/Test-UmicomKernelWritableConsole.ps1"
+    ],
+    "archive_layout": "Repository contents at archive root; .git and build outputs excluded."
+  },
+  "user_manual_windows_test": {
+    "passed": true,
+    "evidence": "User-provided Pasted text.txt, read in this session.",
+    "evidence_sha256": "b001c6f61b9813b0ddaf8df99ede300c990f00f4f2fdfd8ec8f036590f4af30b",
+    "writer_accepted_operations": 4,
+    "readback_accepted_operations": 0,
+    "content": "hello world",
+    "file": "/WORK/NOTE.TXT",
+    "file_bytes": 11,
+    "fresh_qemu_process_readback": true,
+    "clean_shutdown_markers": 2,
+    "interpretation": "The readback count is per mount session. The transcript independently demonstrates persistence on the existing Windows setup."
+  },
+  "native_console_tests": {
+    "passed": 64,
+    "failed": 0,
+    "new_cases": 10,
+    "elapsed_seconds": 4.0,
+    "compiler": "Clang 18.1.3",
+    "sanitisers": [
+      "AddressSanitizer",
+      "UndefinedBehaviorSanitizer"
+    ],
+    "leak_detection": false,
+    "log": "build/native-console-diagnostics/qualification-clang.log",
+    "tail": [
+      "      Start 61: disk-writable-filesystem.console.mounted-arguments",
+      "61/64 Test #61: disk-writable-filesystem.console.mounted-arguments .......   Passed    0.05 sec",
+      "      Start 62: disk-writable-filesystem.console.owner-diagnostics",
+      "62/64 Test #62: disk-writable-filesystem.console.owner-diagnostics .......   Passed    0.06 sec",
+      "      Start 63: disk-writable-filesystem.console.lifetime-hints",
+      "63/64 Test #63: disk-writable-filesystem.console.lifetime-hints ..........   Passed    0.04 sec",
+      "      Start 64: disk-writable-filesystem.console.failed-admission-hint",
+      "64/64 Test #64: disk-writable-filesystem.console.failed-admission-hint ...   Passed    0.04 sec",
+      "",
+      "100% tests passed out of 64",
+      "",
+      "Total Test time (real) =   4.00 sec"
+    ]
+  },
+  "final_build": {
+    "command": [
+      "cmake",
+      "--build",
+      "--preset",
+      "riscv64-clang-debug",
+      "--parallel",
+      "2"
+    ],
+    "exit_code": 0,
+    "duration_seconds": 22.449
+  },
+  "focused_preset_regression": {
+    "command": [
+      "ctest",
+      "--preset",
+      "riscv64-clang-debug",
+      "--output-on-failure",
+      "--no-tests=error",
+      "--parallel",
+      "2",
+      "-R",
+      "kernel.riscv64.(console_shell|standard_streams|disk_writable_filesystem|block_without_device|read_only_block)"
+    ],
+    "exit_code": 0,
+    "duration_seconds": 11.557,
+    "passed": 10,
+    "failed": 0,
+    "includes_unchanged_build_fixture": true,
+    "test_log": "build/console-feedback-validation/tests-final.log",
+    "tail": [
+      "Test project /workspace/scratch/731ae0373859/umicom-kernel-console/build/riscv64-clang-debug",
+      "      Start   8: kernel.build.current",
+      " 1/10 Test   #8: kernel.build.current ................................   Passed    0.10 sec",
+      "      Start  23: kernel.riscv64.console_shell",
+      "      Start  24: kernel.riscv64.standard_streams",
+      " 2/10 Test  #24: kernel.riscv64.standard_streams .....................   Passed    4.54 sec",
+      "      Start  29: kernel.riscv64.block_without_device",
+      " 3/10 Test  #23: kernel.riscv64.console_shell ........................   Passed    4.65 sec",
+      "      Start  30: kernel.riscv64.read_only_block",
+      " 4/10 Test  #29: kernel.riscv64.block_without_device .................   Passed    4.63 sec",
+      "      Start 190: kernel.riscv64.disk_writable_filesystem_prepare",
+      " 5/10 Test #190: kernel.riscv64.disk_writable_filesystem_prepare .....   Passed    0.13 sec",
+      "      Start 191: kernel.riscv64.disk_writable_filesystem_read_only",
+      " 6/10 Test #191: kernel.riscv64.disk_writable_filesystem_read_only ...   Passed    0.19 sec",
+      "      Start 192: kernel.riscv64.disk_writable_filesystem_writer",
+      " 7/10 Test  #30: kernel.riscv64.read_only_block ......................   Passed    5.06 sec",
+      " 8/10 Test #192: kernel.riscv64.disk_writable_filesystem_writer ......   Passed    0.75 sec",
+      "      Start 193: kernel.riscv64.disk_writable_filesystem_readback",
+      " 9/10 Test #193: kernel.riscv64.disk_writable_filesystem_readback ....   Passed    1.17 sec",
+      "      Start 194: kernel.riscv64.disk_writable_filesystem_cleanup",
+      "10/10 Test #194: kernel.riscv64.disk_writable_filesystem_cleanup .....   Passed    0.01 sec",
+      "",
+      "100% tests passed out of 10",
+      "",
+      "Total Test time (real) =  11.53 sec"
+    ]
+  },
+  "earlier_build_fixture_attempt": {
+    "record": {
+      "command": [
+        "ctest",
+        "--preset",
+        "riscv64-clang-debug",
+        "--output-on-failure",
+        "--no-tests=error",
+        "--parallel",
+        "2",
+        "-R",
+        "kernel.riscv64.(console_shell|standard_streams|disk_writable_filesystem|block_without_device|read_only_block)"
+      ],
+      "exit_code": 8,
+      "seconds": 120.073,
+      "log": "build/console-feedback-validation/tests.log",
+      "tail": [
+        "Failed test dependencies: kernel.build.current",
+        " 9/10 Test  #30: kernel.riscv64.read_only_block ......................***Not Run   0.00 sec",
+        "      Start 194: kernel.riscv64.disk_writable_filesystem_cleanup",
+        "10/10 Test #194: kernel.riscv64.disk_writable_filesystem_cleanup .....   Passed    0.03 sec",
+        "",
+        "10% tests passed, 9 tests failed out of 10",
+        "",
+        "Total Test time (real) = 120.05 sec",
+        "",
+        "The following tests FAILED:",
+        "\t  8 - kernel.build.current (Timeout)",
+        "\t 23 - kernel.riscv64.console_shell (Not Run)",
+        "\t 24 - kernel.riscv64.standard_streams (Not Run)",
+        "\t 29 - kernel.riscv64.block_without_device (Not Run)",
+        "\t 30 - kernel.riscv64.read_only_block (Not Run)",
+        "\t190 - kernel.riscv64.disk_writable_filesystem_prepare (Not Run)",
+        "\t191 - kernel.riscv64.disk_writable_filesystem_read_only (Not Run)",
+        "\t192 - kernel.riscv64.disk_writable_filesystem_writer (Not Run)",
+        "\t193 - kernel.riscv64.disk_writable_filesystem_readback (Not Run)",
+        "Errors while running CTest"
+      ]
+    },
+    "resolution": "Completed the local incremental build separately and reran the unchanged 120-second build fixture with the focused test group. Existing compiled objects had incomplete Ninja dependency/log records. No timeout or test gate was weakened.",
+    "cause_limit": "The reason for the incomplete local Ninja records was not established. No source-rule or tool-wrapper defect was established."
+  },
+  "powershell_runner": {
+    "all_planned_qualification_scenarios_passed": true,
+    "runtime": {
+      "powershell_version": "7.4.20",
+      "powershell_platform": "Linux x86_64; Ubuntu 24.04.3 LTS",
+      "powershell_path": "validation-host/toolchain_powershell/extracted/opt/microsoft/powershell/7/pwsh",
+      "package_download": "https://packages.microsoft.com/repos/microsoft-ubuntu-noble-prod/pool/main/p/powershell/powershell_7.4.20-1.deb_amd64.deb",
+      "package_sha256": "7cafae8e49d412afc49c5f4c19c30be84e67afee0a521d8ccce7bb14a1e2cec0",
+      "package_sha256_verified_against": "https://github.com/PowerShell/PowerShell/releases/tag/v7.4.20",
+      "qemu_version": "8.2.2",
+      "qemu_path_with_spaces": "build/console-runner-qualification/QEMU executable with spaces",
+      "build_path_with_spaces": "build/console qualification with spaces",
+      "baseline_firmware_source": "validation-host/umicom-kernel-writable-vfs/build/riscv64-clang-debug/bin/umicom-system.elf",
+      "baseline_firmware_sha256": "53146f444f0c90f4c735d476a30b5b06140885efc34bcd80bd057305195e004d",
+      "native_windows_tested": false,
+      "system_installation_performed": false
+    },
+    "script_sha256": "4ae9f16e34da58261a3b5cca7de1ef1aa69f8e281da433ddc095e7e298f8184f",
+    "baseline_spaced_paths": {
+      "passed": true,
+      "seconds": 10.475372514003539,
+      "result": "build/console qualification with spaces/console-persistence/20261009T113806Z-6df3e7bf2c674f27a27bead03b284fce/result.json",
+      "boots": 2,
+      "detected_slots": [
+        7,
+        7
+      ]
+    },
+    "final_diagnostics_and_persistence": {
+      "passed": true,
+      "seconds": 3.2283012390034855,
+      "result": "build/riscv64-clang-debug/console-persistence/20261009T114215Z-6ffbb3e816704896bb277e7a98c8911f/result.json",
+      "boots": 2,
+      "firmware_sha256": "08219a4a92dd6b4d056d01b73c7d8ade7da82e9453e1e61bea8a5bd0208fb2f0",
+      "malformed_partition_refused_before_admission": true,
+      "corrected_mount_then_succeeded": true,
+      "detected_slots": [
+        7,
+        7
+      ]
+    },
+    "preflight_refusals": {
+      "cases": [
+        {
+          "case": "missing-executable",
+          "returncode": 1,
+          "seconds": 0.6369527709975955,
+          "passed": true,
+          "expected": "QEMU executable not found:",
+          "command": [
+            "validation-host/toolchain_powershell/extracted/opt/microsoft/powershell/7/pwsh",
+            "-NoLogo",
+            "-NoProfile",
+            "-File",
+            "scripts/Test-UmicomKernelWritableConsole.ps1",
+            "-QemuPath",
+            "build/console-runner-qualification/missing-qemu",
+            "-BuildDirectory",
+            "build/console qualification with spaces"
+          ],
+          "log": "build/console-runner-qualification/missing-executable.log"
+        },
+        {
+          "case": "comma-build-path",
+          "returncode": 1,
+          "seconds": 0.56562985599885,
+          "passed": true,
+          "expected": "The build directory contains a comma",
+          "command": [
+            "validation-host/toolchain_powershell/extracted/opt/microsoft/powershell/7/pwsh",
+            "-NoLogo",
+            "-NoProfile",
+            "-File",
+            "scripts/Test-UmicomKernelWritableConsole.ps1",
+            "-QemuPath",
+            "build/console-runner-qualification/QEMU executable with spaces",
+            "-BuildDirectory",
+            "build/console-runner-qualification/comma,build"
+          ],
+          "log": "build/console-runner-qualification/comma-build-path.log"
+        },
+        {
+          "case": "unaccepted-disk-option",
+          "returncode": 1,
+          "seconds": 0.674480047004181,
+          "passed": true,
+          "expected": "A parameter cannot be found that matches parameter name 'DiskPath'",
+          "command": [
+            "validation-host/toolchain_powershell/extracted/opt/microsoft/powershell/7/pwsh",
+            "-NoLogo",
+            "-NoProfile",
+            "-File",
+            "scripts/Test-UmicomKernelWritableConsole.ps1",
+            "-QemuPath",
+            "build/console-runner-qualification/QEMU executable with spaces",
+            "-BuildDirectory",
+            "build/console qualification with spaces",
+            "-DiskPath",
+            "unaccepted-user-disk.raw"
+          ],
+          "log": "build/console-runner-qualification/unaccepted-disk-option.log"
+        },
+        {
+          "case": "malformed-source-fixture",
+          "returncode": 1,
+          "seconds": 0.6317320599991945,
+          "passed": true,
+          "expected": "The immutable source fixture hash differs",
+          "command": [
+            "validation-host/toolchain_powershell/extracted/opt/microsoft/powershell/7/pwsh",
+            "-NoLogo",
+            "-NoProfile",
+            "-File",
+            "build/console-runner-qualification/malformed fixture repository/scripts/Test-UmicomKernelWritableConsole.ps1",
+            "-QemuPath",
+            "build/console-runner-qualification/QEMU executable with spaces",
+            "-BuildDirectory",
+            "build/console-runner-qualification/malformed fixture repository/build"
+          ],
+          "log": "build/console-runner-qualification/malformed-source-fixture.log"
+        }
+      ],
+      "no_writable_runs_created": true,
+      "source_fixture_unchanged": true
+    },
+    "real_stalled_guest_timeout": {
+      "case": "real QEMU connects but firmware never emits prompt",
+      "passed": true,
+      "returncode": 1,
+      "seconds": 5.81860685099673,
+      "timeout_seconds": 5,
+      "qemu_processes_observed": {
+        "56696": {
+          "arguments": [
+            "build/console-runner-qualification/QEMU executable with spaces",
+            "-machine",
+            "virt,aclint=off",
+            "-bios",
+            "build/console-runner-qualification/stalled firmware build/bin/umicom-system.elf",
+            "-display",
+            "none",
+            "-monitor",
+            "none",
+            "-chardev",
+            "socket,id=console,host=127.0.0.1,port=43065,server=off",
+            "-serial",
+            "chardev:console",
+            "-m",
+            "128M",
+            "-smp",
+            "1",
+            "-no-reboot",
+            "-global",
+            "virtio-mmio.force-legacy=false",
+            "-drive",
+            "file=build/console-runner-qualification/stalled firmware build/console-persistence/20261009T114104Z-a3b9804339ea41cb9b14319f52325f5b/writable-console.raw,if=none,format=raw,id=umicomdisk,readonly=off,cache=writeback,rerror=report,werror=report",
+            "-device",
+            "virtio-blk-device,drive=umicomdisk,write-cache=on,logical_block_size=512,physical_block_size=512,num-queues=1",
+            ""
+          ],
+          "namespace_pids": [
+            56696,
+            26
+          ]
+        }
+      },
+      "no_owned_qemu_remaining": true,
+      "loopback_listener_closed": true,
+      "disk_and_fixture_unchanged": true,
+      "runner_result": "build/console-runner-qualification/stalled firmware build/console-persistence/20261009T114104Z-a3b9804339ea41cb9b14319f52325f5b/result.json",
+      "command": [
+        "validation-host/toolchain_powershell/extracted/opt/microsoft/powershell/7/pwsh",
+        "-NoLogo",
+        "-NoProfile",
+        "-File",
+        "scripts/Test-UmicomKernelWritableConsole.ps1",
+        "-QemuPath",
+        "build/console-runner-qualification/QEMU executable with spaces",
+        "-BuildDirectory",
+        "build/console-runner-qualification/stalled firmware build",
+        "-TimeoutSeconds",
+        "5"
+      ],
+      "log": "build/console-runner-qualification/stalled-timeout-qualified.log",
+      "observer_note": "NSpid maps namespace PIDs in .NET to host /proc entries; an initial observer incorrectly equated these, while runner cleanup itself succeeded."
+    },
+    "source_fixture_sha256": "538d4c1def74b0241a91a350362038a85934a9a5d522f86bd7c5347b44c3e1b5",
+    "writer_and_readback_image_sha256": "c489e9efeaa997e88ba424000a887c20a79e7022dd1659f288e8e46ab61db67d",
+    "native_windows_powershell_tested": false,
+    "qualification_limit": "Actual execution used Linux PowerShell7.4.20 and QEMU8.2.2. WindowsPowerShell5.1 API compatibility is a source contract, not a native Windows execution result.",
+    "scope": "No repository source edits, commits, branches, or pushes by this qualification task. Runtime and test data stayed in scratch/build directories."
+  },
+  "limitations": [
+    "The script was executed using PowerShell 7.4.20 on Linux, not Windows PowerShell.",
+    "Windows PowerShell 5.1 syntax and API compatibility are implementation intent and review evidence, not a native Windows execution result.",
+    "The user manual Windows transcript and the automated Linux runner results are separate evidence.",
+    "The console runner checks content, byte count, acceptance counts and whole-image equality between writer shutdown and readback shutdown; it does not independently predict every writer byte.",
+    "The existing process-file CTest group retains its independent expected-image check.",
+    "This batch changes console feedback and testing, not the mounted provider persistence contract.",
+    "Only the stated native, focused preset and PowerShell scenarios were rerun for this update; this record does not claim a fresh full preset run."
+  ],
+  "source_sha256": {
+    "README.md": "edae861efed4f0d355bd38259f6cce0257ef34af1c59ccc909aa42fee8c48c77",
+    "docs/WRITABLE_CONSOLE_TESTING.md": "8415d7434d507756da3927c9b24876ccfb16872f02e9430290ed03111e6061e6",
+    "docs/WRITABLE_FAT16_VFS.md": "9cb323879563bbe5389ae418f9e414aea1e253892a6cd045ac869729cc960cea",
+    "kernel/block_console.c": "79db2bd53610b6f2117209b3d888e5d2bc1766e502a64374afa35df65cc97c9f",
+    "kernel/disk_writable_filesystem_console.c": "5a4630048af3110643367cce11332aeb4869521780b73a85001d28c65af8dad3",
+    "scripts/Test-UmicomKernelWritableConsole.ps1": "4ae9f16e34da58261a3b5cca7de1ef1aa69f8e281da433ddc095e7e298f8184f",
+    "tests/disk_writable_filesystem/CMakeLists.txt": "c198070024ff005a337ec9e366d379637bec1af0e7c29850429d2c2e9e5f961e",
+    "tests/disk_writable_filesystem/writable_tests.c": "cf32b583abc3c82e96ba9dea0e61268600456a895dd15b8eeaadf4c7e6dc84d2"
+  },
+  "firmware_sha256": "08219a4a92dd6b4d056d01b73c7d8ade7da82e9453e1e61bea8a5bd0208fb2f0",
+  "firmware_bytes": 4090400
+}

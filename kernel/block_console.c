@@ -62,7 +62,14 @@ void UmicomKernelBlockReport(void *context, UmicomKernelBlockOutput output)
 #if 0
         "No partitions, filesystems or disk writes are enabled. blockclose retries retained cleanup.\r\n");
 #endif
+        /* This later sentence still looked like a system-wide limitation after
+         * writable mounts were added. Retain it, and scope the report to the
+         * raw-read command whose owner and cleanup are described here. */
+#if 0
         "Raw reads only; no mounts or disk writes. blockclose retries retained cleanup.\r\n");
+#endif
+        "The raw-read command does not mount or write. Filesystem commands use separate owners.\r\n"
+        "blockclose retries retained raw-read cleanup.\r\n");
 }
 UmicomKernelBlockStatus UmicomKernelBlockRetryClose(void)
 {

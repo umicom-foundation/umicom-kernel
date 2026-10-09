@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Umicom Kernel — Console persistence review</title>
+<style>
+:root{--ink:#142b3d;--muted:#4d6475;--line:#d6e2e8;--paper:#fff;--canvas:#edf3f5;--teal:#087c79;--navy:#0d2c42;--soft:#e9f7f2;--amber:#fff4dd}
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--canvas);color:var(--ink);font:16px/1.65 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:1120px;margin:auto;background:var(--paper);box-shadow:0 4px 40px #1735440d}
+header{padding:64px 64px 48px;background:var(--navy);color:#fff}
+.eyebrow{text-transform:uppercase;letter-spacing:.16em;font-size:.77rem;font-weight:750;color:#8ee1d5}
+h1{font-size:clamp(2rem,5vw,3.8rem);line-height:1.1;letter-spacing:-.035em;max-width:850px;margin:18px 0 24px}
+header p{max-width:790px;font-size:1.12rem;color:#d4e4eb}
+.meta{font-size:.86rem;color:#b9d0dc;margin-top:30px}.meta code{color:#fff;background:#214259}
+nav{display:flex;gap:12px 26px;flex-wrap:wrap;padding:20px 64px;border-bottom:1px solid var(--line);background:#f7fafb}
+a{color:#096b72;text-underline-offset:3px}nav a{text-decoration:none;font-size:.9rem;font-weight:650}
+section{padding:36px 64px;border-bottom:1px solid var(--line)}
+h2{font-size:1.65rem;letter-spacing:-.02em;margin:0 0 20px;line-height:1.3}
+h3{font-size:1.08rem;margin:28px 0 9px}p{margin:0 0 16px}
+ul,ol{padding-left:24px;margin:14px 0 20px}li{padding:3px 0}
+.kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin:24px 0}
+.kpi{padding:20px;border:1px solid var(--line);border-radius:10px;background:#f7fafb}
+.kpi strong{display:block;font-size:2rem;line-height:1.2;color:var(--teal)}.kpi span{font-size:.87rem;color:var(--muted)}
+.note{padding:20px 24px;border-radius:8px;background:var(--soft);border-left:4px solid var(--teal);margin:20px 0}
+.caution{background:var(--amber);border-left-color:#ba8520}.note p:last-child{margin-bottom:0}
+table{border-collapse:collapse;width:100%;margin:20px 0;font-size:.92rem}th,td{text-align:left;vertical-align:top;padding:12px 14px;border-bottom:1px solid var(--line)}
+th{background:#edf4f6;font-weight:700}td:first-child{font-weight:550}tr:last-child td{border-bottom:0}
+code{font-family:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace;font-size:.88em;background:#eef3f5;padding:2px 5px;border-radius:4px;overflow-wrap:anywhere}
+pre{margin:18px 0 24px;padding:22px;background:#102b3d;border-radius:8px;overflow:auto;color:#edf7f9;font-size:.87rem;line-height:1.55}
+pre code{background:transparent;color:inherit;padding:0;border-radius:0;overflow-wrap:normal;font-size:1em}
+.small{font-size:.86rem;color:var(--muted)}.badge{display:inline-block;border:1px solid #a6d5c4;border-radius:99px;background:#e6f7ed;color:#195e43;padding:3px 10px;font-size:.8rem;font-weight:700}
+details{margin:20px 0}summary{cursor:pointer;font-weight:650;color:#096b72}footer{padding:28px 64px;color:var(--muted);font-size:.83rem}
+.hash{font-size:.79rem;word-break:break-all}strong{font-weight:700}
+@media(max-width:720px){header{padding:38px 24px}section{padding:30px 24px}nav,footer{padding:20px 24px}.kpis{grid-template-columns:1fr}.kpi strong{font-size:1.5rem}table{display:block;overflow:auto}th,td{padding:10px}}
+@media print{body{background:#fff;font-size:10pt}main{box-shadow:none;max-width:none}header{background:#fff;color:var(--ink);padding:20px 0}header p,.meta,.eyebrow{color:var(--muted)}section{padding:22px 0}nav{display:none}pre{white-space:pre-wrap;word-break:break-word;color:var(--ink);background:#f2f5f6}footer{padding:20px 0}h2,h3{break-after:avoid}.kpi,.note{break-inside:avoid}}
+</style>
+</head>
+<body><main>
+<header>
+<div class="eyebrow">Umicom Foundation · Engineering review · 9 October 2026</div>
+<h1>Clearer console feedback.<br>Automatic persistence checks.</h1>
+<p>Your manual test passed: <strong>hello world</strong> survived a fresh QEMU boot, and <strong>NOTE.TXT</strong> remained 11 bytes. This update makes command errors actionable and automates the same two-boot journey.</p>
+<div class="meta">Baseline <code>ff8195f</code> · Full source package · Author: Sammy Hegab · MIT licence</div>
+</header>
+<nav aria-label="Review sections">
+<a href="#result">Your result</a><a href="#feedback">Console feedback</a><a href="#automation">Automatic test</a><a href="#validation">Validation</a><a href="#apply">Apply and test</a><a href="#files">Files</a>
+</nav>
+<section id="result">
+<span class="badge">Manual reboot test passed</span>
+<h2 style="margin-top:14px">The file persisted across shutdown</h2>
+<p>The supplied Windows transcript contains two distinct QEMU boots. During the first, the writable mount accepted directory creation, file creation, writing <code>hello</code> and appending <code> world</code>. Reading the file returned <code>hello world</code>; listing its directory returned <code>file NOTE.TXT bytes=11</code>. The mount closed successfully and the guest printed <code>UMICOM_KERNEL_END</code>.</p>
+<p>The next QEMU process mounted the same disk and returned the same content and size, then unmounted and powered off cleanly. This completes the manual persistence check. There is no need to repeat those interactive steps.</p>
+<div class="kpis"><div class="kpi"><strong>4</strong><span>Accepted mutations in the first mount</span></div><div class="kpi"><strong>11 bytes</strong><span>Confirmed after the fresh boot</span></div><div class="kpi"><strong>2</strong><span>Clean guest shutdowns</span></div></div>
+<p>The second boot's <code>committed-operations=0</code> is expected: it counts mutations accepted during that mount session. Reads do not increment it. The zero count is consistent with successful readback of data committed in the previous session.</p>
+<h3>Which command sees which files?</h3>
+<table><thead><tr><th>Commands</th><th>Filesystem</th><th>How to inspect the test file</th></tr></thead><tbody>
+<tr><td><code>ls</code>, <code>cat</code>, <code>mkdir</code></td><td>The existing RAM filesystem</td><td>Its listing continues to show the RAM directories.</td></tr>
+<tr><td><code>diskrwls</code>, <code>diskrwcat</code>, <code>diskmkdir</code></td><td>The explicitly mounted writable FAT16 filesystem</td><td><code>diskrwls /WORK</code> and <code>diskrwcat /WORK/NOTE.TXT</code></td></tr>
+<tr><td><code>diskls</code>, <code>diskcat</code></td><td>The separate read-only FAT16 mount</td><td>Use its own explicit mount lifecycle.</td></tr>
+</tbody></table>
+<p>There is no <code>cd</code> command in the current console. Disk operations take absolute paths. The misspellings <code>disappend</code> and <code>diskwls</code> in the transcript were rejected; the subsequent correctly spelt commands succeeded. The initial <code>not-found</code> result was expected because the file had not yet been created.</p>
+</section>
+<section id="feedback">
+<h2>Command failures now explain the recovery step</h2>
+<p>The earlier <code>mountdiskrw 7 @ 2044-02-29T23:58:56</code> attempt failed before mount admission. Partition selection requires a decimal primary-partition index from 0 to 3, and the synthetic fixture uses 0. The old dispatcher returned its invalid-argument status without visible command-specific guidance, leaving the later <code>bad-state</code> messages difficult to interpret.</p>
+<p>The exact malformed partition command now prints:</p>
+<pre><code>mountdiskrw=invalid-argument field=partition
+PARTITION must be decimal 0..3; use 0 for the first partition.
+usage: mountdiskrw SLOT PARTITION YYYY-MM-DDTHH:MM:SS</code></pre>
+<p>A corrected mount with <code>0</code> is still permitted in the same boot because invalid arguments never consume the mount owner. A following mutation without any admitted mount explains what is missing:</p>
+<pre><code>No writable disk is mounted. Run disks, then mountdiskrw SLOT PARTITION YYYY-MM-DDTHH:MM:SS.
+PARTITION is decimal 0..3; use 0 for the first partition.
+diskmkdir=bad-state committed-operations=0</code></pre>
+<p>All 13 writable-console commands now have usage text for malformed argument counts that reach their dispatcher. Numeric slot, partition, offset and size parsing identifies the offending field. Calendar validation identifies invalid syntax or an invalid FAT calendar value. The shared parser still enforces its existing maximum of four tokens; input beyond that limit follows its existing syntax-error path.</p>
+<p>The output distinguishes an unused owner from an active mount, retained cleanup, a closed single-use lifetime, and an admitted operation that encountered an actual media or transport failure. An unused structure no longer prints zero-initialised <code>diskrw.media=ok</code> as though a device had been examined. Once admission occurs, the media, block and cleanup evidence remains available.</p>
+<p>Diagnostic callbacks also receive the existing reentry protection before a mount owner exists. This closes a feedback-path gap without allowing a callback to recursively admit, mutate or close the owner. The original shell ownership and single-use mount lifetime remain part of the contract; failed admitted operations still follow their existing cleanup rules.</p>
+<p>The <code>disks</code> footer now explains that its raw-read commands use a separate owner. It no longer leaves the impression that the Kernel as a whole cannot mount or write a filesystem. Superseded source fragments remain in explanatory disabled blocks, following the repository's source-preservation policy.</p>
+</section>
+<section id="automation">
+<h2>One PowerShell command exercises two real boots</h2>
+<pre><code>&amp; &quot;.\scripts\Test-UmicomKernelWritableConsole.ps1&quot; -CheckSyntaxDiagnostics</code></pre>
+<p><code>scripts/Test-UmicomKernelWritableConsole.ps1</code> launches the normal <code>bin/umicom-system.elf</code> and interacts through its real serial console. It does not require clipboard support or Python. QEMU executable discovery includes the usual MSYS2 UCRT64 location, with an explicit <code>-QemuPath</code> override available.</p>
+<ol>
+<li>Verify the known immutable FAT16 fixture, create a new unique run directory, and copy that fixture to a disposable writable image.</li>
+<li>Reserve a loopback TCP listener before starting QEMU. QEMU connects its serial backend to that listener.</li>
+<li>Run <code>disks</code>, discover the single successfully probed block slot, and mount primary partition 0 with the explicit test calendar.</li>
+<li>Create <code>/WORK/NOTE.TXT</code>, write and append its contents, and verify every status, accepted-operation count, file content and byte count.</li>
+<li>Unmount, power off, confirm the shutdown marker and wait for QEMU to exit successfully.</li>
+<li>Start a fresh QEMU process against the same disposable image, read the file again, verify its size, and shut down cleanly.</li>
+<li>Check that the source fixture is unchanged and that the complete image is identical before and after the second boot's readback.</li>
+</ol>
+<p>Input is paced by the guest: the script waits for each character's echo before sending the next character, and for the next prompt before issuing another command. Each command has a finite deadline; waiting for individual characters does not extend that deadline. This avoids both manual typing and a burst of pasted input into the guest UART.</p>
+<p>The optional <code>-CheckSyntaxDiagnostics</code> switch adds the exact <code>@</code> failure, checks that the mount is still unused, then proves that the corrected mount works. Build this update before using that switch. Default execution also works with the preceding writable-VFS firmware.</p>
+<p>The script accepts <code>-BuildDirectory</code> and <code>-TimeoutSeconds</code> (5–300 seconds, default 60). Relative build paths resolve from the repository containing the script. Executable and build paths with spaces were exercised. Build paths containing commas are refused because the drive specification uses QEMU's comma-separated option syntax.</p>
+<div class="note"><p><strong>Every invocation gets its own test disk.</strong> The runner has no arbitrary existing-disk parameter and never overwrites an earlier run. It retains the disposable image, serial/stdout/stderr logs and <code>result.json</code> under the build directory and prints their location.</p></div>
+<p>Each output stream is capped at one MiB. A failed runtime check preserves evidence, closes the listener and stops only the QEMU process owned by that invocation. Preflight failures occur before a writable run is created. The script uses ordinary PowerShell invocation and does not change execution-policy settings.</p>
+<p>For occasional interactive use in Windows Terminal, Microsoft documents <kbd>Ctrl+Shift+V</kbd> and <kbd>Shift+Insert</kbd> among the default Paste bindings. Send one command and wait for the next prompt. In this guest console, <kbd>Ctrl+C</kbd> cancels the current input line. The automatic runner removes the need to paste this sequence at all.</p>
+</section>
+<section id="validation">
+<h2>Executed checks and their limits</h2>
+<table><thead><tr><th>Check</th><th>Result</th><th>What it establishes</th></tr></thead><tbody>
+<tr><td>Native writable-filesystem tests</td><td><strong>64/64 passed</strong><br>Clang 18.1.3; 4.00 s</td><td>AddressSanitizer and UndefinedBehaviorSanitizer coverage, including 10 added console diagnostic cases. Leak detection was disabled.</td></tr>
+<tr><td>Focused debug-preset regression</td><td><strong>10/10 passed</strong><br>11.557 s</td><td>The unchanged build fixture, console shell and standard streams, block probing/reads, and writable-filesystem preparation, refusal, writer, readback and cleanup.</td></tr>
+<tr><td>Default console runner on prior normal firmware</td><td><strong>Two boots passed</strong><br>10.475 s</td><td>Spaces in executable/build paths, relative build path, caller outside the repository, all 18 command responses, four mutations and fresh-process readback.</td></tr>
+<tr><td>Corrected firmware with syntax diagnostics</td><td><strong>Two boots passed</strong><br>3.228 s</td><td>The exact malformed partition is rejected before admission; the corrected mount completes the full persistence sequence.</td></tr>
+<tr><td>Four preflight refusals</td><td><strong>Passed</strong></td><td>Missing executable, comma in build path, unsupported disk parameter and a deliberately corrupted source fixture do not create a writable run.</td></tr>
+<tr><td>Real QEMU with stalled firmware</td><td><strong>Expected failure passed</strong><br>5.819 s overall</td><td>The five-second prompt timeout fails, stops the owned QEMU, closes its listener, preserves evidence, and leaves both disk images unchanged.</td></tr>
+<tr><td>User manual Windows journey</td><td><strong>Passed</strong></td><td>The existing Windows setup persisted the 11-byte file across a fresh QEMU process.</td></tr>
+</tbody></table>
+<p>The automated PowerShell journeys ran on Linux using PowerShell 7.4.20 and QEMU 8.2.2. The script uses Windows PowerShell 5.1-compatible syntax and APIs, but this update has <strong>not</strong> been executed under native Windows PowerShell. The user's successful manual Windows transcript is separate evidence, not a Windows execution of the new script.</p>
+<p>The first focused CTest attempt timed out in the existing 120-second build fixture while Ninja regenerated missing local dependency records. Compiled outputs already existed, but some corresponding Ninja log/dependency records were absent. The local build was completed separately; the same gate and focused group then passed. The reason for those incomplete records was not established. No build timeout was increased and no required fixture was skipped.</p>
+<p>The normal-console runner proves the specified content, size and acceptance counts, plus whole-image equality across the readback boot. It does not independently predict every byte written during the first boot. The existing process-file CTest group retains its independent expected-image check. This record covers the stated focused tests; it does not claim a new run of the entire preset for this correction.</p>
+<details><summary>Final focused CTest output</summary><pre><code>Test project /workspace/scratch/731ae0373859/umicom-kernel-console/build/riscv64-clang-debug
+      Start   8: kernel.build.current
+ 1/10 Test   #8: kernel.build.current ................................   Passed    0.10 sec
+      Start  23: kernel.riscv64.console_shell
+      Start  24: kernel.riscv64.standard_streams
+ 2/10 Test  #24: kernel.riscv64.standard_streams .....................   Passed    4.54 sec
+      Start  29: kernel.riscv64.block_without_device
+ 3/10 Test  #23: kernel.riscv64.console_shell ........................   Passed    4.65 sec
+      Start  30: kernel.riscv64.read_only_block
+ 4/10 Test  #29: kernel.riscv64.block_without_device .................   Passed    4.63 sec
+      Start 190: kernel.riscv64.disk_writable_filesystem_prepare
+ 5/10 Test #190: kernel.riscv64.disk_writable_filesystem_prepare .....   Passed    0.13 sec
+      Start 191: kernel.riscv64.disk_writable_filesystem_read_only
+ 6/10 Test #191: kernel.riscv64.disk_writable_filesystem_read_only ...   Passed    0.19 sec
+      Start 192: kernel.riscv64.disk_writable_filesystem_writer
+ 7/10 Test  #30: kernel.riscv64.read_only_block ......................   Passed    5.06 sec
+ 8/10 Test #192: kernel.riscv64.disk_writable_filesystem_writer ......   Passed    0.75 sec
+      Start 193: kernel.riscv64.disk_writable_filesystem_readback
+ 9/10 Test #193: kernel.riscv64.disk_writable_filesystem_readback ....   Passed    1.17 sec
+      Start 194: kernel.riscv64.disk_writable_filesystem_cleanup
+10/10 Test #194: kernel.riscv64.disk_writable_filesystem_cleanup .....   Passed    0.01 sec
+
+100% tests passed out of 10
+
+Total Test time (real) =  11.53 sec</code></pre></details>
+<h3>Reproducible evidence</h3>
+<p>The archive contains <code>docs/WRITABLE_CONSOLE_QUALIFICATION.json</code> with the baseline, changed-source hashes, firmware hash, test commands, summaries, failure-case outcomes and qualification limits. Raw build and runtime outputs are generated evidence and are excluded from the source archive.</p>
+<table><tbody>
+<tr><th>Runner SHA-256</th><td class="hash">4ae9f16e34da58261a3b5cca7de1ef1aa69f8e281da433ddc095e7e298f8184f</td></tr>
+<tr><th>Tested normal firmware SHA-256</th><td class="hash">08219a4a92dd6b4d056d01b73c7d8ade7da82e9453e1e61bea8a5bd0208fb2f0</td></tr>
+<tr><th>Immutable fixture SHA-256</th><td class="hash">538d4c1def74b0241a91a350362038a85934a9a5d522f86bd7c5347b44c3e1b5</td></tr>
+<tr><th>Disk after writing and after readback</th><td class="hash">c489e9efeaa997e88ba424000a887c20a79e7022dd1659f288e8e46ab61db67d</td></tr>
+</tbody></table>
+</section>
+<section id="apply">
+<h2>Extract, build, test, commit and push</h2>
+<p>Download <code>Umicom_Kernel_Console_Persistence_Fix.zip</code> to Downloads. It contains the full repository source at the archive root, ready to extract over the clean checkout at <code>ff8195f</code>. The existing Git metadata and generated test disks are outside the archive.</p>
+<pre><code>Expand-Archive -LiteralPath &quot;$env:USERPROFILE\Downloads\Umicom_Kernel_Console_Persistence_Fix.zip&quot; `
+    -DestinationPath &quot;C:\umicom\umicom-kernel&quot; -Force
+Set-Location &quot;C:\umicom\umicom-kernel&quot;
+cmake --preset riscv64-clang-debug
+cmake --build --preset riscv64-clang-debug --parallel 2
+ctest --preset riscv64-clang-debug --output-on-failure --no-tests=error
+&amp; &quot;.\scripts\Test-UmicomKernelWritableConsole.ps1&quot; -CheckSyntaxDiagnostics</code></pre>
+<p>The last command launches the Kernel twice and checks the complete normal-console sequence. It uses a fresh disposable image, so the manual test disk containing your successful result is preserved. After the commands have completed successfully:</p>
+<pre><code>git add -A
+git commit -m &quot;fix(kernel): explain writable console errors and automate persistence checks&quot;
+git push</code></pre>
+<h3>Optional interactive boot of your existing manual disk</h3>
+<p>The manual reboot test is already complete. If you want to inspect its saved file again, the following command uses the existing <code>umicom-writable-vfs-test.raw</code> from that test. Do not replace that disk with a fresh fixture before reading it.</p>
+<pre><code>&amp; &quot;C:\msys64\ucrt64\bin\qemu-system-riscv64.exe&quot; `
+    -machine &quot;virt,aclint=off&quot; `
+    -bios &quot;.\build\riscv64-clang-debug\bin\umicom-system.elf&quot; `
+    -display none `
+    -monitor none `
+    -chardev &quot;stdio,id=console,signal=off&quot; `
+    -serial &quot;chardev:console&quot; `
+    -m 128M `
+    -smp 1 `
+    -no-reboot `
+    -global virtio-mmio.force-legacy=false `
+    -drive &quot;file=.\build\riscv64-clang-debug\fixtures\umicom-writable-vfs-test.raw,if=none,format=raw,id=umicomdisk,readonly=off,cache=writeback,rerror=report,werror=report&quot; `
+    -device &quot;virtio-blk-device,drive=umicomdisk,write-cache=on,logical_block_size=512,physical_block_size=512,num-queues=1&quot;</code></pre>
+<p>At the guest prompt, run <code>disks</code>, use its successfully probed slot in <code>mountdiskrw 7 0 2044-02-29T23:58:56</code> for the observed single-disk arrangement, then run <code>diskrwcat /WORK/NOTE.TXT</code>. Close with <code>unmountdiskrw</code> and <code>poweroff</code>.</p>
+</section>
+<section id="files">
+<h2>Source inventory</h2>
+<p><strong>528 source files: 6 existing files updated, 4 files added, no tracked files deleted.</strong> The prior writable-VFS feature review and qualification remain as historical records. The ZIP excludes Git metadata, build outputs and temporary qualification tools. Archive CRC, path safety, Windows case-insensitive path uniqueness and every extracted file's SHA-256 are checked against the packaged source.</p>
+<table><thead><tr><th>Path</th><th>Change</th></tr></thead><tbody><tr><td><code>README.md</code></td><td>Updated</td></tr>
+<tr><td><code>docs/WRITABLE_CONSOLE_QUALIFICATION.json</code></td><td>Added</td></tr>
+<tr><td><code>docs/WRITABLE_CONSOLE_REVIEW.html</code></td><td>Added</td></tr>
+<tr><td><code>docs/WRITABLE_CONSOLE_TESTING.md</code></td><td>Added</td></tr>
+<tr><td><code>docs/WRITABLE_FAT16_VFS.md</code></td><td>Updated</td></tr>
+<tr><td><code>kernel/block_console.c</code></td><td>Updated</td></tr>
+<tr><td><code>kernel/disk_writable_filesystem_console.c</code></td><td>Updated</td></tr>
+<tr><td><code>scripts/Test-UmicomKernelWritableConsole.ps1</code></td><td>Added</td></tr>
+<tr><td><code>tests/disk_writable_filesystem/CMakeLists.txt</code></td><td>Updated</td></tr>
+<tr><td><code>tests/disk_writable_filesystem/writable_tests.c</code></td><td>Updated</td></tr></tbody></table>
+<p>The baseline is <a href="https://github.com/umicom-foundation/umicom-kernel/commit/ff8195fa4b6529684b08dc0b473d140e2abbc13f">ff8195fa4b6529684b08dc0b473d140e2abbc13f</a>, <em>feat(kernel): add writable FAT16 VFS and native process file access</em>. No branch, commit or push was created while preparing this update.</p>
+<h3>Primary documentation</h3>
+<ul>
+<li><a href="https://learn.microsoft.com/en-us/windows/terminal/customize-settings/actions#paste">Microsoft Windows Terminal: Paste action and default bindings</a>.</li>
+<li><a href="https://www.qemu.org/docs/master/system/qemu-manpage.html#character-device-options">QEMU: character-device options and socket backend</a>.</li>
+<li>Repository guidance: <code>docs/SOURCE_PRESERVATION_AND_NAMING.md</code>, <code>docs/WRITABLE_CONSOLE_TESTING.md</code>, and <code>docs/WRITABLE_FAT16_VFS.md</code>.</li>
+<li>Execution evidence: <code>docs/WRITABLE_CONSOLE_QUALIFICATION.json</code>; the user's supplied two-boot transcript was separately reviewed.</li>
+</ul>
+</section>
+<footer>Umicom Kernel · Sammy Hegab, Umicom Foundation · MIT licence · Review prepared 9 October 2026</footer>
+</main></body></html>
