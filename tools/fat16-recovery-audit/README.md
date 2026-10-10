@@ -94,3 +94,31 @@ should show only the newly added files under this `tools/` directory.
 - Host CTest evidence is not claimed as executed RISC-V guest or Windows evidence.
 - More complete filesystem recovery, write-ahead repair strategy, power-cut
   injection in QEMU and installable OS recovery remain later work packages.
+
+## Allocation-graph verification after header recovery evidence
+
+A separate command, `umicom-fat16-integrity-audit`, now checks ownership of
+FAT16 clusters reachable from the root and nested short-name directories. It
+builds upon, but does not replace, the read-only header/mirror audit above.
+A clean header alone cannot establish a non-overlapping allocation graph.
+
+See [the allocation-integrity guide](ALLOCATION_INTEGRITY.md) for its precise
+read-only scope, bounded traversal, PowerShell build and test commands, error
+codes and known limitations. The original command syntax and JSON fields are
+unchanged; the new CLI has its own output and test cases.
+
+## Interruption laboratory: durable ordering and incomplete acknowledgement
+
+The additional host-only executable `umicom-fat16-interruption-lab` now tests a
+synthetic ordered FAT16 commit under both write-back and write-through device
+models. It simulates power loss after every sector-write/flush boundary and
+runs the existing header and allocation readers on only the remaining durable
+bytes. It cannot write to a supplied image because it accepts no disk path.
+
+The laboratory demonstrates why a clean FAT and a consistent allocation graph
+cannot by themselves authorise replay, repair or even prove a file's previous
+contents. A lost final acknowledgement may leave a fully updated clean image;
+an intentionally unguarded partial data write can also leave a clean image.
+Read [Interruption Qualification](INTERRUPTION_QUALIFICATION.md) before using
+these diagnostics for recovery design. The Kernel's real VirtIO/FAT16 code is
+unchanged; this test is model evidence, not a hardware power-cut test.
