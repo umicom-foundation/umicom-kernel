@@ -189,3 +189,66 @@ if(BUILD_TESTING)
             FIXTURES_REQUIRED fat16_audit_current_binaries)
     endforeach()
 endif()
+
+# Independent full-disk evidence for a real normal-console QEMU Stage/Finish.
+# This is a host-only read-only verifier; QEMU driving is a separately invoked
+# PowerShell acceptance workflow, not a claim made by the host fixture tests.
+# Keep all established host targets and their tests unchanged.
+add_library(umicom-fat16-guest-evidence-core STATIC fat16_guest_commit_evidence.c)
+target_link_libraries(umicom-fat16-guest-evidence-core PUBLIC umicom-fat16-integrity-core)
+target_include_directories(umicom-fat16-guest-evidence-core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+add_executable(umicom-fat16-guest-commit-evidence guest_evidence_main.c)
+target_link_libraries(umicom-fat16-guest-commit-evidence PRIVATE umicom-fat16-guest-evidence-core)
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    foreach(targetName IN ITEMS umicom-fat16-guest-evidence-core umicom-fat16-guest-commit-evidence)
+        target_compile_options(${targetName} PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)
+    endforeach()
+endif()
+
+if(BUILD_TESTING)
+    add_executable(umicom-fat16-guest-evidence-tests tests/guest_evidence_tests.c)
+    target_link_libraries(umicom-fat16-guest-evidence-tests PRIVATE umicom-fat16-guest-evidence-core)
+    if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(umicom-fat16-guest-evidence-tests PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)
+    endif()
+    set(UMICOM_GUEST_BEFORE "${CMAKE_CURRENT_BINARY_DIR}/guest-evidence-before.raw")
+    set(UMICOM_GUEST_STAGED "${CMAKE_CURRENT_BINARY_DIR}/guest-evidence-staged.raw")
+    set(UMICOM_GUEST_FINISHED "${CMAKE_CURRENT_BINARY_DIR}/guest-evidence-finished.raw")
+    set(UMICOM_GUEST_CORRUPT "${CMAKE_CURRENT_BINARY_DIR}/guest-evidence-corrupt.raw")
+    add_test(NAME kernel.host.fat16_guest_evidence_model
+        COMMAND umicom-fat16-guest-evidence-tests)
+    add_test(NAME kernel.host.fat16_guest_evidence_prepare
+        COMMAND umicom-fat16-guest-evidence-tests --fixtures
+            "${UMICOM_GUEST_BEFORE}" "${UMICOM_GUEST_STAGED}"
+            "${UMICOM_GUEST_FINISHED}" "${UMICOM_GUEST_CORRUPT}")
+    set_tests_properties(kernel.host.fat16_guest_evidence_prepare PROPERTIES
+        FIXTURES_SETUP fat16_guest_evidence_images)
+    add_test(NAME kernel.host.fat16_guest_evidence_staged
+        COMMAND umicom-fat16-guest-commit-evidence
+            "${UMICOM_GUEST_BEFORE}" "${UMICOM_GUEST_STAGED}" stage)
+    set_tests_properties(kernel.host.fat16_guest_evidence_staged PROPERTIES
+        FIXTURES_REQUIRED fat16_guest_evidence_images
+        PASS_REGULAR_EXPRESSION "\"expected_changed_bytes\":23")
+    add_test(NAME kernel.host.fat16_guest_evidence_finished
+        COMMAND umicom-fat16-guest-commit-evidence
+            "${UMICOM_GUEST_BEFORE}" "${UMICOM_GUEST_FINISHED}" finish)
+    set_tests_properties(kernel.host.fat16_guest_evidence_finished PROPERTIES
+        FIXTURES_REQUIRED fat16_guest_evidence_images
+        PASS_REGULAR_EXPRESSION "\"expected_changed_bytes\":21")
+    add_test(NAME kernel.host.fat16_guest_evidence_corrupt_refused
+        COMMAND umicom-fat16-guest-commit-evidence
+            "${UMICOM_GUEST_BEFORE}" "${UMICOM_GUEST_CORRUPT}" finish)
+    set_tests_properties(kernel.host.fat16_guest_evidence_corrupt_refused PROPERTIES
+        FIXTURES_REQUIRED fat16_guest_evidence_images WILL_FAIL TRUE)
+    foreach(testName IN ITEMS
+            kernel.host.fat16_guest_evidence_model
+            kernel.host.fat16_guest_evidence_prepare
+            kernel.host.fat16_guest_evidence_staged
+            kernel.host.fat16_guest_evidence_finished
+            kernel.host.fat16_guest_evidence_corrupt_refused)
+        set_property(TEST ${testName} APPEND PROPERTY
+            FIXTURES_REQUIRED fat16_audit_current_binaries)
+    endforeach()
+endif()

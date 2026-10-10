@@ -122,3 +122,36 @@ an intentionally unguarded partial data write can also leave a clean image.
 Read [Interruption Qualification](INTERRUPTION_QUALIFICATION.md) before using
 these diagnostics for recovery design. The Kernel's real VirtIO/FAT16 code is
 unchanged; this test is model evidence, not a hardware power-cut test.
+
+## QEMU normal-console Stage/Finish evidence (new, opt-in)
+
+The `umicom-fat16-guest-commit-evidence` executable compares **every sector**
+from the pinned, synthetic `tests/disk_inspection/fixture.raw` with a stopped
+QEMU guest's disposable copy. It independently follows the `FRAG.BIN` FAT16
+chain and checks the exact 21-byte console update at logical offset 511:
+
+```text
+fatstage /FRAG.BIN 511 "Umicom ordered update"
+```
+
+A verified *stage* must have precisely 23 changed bytes (21 file bytes and
+one clean-flag byte in **each** FAT). A verified *finish* must have precisely
+21 changed file bytes and fully original clean FAT headers. In both modes,
+all other bytes—including unrelated files, allocation entries, directory
+metadata and file slack—must be identical to the original fixture. The
+existing header and allocation auditors are reused; no approval to repair,
+replay, clear flags or mount unknown media is ever issued.
+
+The companion `scripts/Test-UmicomKernelFat16CommitRecovery.ps1` runs four
+actual normal-QEMU guest boots when explicitly invoked on a Windows machine
+with RISC-V QEMU available. It kills **only its owned QEMU process** after
+the guest positively reports a fully flushed Stage, verifies the dirty disk
+and read-only rejection, then separately tests Finish and read-only reboot.
+This is a process-termination/restart boundary after a confirmed flush, **not**
+random in-flight interruption or proof of physical power-cut atomicity. See
+[QEMU commit-recovery qualification](QEMU_COMMIT_RECOVERY.md) before executing.
+
+The five extra standalone CTests use disposable host-generated images and
+run without QEMU. They are **host evidence only**. QEMU acceptance is not
+considered complete until the explicit PowerShell workflow runs successfully
+and its `result.json`, logs and image SHA-256 values are reviewed.
