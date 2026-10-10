@@ -1,8 +1,11 @@
 # Ordered FAT16 commit: QEMU process-termination and reboot qualification
 
-**Author:** Sammy Hegab, Umicom Foundation  
-**Licence:** MIT  
-**Target:** `umicom-kernel` RISC-V64 QEMU `virt,aclint=off`, one hart, 128 MiB  
+**Author:** Sammy Hegab, Umicom Foundation
+
+**Licence:** MIT
+
+**Target:** `umicom-kernel` RISC-V64 QEMU `virt,aclint=off`, one hart, 128 MiB
+
 **Category:** Opt-in destructive *synthetic* guest test, read-only host analysis
 
 ## Purpose and strict boundary

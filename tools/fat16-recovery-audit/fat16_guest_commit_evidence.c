@@ -18,9 +18,28 @@
 #define UMICOM_GUEST_EVIDENCE_PATCH_LENGTH UINT32_C(21)
 #define UMICOM_GUEST_EVIDENCE_MAX_CLUSTER_HOPS UINT32_C(32)
 
+/* These values are on-disk byte sequences, not terminated C strings.
+ * The original fixed-size string initialisers below silently discarded the
+ * trailing NUL. GCC diagnoses that truncation with -Werror in newer versions.
+ * Retain the historical form for review, but compile the exact payload bytes
+ * explicitly so the FAT short name and patch never acquire an extra byte. */
+#if 0
 static const uint8_t umicomGuestExpectedPatch[UMICOM_GUEST_EVIDENCE_PATCH_LENGTH] =
     "Umicom ordered update";
 static const uint8_t umicomGuestShortName[11] = "FRAG    BIN";
+#endif
+
+static const uint8_t umicomGuestExpectedPatch[] = {
+    'U', 'm', 'i', 'c', 'o', 'm', ' ', 'o', 'r', 'd', 'e',
+    'r', 'e', 'd', ' ', 'u', 'p', 'd', 'a', 't', 'e'
+};
+static const uint8_t umicomGuestShortName[] = {
+    'F', 'R', 'A', 'G', ' ', ' ', ' ', ' ', 'B', 'I', 'N'
+};
+_Static_assert(sizeof umicomGuestExpectedPatch == UMICOM_GUEST_EVIDENCE_PATCH_LENGTH,
+    "The ordered FAT16 patch must occupy exactly 21 on-disk bytes");
+_Static_assert(sizeof umicomGuestShortName == 11U,
+    "A FAT short-name directory entry must contain exactly 11 bytes");
 
 typedef struct UmicomGuestPatchByte {
     uint64_t sector;
