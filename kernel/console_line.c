@@ -6,8 +6,12 @@
  *   Turn a byte stream into bounded, complete commands without interpreting
  *   terminal escape sequences or running a truncated prefix after input loss.
  *
- * AUTHOR AND ORGANISATION: Sammy Hegab, Umicom Foundation
- * LICENCE: MIT
+ * AUTHOR AND ORGANISATION:
+ * Sammy Hegab
+ * Umicom Foundation
+ *
+ * LICENCE:
+ * MIT
  *---------------------------------------------------------------------------*/
 #include "umicom/kernel/console_shell.h"
 #include "console_internal.h"
@@ -110,6 +114,10 @@ UmicomKernelShellStatus UmicomKernelShellParse(const char *line, UmicomSize byte
     return UMICOM_SHELL_OK;
 #endif /* Retained parser body. */
 }
+/* The previous NUL-only numeric parser is retained for review. The shared
+ * span implementation below also accepts bounded receive-buffer fields while
+ * its compatibility wrapper preserves the existing console string contract. */
+#if 0
 UmicomBoolean UmicomKernelShellUnsigned(const char *text, UmicomU64 *out)
 {
     if (!text || !out || text[0] == '\0') return UMICOM_FALSE;
@@ -123,6 +131,37 @@ UmicomBoolean UmicomKernelShellUnsigned(const char *text, UmicomU64 *out)
         const UmicomU64 digit = (UmicomU64)(ch - '0');
         if (value > (~(UmicomU64)0U - digit) / 10U) return UMICOM_FALSE;
         value = value * 10U + digit;
+    }
+    return UMICOM_FALSE;
+}
+#endif
+
+/* Length-delimited inputs can come from owned receive buffers without adding
+ * a terminator or reading the next object. Failure leaves the caller's value
+ * unchanged; the caller must supply a trusted span of at least bytes bytes. */
+UmicomBoolean UmicomKernelShellUnsignedSpan(const char *text, UmicomSize bytes,
+    UmicomU64 *out)
+{
+    if (!text || !out || bytes == 0U || bytes >= UMICOM_SHELL_LINE_BYTES)
+        return UMICOM_FALSE;
+    UmicomU64 value = 0U;
+    for (UmicomSize i = 0U; i < bytes; ++i) {
+        const char ch = text[i];
+        if (ch < '0' || ch > '9') return UMICOM_FALSE;
+        const UmicomU64 digit = (UmicomU64)(ch - '0');
+        if (value > (~(UmicomU64)0U - digit) / 10U) return UMICOM_FALSE;
+        value = value * 10U + digit;
+    }
+    *out = value;
+    return UMICOM_TRUE;
+}
+
+UmicomBoolean UmicomKernelShellUnsigned(const char *text, UmicomU64 *out)
+{
+    if (!text || !out) return UMICOM_FALSE;
+    for (UmicomSize bytes = 0U; bytes < UMICOM_SHELL_LINE_BYTES; ++bytes) {
+        if (text[bytes] == '\0')
+            return UmicomKernelShellUnsignedSpan(text, bytes, out);
     }
     return UMICOM_FALSE;
 }

@@ -1,0 +1,51 @@
+name: Native Kernel host contracts
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  contracts:
+    name: Host model - ${{ matrix.suite }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [console_numbers, boot_services]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Record source and prepare tools
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p build/evidence
+          git rev-parse HEAD > build/evidence/kernel-revision.txt
+          sudo apt-get update
+          sudo apt-get install -y ninja-build
+          cmake --version > build/evidence/tools.txt
+          cc --version >> build/evidence/tools.txt
+      - name: Configure the selected host contract
+        shell: bash
+        env:
+          SUITE: ${{ matrix.suite }}
+        run: |
+          set -o pipefail
+          cmake -S "tests/$SUITE" -B build/contract -G Ninja -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON 2>&1 | tee build/evidence/configure.log
+      - name: Compile the host contract
+        shell: bash
+        run: |
+          set -o pipefail
+          cmake --build build/contract --parallel 2 2>&1 | tee build/evidence/build.log
+      - name: Test the host contract
+        run: ctest --test-dir build/contract --no-tests=error --output-on-failure --output-log "$PWD/build/evidence/tests.log" --output-junit "$PWD/build/evidence/tests.xml"
+      - name: Retain source-specific evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-host-${{ matrix.suite }}
+          path: |
+            build/evidence
+            build/contract/Testing/Temporary
+            build/contract/CMakeFiles/CMakeConfigureLog.yaml
+          if-no-files-found: error
+# Hosted contracts do not prove RISC-V execution, firmware boot or hardware behavior.

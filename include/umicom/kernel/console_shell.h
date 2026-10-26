@@ -16,8 +16,12 @@
  *   resources in dependency order; it does not reset or reuse live generations.
  *   Calls and output callbacks are serial and may not re-enter this owner.
  *
- * AUTHOR AND ORGANISATION: Sammy Hegab, Umicom Foundation
- * LICENCE: MIT
+ * AUTHOR AND ORGANISATION:
+ * Sammy Hegab
+ * Umicom Foundation
+ *
+ * LICENCE:
+ * MIT
  *---------------------------------------------------------------------------*/
 #ifndef UMICOM_KERNEL_CONSOLE_SHELL_H
 #define UMICOM_KERNEL_CONSOLE_SHELL_H
@@ -112,6 +116,9 @@ void UmicomKernelConsoleLineConsume(UmicomKernelConsoleLine *line);
  * no escapes, interpolation, pipelines or multi-command syntax are evaluated. */
 UmicomKernelShellStatus UmicomKernelShellParse(const char *line, UmicomSize bytes, UmicomKernelShellCommand *out);
 UmicomBoolean UmicomKernelShellUnsigned(const char *text, UmicomU64 *out);
+/* Decimal trusted byte span; no terminator is required. Accepts leading zeros.
+ * Zero/excess length, embedded NUL, nondigits and overflow leave out unchanged. */
+UmicomBoolean UmicomKernelShellUnsignedSpan(const char *text, UmicomSize bytes, UmicomU64 *out);
 
 /* Initialise once, mount RAMFS, attach file services and install supplied seed
  * images under /bin. On partial setup failure, Close still owns rollback.
