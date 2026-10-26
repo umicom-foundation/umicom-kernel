@@ -50,7 +50,9 @@ endforeach()
 # normal boot, and links no file/process/Framework implementation for recovery.
 add_executable(umicom-startup-support-tests startup_support_tests.c
     ../../kernel/boot_memory.c ../../kernel/recovery_console.c ../../kernel/console_line.c
-    ../../kernel/address.c ../../kernel/device_tree.c ../../kernel/physical_memory.c)
+    ../../kernel/address.c ../../kernel/device_tree.c ../../kernel/device_tree_layout.c
+    ../../kernel/boot_reservations.c ../../kernel/device_tree_reader.c
+    ../../kernel/device_tree_firmware.c ../../kernel/physical_memory.c)
 target_include_directories(umicom-startup-support-tests PRIVATE ../../include)
 if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
     target_compile_options(umicom-startup-support-tests PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)
@@ -63,6 +65,7 @@ set(UMICOM_STARTUP_SUPPORT_CASES memory-valid memory-reservation memory-reinitia
     memory-hart memory-empty-ram memory-overflow-ram memory-alignment memory-image-below
     memory-image-empty memory-image-outside memory-image-unaligned memory-dtb-below
     memory-dtb-truncated memory-dtb-magic memory-dtb-size memory-dtb-overlap memory-capacity
+    memory-firmware-reserved memory-dtb-version memory-dtb-sections memory-dtb-reservation-overflow
     recovery-help recovery-status recovery-poweroff recovery-extra-token recovery-prefix
     recovery-case recovery-launch-refused recovery-file-refused recovery-empty recovery-null
     recovery-quote recovery-control recovery-nul)

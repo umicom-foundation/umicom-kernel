@@ -9,7 +9,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [console_numbers, boot_services]
+        suite: [console_numbers, boot_services, device_tree]
     steps:
       - uses: actions/checkout@v4
         with:
