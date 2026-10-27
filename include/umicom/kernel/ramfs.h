@@ -67,10 +67,18 @@ typedef struct UmicomKernelRamfsInfo {
 UmicomKernelVfsStatus UmicomKernelRamfsInitialize(UmicomKernelRamfs *fs);
 const UmicomKernelVfsOperations *UmicomKernelRamfsOperations(void);
 UmicomKernelVfsStatus UmicomKernelRamfsValidate(UmicomKernelRamfs *fs);
+/* Snapshot requires aligned, valid, non-overflowing trusted Kernel storage.
+ * The result must be independent of the complete filesystem owner and every
+ * metadata/data page it owns. Outputs stay unchanged on errors; validation
+ * can still poison a damaged owner under its established corruption policy.
+ * Calls remain serialised under the object-cache execution gate. These are
+ * ownership checks, not arbitrary address probing or a user-pointer ABI. */
 UmicomKernelVfsStatus UmicomKernelRamfsSnapshot(UmicomKernelRamfs *fs, UmicomKernelRamfsInfo *outInfo);
 /* Reap frees only unlinked, unpinned nodes. On release failure outReaped reports
  * completed nodes; remaining page addresses stay owned and the next call retries.
- * Empty cache frames are released when the domain closes, not at every unlink. */
+ * Empty cache frames are released when the domain closes, not at every unlink.
+ * The counter has the same independent, aligned storage requirement as a
+ * snapshot. Admission failure leaves it unchanged and releases no pages. */
 UmicomKernelVfsStatus UmicomKernelRamfsReap(UmicomKernelRamfs *fs, UmicomSize *outReaped);
 /* Close requires no pins, including the mount's root pin. It closes admission
  * before tearing down the namespace. Retrying a failed close is supported;

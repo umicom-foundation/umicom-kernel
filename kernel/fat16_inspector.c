@@ -2728,3 +2728,6 @@ UmicomKernelDiskStatus UmicomKernelFat16PlanLifecycle(UmicomKernelFat16 *volume,
     volume->fatCached = UMICOM_FALSE;
     return UmicomFatFinish(volume, status);
 }
+
+/* Allocation reporting shares the parser, geometry and finite I/O owner. */
+#include "fat16_space.inc"

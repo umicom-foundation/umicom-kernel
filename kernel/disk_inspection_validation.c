@@ -8,6 +8,7 @@
  * Author: Sammy Hegab, Umicom Foundation. Licence: MIT.
  *---------------------------------------------------------------------------*/
 #include "umicom/kernel/disk_console.h"
+#include "umicom/kernel/fat16_space.h"
 #include "umicom/kernel/physical_memory.h"
 #include "umicom/kernel/console.h"
 #include "umicom/kernel/platform.h"
@@ -110,6 +111,16 @@ void UmicomKernelDiskInspectionValidate(void)
     UmicomDiskRequire(UmicomKernelFat16Read(&umicomFixtureVolume, "/../README.TXT", 0U,
         umicomFixtureOutput, 1U, &bytes) == UMICOM_DISK_INVALID_ARGUMENT && bytes == 99U &&
         umicomFixtureOutput[0] == 0xa5U, "unsupported path leaves output unchanged");
+    /* Count the real fixture through the same guest block lease. Counts alone
+     * intentionally do not claim that every allocated cluster has an owner. */
+    UmicomKernelFat16Space space;
+    UmicomDiskValidationClear(&space, sizeof(space));
+    UmicomDiskRequire(UmicomKernelFat16SpaceRead(&umicomFixtureVolume, &space) == UMICOM_DISK_OK &&
+        space.totalClusters == 12159U && space.freeClusters == 12153U &&
+        space.allocatedClusters == 6U && space.badClusters == 0U &&
+        space.clusterBytes == 512U && space.freeBytes == 6222336U,
+        "bounded mirrored allocation counts");
+    UmicomKernelConsoleWriteLine("disk-inspection.allocation-counts=verified");
     UmicomDiskRequire(UmicomKernelFat16Close(&umicomFixtureVolume) == UMICOM_DISK_OK, "interpretation retired");
     UmicomDiskRequire(UmicomKernelBlockClose(domain, source.handle) == UMICOM_BLOCK_OK, "device reset before DMA release");
     UmicomDiskRequire(UmicomKernelPhysicalMemorySnapshotRead(&after) == UMICOM_KERNEL_MEMORY_OK &&

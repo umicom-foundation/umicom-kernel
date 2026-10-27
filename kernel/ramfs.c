@@ -402,6 +402,10 @@ static UmicomKernelVfsStatus UmicomRamfsEnumerate(void *context, UmicomKernelVfs
     *outNext = UMICOM_RAMFS_NODE_LIMIT;
     return UMICOM_VFS_END;
 }
+/* A snapshot must not overwrite the owner, object-cache pages or file data.
+ * The bounded staged implementation replaces direct publication below; retain
+ * the earlier implementation to review the ownership defect and its repair. */
+#if 0
 UmicomKernelVfsStatus UmicomKernelRamfsSnapshot(UmicomKernelRamfs *fs, UmicomKernelRamfsInfo *outInfo)
 {
     if (outInfo == (UmicomKernelRamfsInfo *)0) return UMICOM_VFS_INVALID_ARGUMENT;
@@ -420,10 +424,21 @@ UmicomKernelVfsStatus UmicomKernelRamfsSnapshot(UmicomKernelRamfs *fs, UmicomKer
     }
     return UMICOM_VFS_OK;
 }
+#endif
+#include "ramfs_snapshot.inc"
+
 UmicomKernelVfsStatus UmicomKernelRamfsReap(UmicomKernelRamfs *fs, UmicomSize *outReaped)
 {
+    /* Reclamation mutates lifetime state. Validate result ownership before
+     * clearing its counter or releasing any page. Retain the earlier null-only
+     * admission below to document why a valid owner alone was insufficient. */
+#if 0
     if (outReaped == (UmicomSize *)0) return UMICOM_VFS_INVALID_ARGUMENT;
     UmicomKernelVfsStatus status = UmicomKernelRamfsValidate(fs);
+    if (status != UMICOM_VFS_OK) return status;
+#endif
+    UmicomKernelVfsStatus status = UmicomRamfsOutputAdmission(fs,
+        outReaped, sizeof(*outReaped), alignof(UmicomSize));
     if (status != UMICOM_VFS_OK) return status;
     *outReaped = 0U;
     for (UmicomSize i = 1U; i < UMICOM_RAMFS_NODE_LIMIT; ++i) {

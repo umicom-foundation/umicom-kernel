@@ -238,3 +238,11 @@ Use [Testing the writable disk console](docs/WRITABLE_CONSOLE_TESTING.md) for
 the PowerShell runner that creates a test disk, drives the normal console and
 verifies a file after reboot. The guide also explains mount argument errors,
 RAM and disk command namespaces, and host-terminal paste.
+
+## Learn and run the Kernel
+
+Start with the [Umicom Kernel user guide](docs/USER_GUIDE.md) for a complete Windows/QEMU workflow with logs. Then read [native program contracts](docs/NATIVE_PROGRAM_CONTRACTS.md) to trace an independently linked program checking the running Kernel interface.
+
+## Wiki and learning routes
+
+Start with the [Kernel wiki](docs/wiki/index.md) to choose a user journey, a source-reading topic or a beginner course. The wiki links existing guides and distinguishes emulator examples from physical-device and full application support.

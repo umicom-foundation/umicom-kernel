@@ -16,8 +16,12 @@
  *   through VFS I/O, and file snapshots go to the original executable loader.
  *   RAM contents are deliberately lost at poweroff; there is no disk driver here.
  *
- * AUTHOR AND ORGANISATION: Sammy Hegab, Umicom Foundation
- * LICENCE: MIT
+ * AUTHOR AND ORGANISATION:
+ * Sammy Hegab
+ * Umicom Foundation
+ *
+ * LICENCE:
+ * MIT
  *---------------------------------------------------------------------------*/
 #ifdef UMICOM_KERNEL_READ_ONLY_BLOCK
 /* Disk inspection is separate from the RAM filesystem and uses no raw addresses. */
@@ -35,6 +39,7 @@
 #include "umicom/kernel/hardware_catalogue.h"
 #endif
 #include "umicom/kernel/console_shell.h"
+#include "umicom/kernel/native_abi.h"
 #ifdef UMICOM_KERNEL_DISK_FILESYSTEM
 /* This mounted domain does not replace the shell's writable RAMFS owner. */
 #include "umicom/kernel/disk_filesystem_console.h"
@@ -92,6 +97,19 @@ static void UmicomShellText(UmicomKernelConsoleShell *shell, const char *text)
 {
     shell->output(shell->outputContext, text, UmicomShellLength(text));
 }
+#if defined(UMICOM_KERNEL_DISK_INSPECTION) || defined(UMICOM_KERNEL_DISK_FILESYSTEM)
+/* These two read-only adapters return argument failures without presentation.
+ * The shell supplies one diagnostic while it still owns command admission.
+ * Adapters with their own field-specific messages keep their existing paths. */
+static UmicomKernelShellStatus UmicomShellFinishAdapter(
+    UmicomKernelConsoleShell *shell, UmicomKernelShellStatus status)
+{
+    if (status == UMICOM_SHELL_INVALID_ARGUMENT)
+        UmicomShellText(shell, "unknown command or incorrect arguments; use help\r\n");
+    shell->busy = UMICOM_FALSE;
+    return status;
+}
+#endif
 static void UmicomShellNumber(UmicomKernelConsoleShell *shell, UmicomU64 value)
 {
     char digits[20];
@@ -270,6 +288,7 @@ static UmicomKernelShellStatus UmicomShellCat(UmicomKernelConsoleShell *shell, c
     UmicomShellText(shell, "\r\n");
     return UmicomShellFileFinish(shell, status);
 }
+#include "console_file_range.inc"
 static UmicomKernelShellStatus UmicomShellWrite(UmicomKernelConsoleShell *shell,
     const char *path, const char *text, UmicomBoolean append)
 {
@@ -507,13 +526,35 @@ UmicomKernelShellStatus UmicomKernelConsoleShellExecute(UmicomKernelConsoleShell
     /* Keep disk interpretation outside the RAMFS command implementation. */
     UmicomBoolean diskHandled = UMICOM_FALSE;
     const UmicomKernelShellStatus diskResult = UmicomKernelDiskInspectionCommand(shell, &command, &diskHandled);
+    /* Command adapters return typed failures without writing usage text.
+     * The interactive shell owns that presentation and keeps its busy guard
+     * while emitting it, so an output callback cannot start another command.
+     * Retain the silent dispatch for comparison with the reported behaviour. */
+#if 0
     if (diskHandled) { shell->busy = UMICOM_FALSE; return diskResult; }
+#endif
+    /* The shared finish path retains this presentation and extends it to the
+     * read-only mount adapter. Keep the first local form for review. */
+#if 0
+    if (diskHandled) {
+        if (diskResult == UMICOM_SHELL_INVALID_ARGUMENT)
+            UmicomShellText(shell, "unknown command or incorrect arguments; use help\r\n");
+        shell->busy = UMICOM_FALSE;
+        return diskResult;
+    }
+#endif
+    if (diskHandled) return UmicomShellFinishAdapter(shell, diskResult);
 #endif
 #ifdef UMICOM_KERNEL_DISK_FILESYSTEM
     UmicomBoolean filesystemHandled = UMICOM_FALSE;
     const UmicomKernelShellStatus filesystemResult = UmicomKernelDiskFilesystemCommand(shell,
         &command, &filesystemHandled);
+    /* Incorrect mount coordinates previously returned silently. Keep the
+     * typed status and existing admission ordering, but report it to the user. */
+#if 0
     if (filesystemHandled) { shell->busy = UMICOM_FALSE; return filesystemResult; }
+#endif
+    if (filesystemHandled) return UmicomShellFinishAdapter(shell, filesystemResult);
 #endif
 #ifdef UMICOM_KERNEL_DISK_WRITABLE_FILESYSTEM
     UmicomBoolean writableFilesystemHandled = UMICOM_FALSE;
@@ -541,6 +582,7 @@ UmicomKernelShellStatus UmicomKernelConsoleShellExecute(UmicomKernelConsoleShell
 #endif
     UmicomBoolean poweroff = UMICOM_FALSE;
     if (UmicomShellEqual(name, "help") && command.count == 1U) {
+        UmicomShellText(shell, "abi (compiled native interface metadata; no authority granted)\r\n");
 #ifdef UMICOM_KERNEL_FAT16_FILE_COMMIT
         UmicomShellText(shell, "fatfileopen SLOT PART | fatfiletime YYYY-MM-DDTHH:MM:SS | fatfilestage PATH OFFSET \"TEXT\" | fatfilecommit | fatfileinfo | fatfileclose\r\n");
         UmicomShellText(shell, "fatfileappend PATH \"TEXT\" | append at EOF within the file's existing final-cluster space; then fatfilecommit\r\n");
@@ -574,6 +616,7 @@ UmicomKernelShellStatus UmicomKernelConsoleShellExecute(UmicomKernelConsoleShell
         UmicomShellText(shell, "Writable VFS commands finish each mutation before success. No separate commit command; close never repairs a failed operation.\r\n");
 #endif
 #ifdef UMICOM_KERNEL_DISK_INSPECTION
+        UmicomShellText(shell, "fatspace SLOT PART: read-only allocation counts\r\n");
         UmicomShellText(shell, "partitions SLOT | fatinfo SLOT PART | fatls SLOT PART PATH | fatcat SLOT PART PATH | diskclose\r\n");
         UmicomShellText(shell, "fatstat SLOT PART PATH (persisted attributes and write time; read-only)\r\n");
 #endif
@@ -592,10 +635,13 @@ UmicomKernelShellStatus UmicomKernelConsoleShellExecute(UmicomKernelConsoleShell
 #ifdef UMICOM_KERNEL_PROGRAM_LAUNCH
         UmicomShellText(shell, "exec PATH [ARG ...] | execrw PATH [ARG ...] (structured argv)\r\n");
 #endif
+        UmicomShellText(shell, "read PATH OFFSET BYTES (RAM file, at most 4096 source bytes)\r\n");
         UmicomShellText(shell,
             "help | about | status | mem | pwd\r\n"
             "ls [PATH] | stat PATH | cat PATH\r\n"
             "mkdir PATH | create PATH | rm PATH | rmdir PATH | reap\r\n"
+            "read PATH OFFSET BYTES (escaped text; up to 4096 bytes)\r\n"
+            "hex PATH OFFSET BYTES (up to 4096 bytes)\r\n"
             "write PATH \"TEXT\" | append PATH \"TEXT\"\r\n"
             "run PATH [UNSIGNED] | runrw PATH [UNSIGNED]\r\n"
             "poweroff\r\n"
@@ -619,6 +665,48 @@ UmicomKernelShellStatus UmicomKernelConsoleShellExecute(UmicomKernelConsoleShell
 #endif
 #endif
 #endif /* Preserve the established about strings for their original profiles. */
+    } else if (UmicomShellEqual(name, "abi") && command.count == 1U) {
+        /* The monitor owns feature selection. Reading it here avoids a second
+         * list inferred from the console translation unit's build definitions. */
+        const UmicomU64 version = UmicomKernelUserAbiQuery(UMICOM_USER_ABI_QUERY_VERSION, 0U, 0U);
+        UmicomShellText(shell, "abi.version=");
+        UmicomShellNumber(shell, version >> 16U);
+        UmicomShellText(shell, ".");
+        UmicomShellNumber(shell, version & 0xffffU);
+        UmicomShellText(shell, "\r\n");
+        /* This table is immutable Kernel metadata. Static storage avoids a
+         * compiler-generated stack copy and its unavailable freestanding memcpy.
+         * Retain the original automatic aggregate for diagnostic review. */
+#if 0
+        const struct {
+            const char *label;
+            UmicomU64 selector;
+        } fields[] = {
+            {"abi.word-bits=", UMICOM_USER_ABI_QUERY_WORD_BITS},
+            {"abi.byte-order=", UMICOM_USER_ABI_QUERY_BYTE_ORDER},
+            {"abi.page-bytes=", UMICOM_USER_ABI_QUERY_PAGE_BYTES},
+            {"abi.copy-limit=", UMICOM_USER_ABI_QUERY_COPY_LIMIT},
+            {"abi.call-limit=", UMICOM_USER_ABI_QUERY_CALL_LIMIT},
+            {"abi.compiled-features=", UMICOM_USER_ABI_QUERY_FEATURES}
+        };
+#endif
+        static const struct {
+            const char *label;
+            UmicomU64 selector;
+        } fields[] = {
+            {"abi.word-bits=", UMICOM_USER_ABI_QUERY_WORD_BITS},
+            {"abi.byte-order=", UMICOM_USER_ABI_QUERY_BYTE_ORDER},
+            {"abi.page-bytes=", UMICOM_USER_ABI_QUERY_PAGE_BYTES},
+            {"abi.copy-limit=", UMICOM_USER_ABI_QUERY_COPY_LIMIT},
+            {"abi.call-limit=", UMICOM_USER_ABI_QUERY_CALL_LIMIT},
+            {"abi.compiled-features=", UMICOM_USER_ABI_QUERY_FEATURES}
+        };
+        for (UmicomSize index = 0U; index < sizeof(fields) / sizeof(fields[0]); ++index) {
+            UmicomShellText(shell, fields[index].label);
+            UmicomShellNumber(shell, UmicomKernelUserAbiQuery(fields[index].selector, 0U, 0U));
+            UmicomShellText(shell, "\r\n");
+        }
+        UmicomShellText(shell, "Compiled services describe this image, not granted permissions.\r\n");
     } else if (UmicomShellEqual(name, "pwd") && command.count == 1U) {
         UmicomShellText(shell, "/\r\n"); /* There is no mutable working directory. */
     } else if (UmicomShellEqual(name, "status") && command.count == 1U) {
@@ -639,6 +727,24 @@ UmicomKernelShellStatus UmicomKernelConsoleShellExecute(UmicomKernelConsoleShell
         result = UmicomShellInspect(shell, path, UMICOM_FALSE);
     } else if (UmicomShellEqual(name, "cat") && command.count == 2U) {
         result = UmicomShellCat(shell, path);
+    } else if (UmicomShellEqual(name, "read") && command.count == 4U) {
+        UmicomU64 offset = 0U, bytesToRead = 0U;
+        const char *const length = command.bytes + command.offsets[3];
+        if (!UmicomKernelShellUnsigned(text, &offset) ||
+            !UmicomKernelShellUnsigned(length, &bytesToRead) ||
+            offset > UMICOM_RAMFS_FILE_BYTES || bytesToRead > UMICOM_SHELL_READ_BYTES) {
+            UmicomShellText(shell, "read requires a decimal RAM file offset and 0..4096 bytes\r\n");
+            result = UMICOM_SHELL_RANGE;
+        } else result = UmicomShellReadRange(shell, path, (UmicomSize)offset, (UmicomSize)bytesToRead);
+    } else if (UmicomShellEqual(name, "hex") && command.count == 4U) {
+        UmicomU64 offset = 0U, bytesToRead = 0U;
+        const char *const length = command.bytes + command.offsets[3];
+        if (!UmicomKernelShellUnsigned(text, &offset) ||
+            !UmicomKernelShellUnsigned(length, &bytesToRead) ||
+            offset > UMICOM_RAMFS_FILE_BYTES || bytesToRead > UMICOM_SHELL_READ_BYTES) {
+            UmicomShellText(shell, "hex requires a decimal RAM file offset and 0..4096 bytes\r\n");
+            result = UMICOM_SHELL_RANGE;
+        } else result = UmicomShellHexRange(shell, path, (UmicomSize)offset, (UmicomSize)bytesToRead);
     } else if ((UmicomShellEqual(name, "write") || UmicomShellEqual(name, "append")) && command.count == 3U) {
         result = UmicomShellWrite(shell, path, text, UmicomShellEqual(name, "append"));
     } else if ((UmicomShellEqual(name, "mkdir") || UmicomShellEqual(name, "create")) && command.count == 2U) {

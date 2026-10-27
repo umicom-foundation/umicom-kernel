@@ -68,3 +68,47 @@ if(UMICOM_VFS_TEST_EXECUTABLE)
 else()
     message(STATUS "No diagnostic ELF supplied: the optional file-to-loader test is not registered")
 endif()
+
+# Snapshot results may not overwrite the filesystem, cache or file pages.
+# Use the same real allocator and frame-release injection as the original suite.
+add_executable(umicom-ramfs-snapshot-tests snapshot_tests.c
+    ../../kernel/vfs.c ../../kernel/ramfs.c ../../kernel/object_cache.c
+    ../../kernel/physical_memory.c ../../kernel/address.c)
+target_include_directories(umicom-ramfs-snapshot-tests PRIVATE ../../include)
+if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
+    target_compile_options(umicom-ramfs-snapshot-tests PRIVATE
+        -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)
+    if(UMICOM_VFS_SANITIZERS)
+        target_compile_options(umicom-ramfs-snapshot-tests PRIVATE
+            -fsanitize=address,undefined -fno-omit-frame-pointer)
+        target_link_options(umicom-ramfs-snapshot-tests PRIVATE -fsanitize=address,undefined)
+    endif()
+endif()
+foreach(case IN ITEMS ordinary unlinked closing null_owner null_result owner_alignment result_alignment
+        owner_overflow result_overflow owner_alias root_alias cache_alias node_alias cache_page_alias
+        data_alias data_tail_alias second_page_alias copied unsafe pin_overflow)
+    add_test(NAME "kernel.ramfs.snapshot.${case}" COMMAND umicom-ramfs-snapshot-tests "${case}")
+    set_tests_properties("kernel.ramfs.snapshot.${case}" PROPERTIES TIMEOUT 30)
+endforeach()
+
+# Reclamation reports completed nodes even after a release refusal, but an
+# invalid result pointer must not trigger any mutation or frame release.
+add_executable(umicom-ramfs-reap-tests reap_tests.c
+    ../../kernel/vfs.c ../../kernel/ramfs.c ../../kernel/object_cache.c
+    ../../kernel/physical_memory.c ../../kernel/address.c)
+target_include_directories(umicom-ramfs-reap-tests PRIVATE ../../include)
+if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
+    target_compile_options(umicom-ramfs-reap-tests PRIVATE
+        -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)
+    if(UMICOM_VFS_SANITIZERS)
+        target_compile_options(umicom-ramfs-reap-tests PRIVATE
+            -fsanitize=address,undefined -fno-omit-frame-pointer)
+        target_link_options(umicom-ramfs-reap-tests PRIVATE -fsanitize=address,undefined)
+    endif()
+endif()
+foreach(case IN ITEMS linked pinned unlinked closing release_retry null_owner null_result
+        owner_alignment result_alignment owner_overflow result_overflow owner_alias root_alias
+        cache_alias node_alias cache_page_alias data_alias data_tail_alias second_page_alias copied unsafe)
+    add_test(NAME "kernel.ramfs.reap.${case}" COMMAND umicom-ramfs-reap-tests "${case}")
+    set_tests_properties("kernel.ramfs.reap.${case}" PROPERTIES TIMEOUT 30)
+endforeach()

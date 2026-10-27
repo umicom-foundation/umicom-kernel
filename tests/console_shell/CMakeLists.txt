@@ -61,3 +61,17 @@ foreach(UMICOM_UART_CASE IN ITEMS null-output idle-output-unchanged all-byte-val
     add_test(NAME kernel.console.uart.${UMICOM_UART_CASE} COMMAND umicom-console-uart-tests ${UMICOM_UART_CASE})
     set_tests_properties(kernel.console.uart.${UMICOM_UART_CASE} PROPERTIES SKIP_RETURN_CODE 77)
 endforeach()
+
+# Range cases exercise the same real VFS and descriptor lifecycle as the shell.
+foreach(case IN ITEMS middle page-boundary budget tail eof beyond-eof zero empty binary
+        partial-error read-error independent-position reentry repeated errors invalid)
+    add_test(NAME "kernel.console.range-${case}" COMMAND umicom-console-tests "range-${case}")
+    set_tests_properties("kernel.console.range-${case}" PROPERTIES TIMEOUT 30)
+endforeach()
+
+# Binary views share the reader, but row boundaries must survive short reads.
+foreach(case IN ITEMS all-bytes page-boundary budget tail eof zero short-read
+        partial-error independent-position invalid reentry)
+    add_test(NAME "kernel.console.hex-${case}" COMMAND umicom-console-tests "hex-${case}")
+    set_tests_properties("kernel.console.hex-${case}" PROPERTIES TIMEOUT 30)
+endforeach()

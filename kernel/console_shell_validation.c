@@ -7,8 +7,12 @@
  *   requiring terminal input in an automated guest. User programs are actual
  *   independently linked ELF images, not calls into Kernel test functions.
  *
- * AUTHOR AND ORGANISATION: Sammy Hegab, Umicom Foundation
- * LICENCE: MIT
+ * AUTHOR AND ORGANISATION:
+ * Sammy Hegab
+ * Umicom Foundation
+ *
+ * LICENCE:
+ * MIT
  *---------------------------------------------------------------------------*/
 #include "umicom/kernel/console_shell.h"
 #include "console_internal.h"
@@ -83,6 +87,12 @@ void UmicomKernelConsoleShellValidateExecution(void)
         "mount and seed one private shell filesystem");
 
     UmicomKernelConsoleWriteLine("console-shell.case=editing-and-file-commands");
+    /* Read-only interface inspection shares the normal command parser.
+     * Additional arguments must be refused instead of silently ignored. */
+    UmicomConsoleCommand("abi");
+    UmicomConsoleExpect(UmicomKernelConsoleShellExecute(&umicomConsoleValidation,
+        "abi extra", sizeof("abi extra") - 1U) != UMICOM_SHELL_OK,
+        "ABI inspection refuses extra arguments");
     const char edited[] = "create /notes/draftx\b\r\n";
     /* Backspace removes the final x before Enter. The CR+LF pair must create
      * exactly one file rather than submit a second, empty command. */
@@ -96,6 +106,16 @@ void UmicomKernelConsoleShellValidateExecution(void)
     UmicomConsoleCommand("ls /notes");
     UmicomConsoleCommand("stat /notes/plan");
     UmicomConsoleCommand("cat /notes/plan");
+    /* Range inspection borrows a new descriptor and must remain bounded even
+     * though the underlying RAM file supports larger data. Serial integration
+     * separately verifies the exact text and progress report. */
+    UmicomConsoleCommand("read /notes/plan 9 8");
+    UmicomConsoleCommand("read /notes/plan 0 0");
+    UmicomConsoleCommand("read /notes/plan 131072 4096");
+    UmicomConsoleExpect(UmicomKernelConsoleShellExecute(&umicomConsoleValidation,
+        "read /notes/plan 0 4097", sizeof("read /notes/plan 0 4097") - 1U) == UMICOM_SHELL_RANGE,
+        "range view refuses output above its independent serial budget");
+    UmicomConsoleExpect(umicomConsoleValidation.descriptor == 0U, "range inspection retains no descriptor");
     UmicomKernelFileDescriptor fd = 0U;
     char result[64];
     UmicomConsoleClear(result, sizeof(result));

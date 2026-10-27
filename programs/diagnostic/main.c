@@ -21,6 +21,7 @@
  *---------------------------------------------------------------------------*/
 #include "umicom/kernel/types.h"
 #include "umicom/kernel/user_abi.h"
+#include "umicom/user/native_contract.h"
 
 /* Definitions are deliberately in separate permission classes. The zero array
  * crosses a page boundary so an incomplete BSS mapping cannot pass by accident. */
@@ -70,6 +71,26 @@ UmicomU64 UmicomProgramMain(UmicomU64 argument)
     if (argument == 3U) {
         UmicomProgramBusyLoop();
         return 0xe006U;
+    }
+    /* A separately loaded program uses the same discoverable contract as
+     * future native clients. Other arguments retain their original behavior. */
+    if (argument == 4U) {
+        UmicomUserContract contract;
+        if (UmicomUserContractDiscover(UmicomProgramSystemCall, &contract) != UMICOM_USER_CONTRACT_OK)
+            return 0xe007U;
+        /* The client now centralizes requirement checks and counts the two
+         * initial calls plus seven discovery calls. Retain the original
+         * fixed check for review; it did not express remaining-call ownership. */
+#if 0
+        if (contract.copyLimit < 16U || contract.callLimit < 10U)
+            return 0xe008U;
+#else
+        static const UmicomUserRequirements requirements = {
+            sizeof(UmicomUserRequirements), 0U, 0U, 16U, 9U, 1U
+        };
+        if (UmicomUserContractCheck(&contract, &requirements) != UMICOM_USER_READY)
+            return 0xe008U;
+#endif
     }
     /* A caller can predict this value from its assigned identity and argument.
      * Both the data initialiser and a successful write contribute to it. */

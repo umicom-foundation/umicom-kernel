@@ -14,9 +14,11 @@
  *   outcomes deterministically without relying on a host's interrupt timing.
  *
  * AUTHOR AND ORGANISATION:
- *   Sammy Hegab
- *   Umicom Foundation
- * LICENCE: MIT
+ * Sammy Hegab
+ * Umicom Foundation
+ *
+ * LICENCE:
+ * MIT
  *---------------------------------------------------------------------------*/
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,7 +29,26 @@
 #include "umicom/kernel/platform.h"
 
 #define UMICOM_MODEL_RAM_BYTES 1048576U
+/* A static 1 MiB alignment cannot be encoded by the Windows COFF compiler.
+ * Keep the original declaration for review. The bounded backing below supplies
+ * the same aligned one-MiB region needed by PMP admission, without weakening
+ * the architecture model or depending on a host aligned-allocation extension. */
+#if 0
 alignas(UMICOM_MODEL_RAM_BYTES) static UmicomU8 umicomModelRam[UMICOM_MODEL_RAM_BYTES];
+#endif
+static_assert((UMICOM_MODEL_RAM_BYTES & (UMICOM_MODEL_RAM_BYTES - 1U)) == 0U,
+    "The PMP model requires a power-of-two memory extent.");
+static UmicomU8 umicomModelBacking[2U * UMICOM_MODEL_RAM_BYTES - 1U];
+static UmicomU8 (*UmicomModelRamBuffer(void))[UMICOM_MODEL_RAM_BYTES]
+{
+    const UmicomAddress address = (UmicomAddress)umicomModelBacking;
+    const UmicomSize remainder = address & (UMICOM_MODEL_RAM_BYTES - 1U);
+    const UmicomSize skip = remainder == 0U ? 0U : UMICOM_MODEL_RAM_BYTES - remainder;
+    /* skip is at most extent-1, leaving a complete extent inside the backing.
+     * Keep an array lvalue so every existing sizeof still means bytes of RAM. */
+    return (UmicomU8 (*)[UMICOM_MODEL_RAM_BYTES])(void *)(umicomModelBacking + skip);
+}
+#define umicomModelRam (*UmicomModelRamBuffer())
 static UmicomU8 umicomModelElf[16384U];
 static UmicomKernelUserScheduler umicomModelScheduler;
 static UmicomRiscvSupervisorMachineState umicomModelMachine;
@@ -151,6 +172,8 @@ static void UmicomModelSegment(UmicomSize index, UmicomU64 flags, UmicomU64 offs
 }
 static void UmicomModelSetup(void)
 {
+    UmicomModelRequire(((UmicomAddress)umicomModelRam & (UMICOM_MODEL_RAM_BYTES - 1U)) == 0U,
+        "the complete model RAM region retains PMP size alignment");
     memset(umicomModelRam, 0, sizeof(umicomModelRam));
     UmicomModelRequire(UmicomKernelPhysicalMemoryInitialize((UmicomAddress)umicomModelRam,
         sizeof(umicomModelRam)) == UMICOM_KERNEL_MEMORY_OK, "initialise model RAM");

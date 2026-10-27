@@ -1,13 +1,22 @@
 /*-----------------------------------------------------------------------------
- * Umicom Kernel console host checks
+ * Umicom Kernel
  * File: tests/console_shell/console_shell_tests.c
  *
- * Reuse the existing explicit ELF/RAM/CSR model without changing it. The real
- * command engine, supervisor, scheduler, file services, VFS, RAMFS, page tables
- * and allocators are linked. Only hardware entry/clock and selected allocator
- * refusals are models. This is not evidence of a RISC-V guest or a physical UART.
- * Sammy Hegab, Umicom Foundation. MIT licence.
+ * PURPOSE:
+ *   Exercise console parsing, file ranges, lifecycle and explicit machine models.
+ *
+ * AUTHOR AND ORGANISATION:
+ * Sammy Hegab
+ * Umicom Foundation
+ *
+ * LICENCE:
+ * MIT
  *---------------------------------------------------------------------------*/
+/* Reuse the existing ELF/RAM/CSR model. The real command engine, supervisor,
+ * scheduler, file services, VFS, RAMFS, page tables and allocators are linked.
+ * Only hardware entry/clock and selected allocator refusals are models. This
+ * is not evidence of a RISC-V guest or physical UART. */
+
 #define main UmicomConsoleEarlierSchedulingMain
 #define UmicomRiscvUserExecuteFrame UmicomConsoleEarlierEntry
 #include "../user_scheduling/user_scheduling_tests.c"
@@ -230,6 +239,8 @@ static void TestParse(const char *name)
         }
     } else { CHECK(0); }
 }
+#include "range_cases.inc"
+#include "hex_cases.inc"
 int main(int argc,char **argv)
 {
     if(argc!=2)return EXIT_FAILURE;
@@ -257,6 +268,12 @@ int main(int argc,char **argv)
         return EXIT_SUCCESS;
     }
     Initialise();
+    if (!strncmp(name, "hex-", 4U)) {
+        HexCase(name); Close(); printf("console hex case passed: %s\n", name); return EXIT_SUCCESS;
+    }
+    if (!strncmp(name, "range-", 6U)) {
+        RangeCase(name); Close(); printf("console range case passed: %s\n", name); return EXIT_SUCCESS;
+    }
     if(!strcmp(name,"seed-files")){
         Contents("/shared/report","Umicom report\n");CHECK(Command("ls /bin")==UMICOM_SHELL_OK);
         CHECK(strstr(transcript,"model.elf")!=NULL);

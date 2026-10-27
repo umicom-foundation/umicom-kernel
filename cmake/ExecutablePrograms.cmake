@@ -8,6 +8,7 @@
 add_executable(umicom-diagnostic-program
     "${CMAKE_CURRENT_SOURCE_DIR}/programs/diagnostic/entry.S"
     "${CMAKE_CURRENT_SOURCE_DIR}/programs/diagnostic/main.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/programs/support/native_contract.c"
 )
 target_include_directories(umicom-diagnostic-program PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -54,6 +55,12 @@ set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/arch/riscv64/executable
     PROPERTIES COMPILE_OPTIONS "-march=rv64imac_zicsr_zifencei")
 
 if(BUILD_TESTING AND UMICOM_QEMU_RISCV64)
+    add_test(NAME kernel.riscv64.native_contract_client
+        COMMAND "${UMICOM_QEMU_RISCV64}" ${UMICOM_QEMU_RISCV64_ARGUMENTS})
+    set_tests_properties(kernel.riscv64.native_contract_client PROPERTIES
+        TIMEOUT 15 FIXTURES_REQUIRED kernel_current_image
+        PASS_REGULAR_EXPRESSION "UMICOM_KERNEL_NATIVE_CONTRACT_CLIENT_READY"
+        FAIL_REGULAR_EXPRESSION "UMICOM_KERNEL_FAIL;unexpected-trap;panic;PANIC;failed;FAILED")
     add_test(NAME kernel.riscv64.executable_loading
         COMMAND "${UMICOM_QEMU_RISCV64}" ${UMICOM_QEMU_RISCV64_ARGUMENTS})
     set_tests_properties(kernel.riscv64.executable_loading PROPERTIES

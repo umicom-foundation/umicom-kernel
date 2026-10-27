@@ -34,6 +34,8 @@
 /* Structured launch adds a command token plus up to sixteen argv elements. */
 #define UMICOM_SHELL_TOKEN_LIMIT 17U
 #define UMICOM_SHELL_IMAGE_BYTES 131072U
+/* A serial range view limits source bytes, before terminal escaping. */
+#define UMICOM_SHELL_READ_BYTES 4096U
 #define UMICOM_SHELL_QUANTUM_TICKS 50000U
 #define UMICOM_SHELL_SLICE_LIMIT 256U
 

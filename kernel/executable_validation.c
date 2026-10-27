@@ -97,7 +97,13 @@ static void UmicomExecutableRun(UmicomKernelProcess *process, const char *name,
     if (expectedState == UMICOM_PROCESS_EXITED) {
         UmicomExecutableDecimal("executable.exit-value", process->report.exitValue);
         UmicomExecutableRequire(process->report.exitValue == process->identity + argument + 33U &&
+            /* Argument 4 adds seven versioned discovery calls. Preserve the
+             * previous three-call expectation for every other loaded case. */
+#if 0
             process->report.callCount == 3U ? UMICOM_TRUE : UMICOM_FALSE, "executable-data-bss-or-exit");
+#endif
+            process->report.callCount == (argument == 4U ? 10U : 3U)
+                ? UMICOM_TRUE : UMICOM_FALSE, "executable-data-bss-or-exit");
     }
     /* A terminal image is retained for inspection, not implicitly restarted. */
     UmicomExecutableRequire(UmicomKernelProcessRun(process, argument, 1000000U) == UMICOM_PROCESS_BAD_STATE
@@ -169,6 +175,12 @@ void UmicomKernelExecutableLoadingValidate(void)
     UmicomExecutableRequire(UmicomKernelProcessDestroy(&umicomExecutableProcessA) == UMICOM_PROCESS_BAD_STATE
         ? UMICOM_TRUE : UMICOM_FALSE, "executable-double-destroy");
 
+    UmicomExecutableCreate(&umicomExecutableProcessA, UmicomEmbeddedExecutableStart, bytes, 506U);
+    UmicomExecutableRun(&umicomExecutableProcessA, "loaded-contract-discovery", 4U,
+        UMICOM_PROCESS_EXITED, 8U);
+    UmicomExecutableRequire(UmicomKernelProcessDestroy(&umicomExecutableProcessA) == UMICOM_PROCESS_OK
+        ? UMICOM_TRUE : UMICOM_FALSE, "executable-destroy-contract");
+
     UmicomRiscvTrapSnapshot trapBefore;
     UmicomRiscvTrapSnapshot trapAfter;
     UmicomRiscvTrapSnapshotRead(&trapBefore);
@@ -184,7 +196,13 @@ void UmicomKernelExecutableLoadingValidate(void)
         ? UMICOM_TRUE : UMICOM_FALSE, "executable-frame-accounting");
     UmicomKernelConsoleWriteLine("executable.original-trap-handler=pass");
     UmicomKernelConsoleWriteLine("executable.frame-accounting=restored");
+    /* Six loaded executions now include contract discovery. Keep the old
+     * marker for review; the original five cases still execute above. */
+#if 0
     UmicomKernelConsoleWriteLine("executable.completed-cases=5");
+#endif
+    UmicomKernelConsoleWriteLine("executable.completed-cases=6");
+    UmicomKernelConsoleWriteLine("UMICOM_KERNEL_NATIVE_CONTRACT_CLIENT_READY");
     UmicomKernelConsoleWriteLine("executable-loading-test=pass");
     UmicomKernelConsoleWriteLine("UMICOM_KERNEL_EXECUTABLE_LOADING_READY");
 }

@@ -159,3 +159,20 @@ Keep the source and linked-image identity with the result using the
 [user-memory guide](USER_MEMORY_BOUNDARIES.md) explains the related complete-span
 checks. A native Framework adapter remains separate work; discovery alone does
 not make Framework applications runnable on the experimental Kernel.
+
+## Native program client
+
+The [native program contract guide](NATIVE_PROGRAM_CONTRACTS.md) follows the separately linked C client and Assembly bridge. The [user guide](USER_GUIDE.md) explains preparation and log capture step by step.
+
+## Inspect the same contract from the console
+
+The trusted development console accepts `abi` with no arguments. It calls
+`UmicomKernelUserAbiQuery`, the same pure metadata reader used after user-origin
+checks in the trap dispatcher. It does not simulate an environment call and
+does not consume a user process's invocation budget.
+
+The declaration lives in `include/umicom/kernel/native_abi.h`. Presentation
+uses immutable static metadata so a freestanding debug build does not require
+a compiler-generated aggregate copy through hosted `memcpy`.
+See [the console exercise](CONSOLE_LEARNING_GUIDE.md) for commands and expected
+meaning. User programs continue using ABI_QUERY through their Assembly bridge.

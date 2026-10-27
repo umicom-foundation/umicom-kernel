@@ -22,8 +22,17 @@
  * LICENCE:
  *   MIT
  *---------------------------------------------------------------------------*/
+/* The exported metadata reader is available in every native image, including
+ * images without the optional managed-services route. Its declaration must
+ * therefore be checked in every compilation of this implementation. */
+#include "umicom/kernel/native_abi.h"
 #ifdef UMICOM_KERNEL_MANAGED_SERVICES
 /* Explicit readiness reports use the same checked trap and saved-frame path. */
+/* Retain the earlier conditional placement for review; the unconditional
+ * declaration above now keeps non-service images type-checked as well. */
+#if 0
+#include "umicom/kernel/native_abi.h"
+#endif
 #include "umicom/kernel/service_manager.h"
 #endif
 #ifdef UMICOM_KERNEL_BLOCKING_IPC
@@ -89,8 +98,16 @@ static UmicomU64 UmicomKernelUserCopy(
 /* Querying the contract shares the normal origin, instruction and budget
  * checks. It never exposes Kernel addresses or grants a service binding.
  * Compile-time routes describe this image rather than the development host. */
+/* Share this pure metadata reader with trusted console presentation. Only
+ * the trap entry supplies the user-origin and budget checks described above.
+ * Retain the earlier private declaration for review; the body is unchanged. */
+#if 0
 static UmicomU64 UmicomKernelUserAbiQuery(UmicomU64 selector,
     UmicomU64 reservedFirst, UmicomU64 reservedSecond)
+#else
+UmicomU64 UmicomKernelUserAbiQuery(UmicomU64 selector,
+    UmicomU64 reservedFirst, UmicomU64 reservedSecond)
+#endif
 {
     if (reservedFirst != 0U || reservedSecond != 0U)
         return UMICOM_USER_ABI_UNAVAILABLE;

@@ -13,6 +13,7 @@
 #include "umicom/kernel/disk_console.h"
 #include "umicom/kernel/platform.h"
 #include "umicom/kernel/disk_metadata_console.h"
+#include "umicom/kernel/disk_space_console.h"
 
 static UmicomKernelBlockDomain *umicomDiskDomain;
 static UmicomKernelBlockHandle umicomDiskHandle;
@@ -97,6 +98,8 @@ UmicomKernelDiskStatus UmicomKernelDiskInspect(UmicomSize slot, UmicomSize parti
         partition >= UMICOM_DISK_PRIMARY_PARTITIONS) return UMICOM_DISK_INVALID_ARGUMENT;
     if (UmicomDiskEqual(operation, "fatstat"))
         return UmicomKernelDiskMetadataInspect(slot, partition, path, context, output);
+    if (UmicomDiskEqual(operation, "fatspace"))
+        return UmicomKernelDiskSpaceInspect(slot, partition, context, output);
     const UmicomBoolean partitions = UmicomDiskEqual(operation, "partitions");
     const UmicomBoolean infoOnly = UmicomDiskEqual(operation, "fatinfo");
     const UmicomBoolean list = UmicomDiskEqual(operation, "fatls");
@@ -209,9 +212,14 @@ UmicomKernelShellStatus UmicomKernelDiskInspectionCommand(UmicomKernelConsoleShe
     }
     const UmicomBoolean parts = UmicomDiskEqual(name, "partitions");
     const UmicomBoolean info = UmicomDiskEqual(name, "fatinfo");
+    const UmicomBoolean space = UmicomDiskEqual(name, "fatspace");
     const UmicomBoolean list = UmicomDiskEqual(name, "fatls"), cat = UmicomDiskEqual(name, "fatcat");
     const UmicomBoolean close = UmicomDiskEqual(name, "diskclose");
+    /* The previous dispatch set is retained beside the extended read-only command. */
+#if 0
     if (!parts && !info && !list && !cat && !close) return UMICOM_SHELL_OK;
+#endif
+    if (!parts && !info && !space && !list && !cat && !close) return UMICOM_SHELL_OK;
     *handled = UMICOM_TRUE;
     if (close) {
         if (command->count != 1U) return UMICOM_SHELL_INVALID_ARGUMENT;
@@ -224,7 +232,11 @@ UmicomKernelShellStatus UmicomKernelDiskInspectionCommand(UmicomKernelConsoleShe
         shell->output(shell->outputContext, "\r\n", 2U);
         return status == UMICOM_BLOCK_OK ? UMICOM_SHELL_OK : UMICOM_SHELL_CLEANUP_FAILED;
     }
+    /* Capacity accepts the same slot and partition coordinates as fatinfo. */
+#if 0
     const UmicomSize expected = parts ? 2U : (info ? 3U : 4U);
+#endif
+    const UmicomSize expected = parts ? 2U : ((info || space) ? 3U : 4U);
     UmicomU64 slot = 0U, partition = 0U;
     if (command->count != expected || !UmicomKernelShellUnsigned(command->bytes + command->offsets[1], &slot) ||
         (!parts && !UmicomKernelShellUnsigned(command->bytes + command->offsets[2], &partition)) ||
@@ -345,6 +357,9 @@ static void UmicomDiskMetadataOutput(void *context, UmicomKernelBlockOutput outp
     } else UmicomDiskText(context, output, UmicomDiskMetadataState(stamp->state));
     output(context, "\r\n", 2U);
 }
+/* File metadata and volume capacity now share one guarded transport lifetime.
+ * Retain the original metadata-only implementation for engineering comparison. */
+#if 0
 UmicomKernelDiskStatus UmicomKernelDiskMetadataInspect(UmicomSize slot,
     UmicomSize partition, const char *path, void *context, UmicomKernelBlockOutput output)
 {
@@ -392,4 +407,76 @@ UmicomKernelDiskStatus UmicomKernelDiskMetadataInspect(UmicomSize slot,
     UmicomDiskClear(umicomDiskContent, sizeof(umicomDiskContent));
     umicomDiskBusy = UMICOM_FALSE;
     return result;
+}
+
+#endif
+#include "disk_space_output.inc"
+
+static UmicomKernelDiskStatus UmicomDiskSnapshotInspect(UmicomSize slot,
+    UmicomSize partition, const char *path, void *context, UmicomKernelBlockOutput output,
+    UmicomBoolean allocation)
+{
+    if (!path || !output || slot >= UMICOM_BLOCK_SLOT_LIMIT || partition >= UMICOM_DISK_PRIMARY_PARTITIONS ||
+        (UmicomAddress)path > ~(UmicomAddress)0 - UMICOM_FAT16_PATH_BYTES)
+        return UMICOM_DISK_INVALID_ARGUMENT;
+    if (umicomDiskBusy) return UMICOM_DISK_BUSY;
+    char selected[UMICOM_FAT16_PATH_BYTES];
+    UmicomDiskClear(selected, sizeof(selected));
+    UmicomSize length = 0U;
+    while (length < sizeof(selected) && path[length]) { selected[length] = path[length]; ++length; }
+    if (length == sizeof(selected)) return UMICOM_DISK_LIMIT;
+    if (!length || selected[0] != '/') return UMICOM_DISK_INVALID_ARGUMENT;
+    UmicomKernelFat16Metadata metadata;
+    UmicomKernelFat16Space space;
+    UmicomDiskClear(&space, sizeof(space));
+    UmicomKernelBlockInfo info;
+    UmicomDiskClear(&metadata, sizeof(metadata)); UmicomDiskClear(&info, sizeof(info));
+    umicomDiskBusy = UMICOM_TRUE;
+    umicomDiskMetadataReads = 0U; umicomDiskMetadataLimit = UMICOM_FALSE;
+    umicomDiskStarted = UmicomPlatformTimerRead(); umicomDiskClock = umicomDiskStarted;
+    UmicomKernelBlockStatus block = UmicomDiskMetadataOwnedClose();
+    const UmicomBoolean previousCloseFailed = block != UMICOM_BLOCK_OK;
+    if (block == UMICOM_BLOCK_OK) block = UmicomKernelBlockRetryClose();
+    if (block == UMICOM_BLOCK_OK) block = UmicomPlatformBlockDomainGet(&umicomDiskDomain);
+    if (block == UMICOM_BLOCK_OK)
+        block = UmicomKernelBlockOpen(umicomDiskDomain, slot, 10000000U, &umicomDiskHandle);
+    if (block == UMICOM_BLOCK_OK) block = UmicomKernelBlockProbe(umicomDiskDomain, slot, &info);
+    umicomDiskLastBlock = block;
+    UmicomKernelDiskStatus status = block == UMICOM_BLOCK_OK ? UMICOM_DISK_OK : UMICOM_DISK_IO_ERROR;
+    const UmicomKernelDiskReader reader = {info.sectors, UmicomDiskMetadataRead, &umicomDiskVolume};
+    if (status == UMICOM_DISK_OK) status = UmicomKernelFat16Open(&umicomDiskVolume, &reader, partition);
+    if (status == UMICOM_DISK_OK) status = allocation ?
+        UmicomKernelFat16SpaceRead(&umicomDiskVolume, &space) :
+        UmicomKernelFat16MetadataRead(&umicomDiskVolume, selected, &metadata);
+    if (umicomDiskMetadataLimit) status = UMICOM_DISK_LIMIT;
+    if (status == UMICOM_DISK_OK && !UmicomDiskMetadataDeadline()) status = UMICOM_DISK_IO_ERROR;
+    const UmicomKernelBlockStatus closed = previousCloseFailed ? block : UmicomDiskMetadataOwnedClose();
+    if (status == UMICOM_DISK_OK && !UmicomDiskMetadataDeadline()) status = UMICOM_DISK_IO_ERROR;
+    const UmicomKernelDiskStatus result = closed == UMICOM_BLOCK_OK ? status : UMICOM_DISK_IO_ERROR;
+    /* The snapshot is useful only when the complete command succeeds. A reset
+     * or release error retains the handle and emits status without metadata. */
+    if (result == UMICOM_DISK_OK) {
+        if (allocation) UmicomDiskSpaceOutput(context, output, &space);
+        else UmicomDiskMetadataOutput(context, output, &metadata);
+    }
+    UmicomDiskText(context, output, "disk.inspect="); UmicomDiskText(context, output, UmicomKernelDiskStatusName(result));
+    UmicomDiskText(context, output, " block="); UmicomDiskText(context, output, UmicomKernelBlockStatusName(umicomDiskLastBlock));
+    UmicomDiskText(context, output, " close="); UmicomDiskText(context, output, UmicomKernelBlockStatusName(closed));
+    output(context, "\r\n", 2U);
+    UmicomDiskClear(&metadata, sizeof(metadata)); UmicomDiskClear(selected, sizeof(selected));
+    UmicomDiskClear(umicomDiskContent, sizeof(umicomDiskContent));
+    UmicomDiskClear(&space, sizeof(space));
+    umicomDiskBusy = UMICOM_FALSE;
+    return result;
+}
+
+UmicomKernelDiskStatus UmicomKernelDiskMetadataInspect(UmicomSize slot,
+    UmicomSize partition, const char *path, void *context, UmicomKernelBlockOutput output)
+{
+    return UmicomDiskSnapshotInspect(slot, partition, path, context, output, UMICOM_FALSE);
+}
+UmicomKernelDiskStatus UmicomKernelDiskSpaceInspect(UmicomSize slot,
+    UmicomSize partition, void *context, UmicomKernelBlockOutput output)
+{
+    return UmicomDiskSnapshotInspect(slot, partition, "/", context, output, UMICOM_TRUE);
 }
