@@ -104,6 +104,177 @@ static void UmicomTestTeardown(void)
         UmicomKernelPhysicalMemoryValidate() == UMICOM_KERNEL_MEMORY_OK, "no fixture frame leaks");
 }
 
+/* Sweep the complete 64-byte copy budget across adjacent virtual pages backed
+ * by nonadjacent physical frames. Expected bytes are calculated independently
+ * of the production page walker, and refusal checks compare complete buffers. */
+static void UmicomTestSpanContract(const char *name)
+{
+    UmicomU8 probe[66];
+    UmicomU8 input[64];
+    UmicomU8 firstBefore[4096], secondBefore[4096];
+    UmicomU8 *const first = (UmicomU8 *)umicomTestFirst;
+    UmicomU8 *const second = (UmicomU8 *)umicomTestSecond;
+    for (UmicomSize i = 0U; i < sizeof(input); ++i) input[i] = (UmicomU8)i;
+
+    if (strcmp(name, "span-read-boundaries") == 0) {
+        for (UmicomSize i = 0U; i < 64U; ++i) {
+            first[4032U + i] = (UmicomU8)i;
+            second[i] = (UmicomU8)(0x80U + i);
+        }
+        for (UmicomSize split = 1U; split < 64U; ++split) {
+            memset(probe, 0xcc, sizeof(probe));
+            UmicomTestRequire(UmicomKernelUserMemoryRead(&umicomTestMemory,
+                UMICOM_TEST_DATA + 4096U - split, probe + 1U, 64U) ==
+                UMICOM_USER_RESULT_OK, "read every cross-page split");
+            UmicomTestRequire(probe[0] == 0xccU && probe[65] == 0xccU,
+                "read retains output guards");
+            for (UmicomSize i = 0U; i < 64U; ++i) {
+                const UmicomU8 expected = i < split
+                    ? (UmicomU8)(64U - split + i) : (UmicomU8)(0x80U + i - split);
+                UmicomTestRequire(probe[i + 1U] == expected, "read exact virtual ordering");
+            }
+        }
+        return;
+    }
+    if (strcmp(name, "span-write-boundaries") == 0) {
+        for (UmicomSize split = 1U; split < 64U; ++split) {
+            memset(first, 0xa5, 4096U);
+            memset(second, 0x5a, 4096U);
+            UmicomTestRequire(UmicomKernelUserMemoryWrite(&umicomTestMemory,
+                UMICOM_TEST_DATA + 4096U - split, input, 64U) ==
+                UMICOM_USER_RESULT_OK, "write every cross-page split");
+            for (UmicomSize i = 0U; i < 4096U; ++i) {
+                const UmicomU8 expectedFirst = i >= 4096U - split
+                    ? input[i - (4096U - split)] : 0xa5U;
+                const UmicomU8 expectedSecond = i < 64U - split
+                    ? input[split + i] : 0x5aU;
+                UmicomTestRequire(first[i] == expectedFirst && second[i] == expectedSecond,
+                    "write preserves every byte outside the destination span");
+            }
+        }
+        return;
+    }
+
+    memcpy(firstBefore, first, sizeof(firstBefore));
+    memcpy(secondBefore, second, sizeof(secondBefore));
+    memset(probe, 0xcc, sizeof(probe));
+    const UmicomAddress cross = UMICOM_TEST_DATA + 4088U;
+    UmicomU64 status = 0U, expected = UMICOM_USER_RESULT_DENIED;
+    if (strcmp(name, "span-read-refused-second") == 0) {
+        UmicomTestRequire(UmicomKernelVirtualMemoryUnmapPage(&umicomTestSpace,
+            UMICOM_TEST_DATA + 4096U) == UMICOM_KERNEL_VIRTUAL_MEMORY_OK,
+            "remove second source page");
+        status = UmicomKernelUserMemoryRead(&umicomTestMemory, cross, probe + 1U, 16U);
+        expected = UMICOM_USER_RESULT_BAD_ADDRESS;
+    } else if (strcmp(name, "span-write-readonly-second") == 0) {
+        UmicomTestRequire(UmicomKernelVirtualMemoryUnmapPage(&umicomTestSpace,
+            UMICOM_TEST_DATA + 4096U) == UMICOM_KERNEL_VIRTUAL_MEMORY_OK,
+            "replace second destination permissions");
+        UmicomTestMap(1U, UMICOM_TEST_DATA + 4096U, umicomTestSecond,
+            UMICOM_KERNEL_VIRTUAL_MEMORY_USER | UMICOM_KERNEL_VIRTUAL_MEMORY_READ);
+        status = UmicomKernelUserMemoryWrite(&umicomTestMemory, cross, input, 16U);
+    } else if (strcmp(name, "span-read-unowned-second") == 0) {
+        /* Fault injection: the PTE survives but the second ownership record is
+         * no longer available to this borrowed user-memory view. */
+        umicomTestMemory.pageCount = 1U;
+        status = UmicomKernelUserMemoryRead(&umicomTestMemory, cross, probe + 1U, 16U);
+    } else if (strcmp(name, "span-write-mismatched-second") == 0) {
+        /* Fault injection deliberately disagrees with the mapped backing frame. */
+        umicomTestPages[1].physicalBase = umicomTestOther;
+        status = UmicomKernelUserMemoryWrite(&umicomTestMemory, cross, input, 16U);
+    } else if (strcmp(name, "span-missing-middle") == 0) {
+        UmicomTestRequire(UmicomKernelVirtualMemoryUnmapPage(&umicomTestSpace,
+            UMICOM_TEST_DATA + 4096U) == UMICOM_KERNEL_VIRTUAL_MEMORY_OK,
+            "leave a hole between valid endpoints");
+        UmicomTestMap(1U, UMICOM_TEST_DATA + 8192U, umicomTestSecond,
+            UMICOM_KERNEL_VIRTUAL_MEMORY_USER | UMICOM_KERNEL_VIRTUAL_MEMORY_READ |
+            UMICOM_KERNEL_VIRTUAL_MEMORY_WRITE);
+        status = UmicomKernelUserMemoryCheck(&umicomTestMemory,
+            UMICOM_TEST_DATA, 8193U, UMICOM_KERNEL_VIRTUAL_MEMORY_READ);
+        expected = UMICOM_USER_RESULT_BAD_ADDRESS;
+    } else {
+        UmicomTestRequire(0, "unknown span contract");
+    }
+    UmicomTestRequire(status == expected, "complete span is refused before copying");
+    for (UmicomSize i = 0U; i < sizeof(probe); ++i)
+        UmicomTestRequire(probe[i] == 0xccU, "refused read retains complete output");
+    UmicomTestRequire(memcmp(firstBefore, first, sizeof(firstBefore)) == 0 &&
+        memcmp(secondBefore, second, sizeof(secondBefore)) == 0,
+        "refused write retains both complete physical pages");
+}
+
+/* Fixed expected wire values catch accidental renumbering. The fixture links
+ * the minimal monitor, so no optional service bit may be advertised. The real
+ * guest separately checks the feature-bearing Kernel image. */
+static void UmicomTestAbiContract(const char *name)
+{
+    UmicomKernelUserSession session;
+    UmicomRiscvTrapFrame frame;
+    UmicomU8 firstBefore[4096], secondBefore[4096];
+    memset(&session, 0, sizeof(session));
+    memset(&frame, 0x45, sizeof(frame));
+    session.memory = umicomTestMemory;
+    session.identity = 202U;
+    frame.mstatus = 0U;
+    frame.mcause = 8U;
+    frame.mepc = UMICOM_TEST_CODE;
+    frame.x17_a7 = UMICOM_USER_CALL_ABI_QUERY;
+    frame.x10_a0 = UMICOM_USER_ABI_QUERY_VERSION;
+    frame.x11_a1 = 0U;
+    frame.x12_a2 = 0U;
+    memcpy(firstBefore, (const void *)umicomTestFirst, sizeof(firstBefore));
+    memcpy(secondBefore, (const void *)umicomTestSecond, sizeof(secondBefore));
+
+    if (strcmp(name, "abi-values") == 0) {
+        const UmicomU64 expected[] = {0x00010000U, 0U, 64U, 1U, 4096U, 64U, 32U};
+        for (UmicomSize i = 0U; i < sizeof(expected) / sizeof(expected[0]); ++i) {
+            frame.x10_a0 = (UmicomU64)i;
+            const UmicomU64 pc = frame.mepc;
+            UmicomTestRequire(UmicomKernelUserTrapDispatch(&session, &frame) == 1U &&
+                frame.x10_a0 == expected[i] && frame.mepc == pc + 4U,
+                "ABI selector returns its fixed wire value");
+        }
+        UmicomTestRequire(session.callCount == 7U && session.rejectedCalls == 0U,
+            "successful discovery retains ordinary call accounting");
+    } else if (strcmp(name, "abi-unknown") == 0 ||
+               strcmp(name, "abi-reserved-first") == 0 ||
+               strcmp(name, "abi-reserved-second") == 0) {
+        if (strcmp(name, "abi-unknown") == 0) frame.x10_a0 = ~(UmicomU64)0U;
+        else if (strcmp(name, "abi-reserved-first") == 0) frame.x11_a1 = ~(UmicomU64)0U;
+        else frame.x12_a2 = ~(UmicomU64)0U;
+        const UmicomU64 first = frame.x11_a1, second = frame.x12_a2;
+        UmicomTestRequire(UmicomKernelUserTrapDispatch(&session, &frame) == 1U &&
+            frame.x10_a0 == ~(UmicomU64)0U && frame.mepc == UMICOM_TEST_CODE + 4U &&
+            frame.x11_a1 == first && frame.x12_a2 == second &&
+            session.callCount == 1U && session.rejectedCalls == 1U,
+            "unsupported ABI request resumes with an explicit refusal");
+    } else if (strcmp(name, "abi-registers") == 0) {
+        UmicomRiscvTrapFrame expected = frame;
+        expected.x10_a0 = 0x00010000U;
+        expected.mepc += 4U;
+        UmicomTestRequire(UmicomKernelUserTrapDispatch(&session, &frame) == 1U &&
+            memcmp(&expected, &frame, sizeof(frame)) == 0,
+            "ABI discovery preserves every other register and trap field");
+    } else if (strcmp(name, "abi-budget") == 0 ||
+               strcmp(name, "abi-origin") == 0 ||
+               strcmp(name, "abi-next-pc") == 0) {
+        UmicomKernelUserStopReason expected = UMICOM_USER_STOP_MONITOR_ERROR;
+        if (strcmp(name, "abi-budget") == 0) {
+            session.callCount = UMICOM_USER_CALL_LIMIT;
+            expected = UMICOM_USER_STOP_CALL_BUDGET;
+        } else if (strcmp(name, "abi-origin") == 0) frame.mstatus = 0x1800U;
+        else frame.mepc = UMICOM_TEST_CODE + 4092U;
+        const UmicomRiscvTrapFrame before = frame;
+        UmicomTestRequire(UmicomKernelUserTrapDispatch(&session, &frame) == 0U &&
+            session.stopReason == expected && memcmp(&before, &frame, sizeof(frame)) == 0,
+            "discovery cannot bypass budget, privilege or continuation checks");
+    } else UmicomTestRequire(0, "unknown ABI contract case");
+    UmicomTestRequire(session.copiedBytes == 0U &&
+        memcmp(firstBefore, (const void *)umicomTestFirst, sizeof(firstBefore)) == 0 &&
+        memcmp(secondBefore, (const void *)umicomTestSecond, sizeof(secondBefore)) == 0,
+        "discovery leaves user data and copy accounting unchanged");
+}
+
 int main(int argc, char **argv)
 {
     UmicomTestRequire(argc == 2, "select one named native case");
@@ -113,7 +284,11 @@ int main(int argc, char **argv)
     memset(bytes, 0xcc, sizeof(bytes));
     const UmicomAddress cross = UMICOM_TEST_DATA + 4088U;
     UmicomU64 status = 0U;
-    if (strcmp(name, "cross-page-read") == 0) {
+    if (strncmp(name, "span-", 5U) == 0) {
+        UmicomTestSpanContract(name);
+    } else if (strncmp(name, "abi-", 4U) == 0) {
+        UmicomTestAbiContract(name);
+    } else if (strcmp(name, "cross-page-read") == 0) {
         status = UmicomKernelUserMemoryRead(&umicomTestMemory, cross, bytes, 16U);
         UmicomTestRequire(status == UMICOM_USER_RESULT_OK, "cross-page read");
         for (UmicomSize i = 0U; i < 16U; ++i) {

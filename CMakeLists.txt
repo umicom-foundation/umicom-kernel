@@ -385,6 +385,16 @@ if(BUILD_TESTING AND UMICOM_QEMU_RISCV64)
                 "UMICOM_KERNEL_FAIL;unexpected-trap;corrupt-page-table;invariant-failure;panic;PANIC;failed;FAILED"
     )
 
+    # Observe the native contract from actual U-mode in two isolated address
+    # spaces. The earlier execution readiness and failure checks remain intact.
+    add_test(NAME kernel.riscv64.abi_discovery
+        COMMAND "${UMICOM_QEMU_RISCV64}" ${UMICOM_QEMU_RISCV64_ARGUMENTS})
+    set_tests_properties(kernel.riscv64.abi_discovery PROPERTIES
+        TIMEOUT 10
+        FIXTURES_REQUIRED kernel_current_image
+        PASS_REGULAR_EXPRESSION "UMICOM_KERNEL_ABI_DISCOVERY_READY"
+        FAIL_REGULAR_EXPRESSION "UMICOM_KERNEL_FAIL;unexpected-trap;invariant-failure;panic;PANIC;failed;FAILED")
+
     # Before any QEMU capability test is allowed to run, ask CMake/Ninja to
     # build the current Kernel image incrementally.  This guards against a
     # misleading situation where compilation fails but an older ELF remains in
@@ -399,7 +409,7 @@ if(BUILD_TESTING AND UMICOM_QEMU_RISCV64)
         COMMAND
             "${CMAKE_COMMAND}"
             --build "${CMAKE_BINARY_DIR}"
-            --target umicom-kernel
+            --target umicom-kernel-evidence
             --parallel 2
     )
 
@@ -584,3 +594,8 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/Fat16Directory.cmake")
 # Admit explicit writable disk VFS domains and exercise native process file
 # services against persistent storage, with independent fresh-boot readback.
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/DiskWritableFilesystem.cmake")
+
+# Record the source and image identities after building all Kernel dependencies.
+# The earlier fixture built --target umicom-kernel directly; its replacement
+# keeps that dependency and adds evidence without altering guest behaviour.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/Qualification.cmake")

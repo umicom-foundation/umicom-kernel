@@ -86,6 +86,42 @@ static UmicomU64 UmicomKernelUserCopy(
     return UmicomKernelUserMemoryWrite(memory, destination, scratch, bytes);
 }
 
+/* Querying the contract shares the normal origin, instruction and budget
+ * checks. It never exposes Kernel addresses or grants a service binding.
+ * Compile-time routes describe this image rather than the development host. */
+static UmicomU64 UmicomKernelUserAbiQuery(UmicomU64 selector,
+    UmicomU64 reservedFirst, UmicomU64 reservedSecond)
+{
+    if (reservedFirst != 0U || reservedSecond != 0U)
+        return UMICOM_USER_ABI_UNAVAILABLE;
+    UmicomU64 features = 0U;
+#ifdef UMICOM_KERNEL_MESSAGE_CHANNELS
+    features |= UMICOM_USER_ABI_FEATURE_MESSAGES;
+#endif
+#ifdef UMICOM_KERNEL_BLOCKING_IPC
+    features |= UMICOM_USER_ABI_FEATURE_BLOCKING_IPC;
+#endif
+#ifdef UMICOM_KERNEL_FILE_SERVICES
+    features |= UMICOM_USER_ABI_FEATURE_FILES;
+#endif
+#ifdef UMICOM_KERNEL_STANDARD_STREAMS
+    features |= UMICOM_USER_ABI_FEATURE_STREAMS;
+#endif
+#ifdef UMICOM_KERNEL_MANAGED_SERVICES
+    features |= UMICOM_USER_ABI_FEATURE_SERVICE_REPORTS;
+#endif
+    switch (selector) {
+    case UMICOM_USER_ABI_QUERY_VERSION: return UMICOM_USER_ABI_VERSION;
+    case UMICOM_USER_ABI_QUERY_FEATURES: return features;
+    case UMICOM_USER_ABI_QUERY_WORD_BITS: return 64U;
+    case UMICOM_USER_ABI_QUERY_BYTE_ORDER: return UMICOM_USER_ABI_LITTLE_ENDIAN;
+    case UMICOM_USER_ABI_QUERY_PAGE_BYTES: return UMICOM_USER_PAGE_BYTES;
+    case UMICOM_USER_ABI_QUERY_COPY_LIMIT: return UMICOM_USER_COPY_LIMIT;
+    case UMICOM_USER_ABI_QUERY_CALL_LIMIT: return UMICOM_USER_CALL_LIMIT;
+    default: return UMICOM_USER_ABI_UNAVAILABLE;
+    }
+}
+
 UmicomU64 UmicomKernelUserTrapDispatch(
     UmicomKernelUserSession *session,
     UmicomRiscvTrapFrame *frame
@@ -195,6 +231,9 @@ UmicomU64 UmicomKernelUserTrapDispatch(
     if (frame->x17_a7 == UMICOM_USER_CALL_IDENTITY) {
         /* Ignore all supplied identity arguments; authority belongs to setup. */
         result = session->identity;
+    } else if (frame->x17_a7 == UMICOM_USER_CALL_ABI_QUERY) {
+        result = UmicomKernelUserAbiQuery(frame->x10_a0, frame->x11_a1, frame->x12_a2);
+        if (result == UMICOM_USER_ABI_UNAVAILABLE) ++session->rejectedCalls;
     } else if (frame->x17_a7 == UMICOM_USER_CALL_COPY) {
         result = UmicomKernelUserCopy(&session->memory,
             (UmicomAddress)frame->x10_a0, (UmicomAddress)frame->x11_a1,

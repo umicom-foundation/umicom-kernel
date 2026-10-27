@@ -25,5 +25,7 @@ typedef struct UmicomKernelUserObservation {
     UmicomU64 syscallChecks; /* Number of explicit buffer/refusal checks. */
     UmicomU64 registerCheck; /* Assembly verified several register classes. */
     UmicomAddress stackAddress; /* Observed sp while the user C frame is live. */
+    UmicomU64 abiVersion; /* Discovery result; checked independently by the monitor. */
+    UmicomU64 abiFeatures; /* Compiled routes, not authority granted to this task. */
 } UmicomKernelUserObservation;
 #endif /* UMICOM_KERNEL_USER_OBSERVATION_H */

@@ -329,6 +329,16 @@ static void UmicomKernelUserRunCase(
             UmicomKernelUserRequire(bytes[128U + index] == (UmicomU8)(0x40U + index)
                 ? UMICOM_TRUE : UMICOM_FALSE, "user-copy-physical-observation");
         }
+    } else if (operation == UMICOM_USER_OPERATION_ABI_DISCOVERY) {
+        /* The normal RV64 image links all five routes. The independent host
+         * fixture links none; both profiles must advertise exactly their own
+         * composition without granting a caller any channel or file rights. */
+        UmicomKernelUserRequire(session.exitValue == 0U &&
+            observation->completed == 1U && observation->syscallChecks == 10U &&
+            observation->registerCheck == 1U && observation->abiVersion == 0x00010000U &&
+            observation->abiFeatures == 31U && session.callCount == 13U &&
+            session.rejectedCalls == 3U && session.copiedBytes == 0U
+            ? UMICOM_TRUE : UMICOM_FALSE, "user-abi-discovery-contract");
     } else if (operation == UMICOM_USER_OPERATION_INVALID_STACK_EXIT) {
         UmicomKernelUserRequire(session.exitValue == 0U &&
             session.trapStack == UMICOM_USER_STACK_BASE - UMICOM_USER_PAGE_BYTES
@@ -413,6 +423,19 @@ void UmicomKernelUserExecutionValidate(void)
     UmicomKernelUserRequire(a->runs == 2U && b->runs == 2U
         ? UMICOM_TRUE : UMICOM_FALSE, "user-isolation-after-faults");
 
+    /* Run discovery in both isolated spaces after all original fault cases.
+     * Their persistent run counters must remain unchanged by this read-only
+     * service, and existing machine/allocator restoration checks still apply. */
+    UmicomKernelUserRunCase(&umicomUserTaskA, "task-a-abi-discovery",
+        UMICOM_USER_OPERATION_ABI_DISCOVERY, UMICOM_USER_STOP_EXIT, 8U,
+        (UmicomAddress)UmicomRiscvUserExitInstruction, 0U);
+    UmicomKernelUserRunCase(&umicomUserTaskB, "task-b-abi-discovery",
+        UMICOM_USER_OPERATION_ABI_DISCOVERY, UMICOM_USER_STOP_EXIT, 8U,
+        (UmicomAddress)UmicomRiscvUserExitInstruction, 0U);
+    UmicomKernelUserRequire(a->runs == 2U && b->runs == 2U
+        ? UMICOM_TRUE : UMICOM_FALSE, "user-abi-query-does-not-run-task");
+    UmicomKernelConsoleWriteLine("UMICOM_KERNEL_ABI_DISCOVERY_READY");
+
     /* Private user traps and timer recovery must not alter the established
      * trap subsystem's counters. Then prove that original ECALL still returns. */
     UmicomRiscvTrapSnapshotRead(&trapAfter);
@@ -436,7 +459,12 @@ void UmicomKernelUserExecutionValidate(void)
         final.reservedFrames == baseline.reservedFrames && final.freeFrames == baseline.freeFrames
         ? UMICOM_TRUE : UMICOM_FALSE, "user-frame-leak");
     UmicomKernelConsoleWriteLine("user.frame-accounting=restored");
+    /* Two discovery cases extend the original twelve acceptance cases. Keep
+     * the earlier marker for review; consumers should use readiness markers. */
+#if 0
     UmicomKernelConsoleWriteLine("user.completed-cases=12");
+#endif
+    UmicomKernelConsoleWriteLine("user.completed-cases=14");
     UmicomKernelConsoleWriteLine("user-execution-test=pass");
     UmicomKernelConsoleWriteLine("UMICOM_KERNEL_USER_EXECUTION_READY");
 }

@@ -34,6 +34,35 @@
  * Kernel-owned scratch storage. This teaching service has no device access. */
 #define UMICOM_USER_CALL_COPY 2
 
+/* Discover the running native contract using only registers. a0 selects one
+ * value; a1 and a2 must be zero. No user pointer is read or written. Existing
+ * programs keep their operation numbers and do not need to make this call. */
+#define UMICOM_USER_CALL_ABI_QUERY 3
+#define UMICOM_USER_ABI_QUERY_VERSION 0
+#define UMICOM_USER_ABI_QUERY_FEATURES 1
+#define UMICOM_USER_ABI_QUERY_WORD_BITS 2
+#define UMICOM_USER_ABI_QUERY_BYTE_ORDER 3
+#define UMICOM_USER_ABI_QUERY_PAGE_BYTES 4
+#define UMICOM_USER_ABI_QUERY_COPY_LIMIT 5
+#define UMICOM_USER_ABI_QUERY_CALL_LIMIT 6
+
+/* VERSION packs a 16-bit major and minor value. This is an interface contract,
+ * not a product release. BYTE_ORDER uses 1 for little-endian. All-ones is the
+ * refusal sentinel for unknown selectors or nonzero reserved arguments. An
+ * older monitor returns UNKNOWN_CALL for operation 3, so query VERSION first. */
+#define UMICOM_USER_ABI_VERSION 0x00010000
+#define UMICOM_USER_ABI_LITTLE_ENDIAN 1
+#define UMICOM_USER_ABI_UNAVAILABLE 0xffffffffffffffff
+
+/* These bits describe compiled service routes, never a caller's authority.
+ * A present service can still be unbound, deny a handle or refuse a request.
+ * Unrecognised future bits must not be interpreted as permission. */
+#define UMICOM_USER_ABI_FEATURE_MESSAGES 1
+#define UMICOM_USER_ABI_FEATURE_BLOCKING_IPC 2
+#define UMICOM_USER_ABI_FEATURE_FILES 4
+#define UMICOM_USER_ABI_FEATURE_STREAMS 8
+#define UMICOM_USER_ABI_FEATURE_SERVICE_REPORTS 16
+
 /* COPY returns zero on success; IDENTITY returns the assigned identity. */
 #define UMICOM_USER_RESULT_OK 0
 #define UMICOM_USER_RESULT_UNKNOWN_CALL 1
@@ -56,6 +85,8 @@
 #define UMICOM_USER_OPERATION_INVALID_STACK_EXIT 6
 #define UMICOM_USER_OPERATION_CALL_BUDGET 7
 #define UMICOM_USER_OPERATION_BUSY_LOOP 8
+
+#define UMICOM_USER_OPERATION_ABI_DISCOVERY 9
 
 /* The executable is position independent within its dedicated text pages;
  * these data addresses are the deliberately shared virtual layout of each

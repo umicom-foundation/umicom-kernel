@@ -47,6 +47,48 @@ UmicomU64 UmicomRiscvUserPayload(UmicomU64 operation)
     __asm__ volatile("mv %0, sp" : "=r"(stack));
     observation->stackAddress = stack;
 
+    /* Discover the contract through real U-mode ECALLs. No structure address
+     * is passed to the Kernel; even the refused reserved words are scalars. */
+    if (operation == UMICOM_USER_OPERATION_ABI_DISCOVERY) {
+        observation->syscallChecks = 0U;
+        observation->abiVersion = UmicomRiscvUserSystemCall(
+            UMICOM_USER_CALL_ABI_QUERY, UMICOM_USER_ABI_QUERY_VERSION, 0U, 0U);
+        if (observation->abiVersion != 0x00010000U) return 130U;
+        ++observation->syscallChecks;
+        observation->abiFeatures = UmicomRiscvUserSystemCall(
+            UMICOM_USER_CALL_ABI_QUERY, UMICOM_USER_ABI_QUERY_FEATURES, 0U, 0U);
+        if (observation->abiFeatures == UMICOM_USER_ABI_UNAVAILABLE) return 131U;
+        ++observation->syscallChecks;
+        if (UmicomRiscvUserSystemCall(UMICOM_USER_CALL_ABI_QUERY,
+                UMICOM_USER_ABI_QUERY_WORD_BITS, 0U, 0U) != 64U) return 132U;
+        ++observation->syscallChecks;
+        if (UmicomRiscvUserSystemCall(UMICOM_USER_CALL_ABI_QUERY,
+                UMICOM_USER_ABI_QUERY_BYTE_ORDER, 0U, 0U) != 1U) return 133U;
+        ++observation->syscallChecks;
+        if (UmicomRiscvUserSystemCall(UMICOM_USER_CALL_ABI_QUERY,
+                UMICOM_USER_ABI_QUERY_PAGE_BYTES, 0U, 0U) != 4096U) return 134U;
+        ++observation->syscallChecks;
+        if (UmicomRiscvUserSystemCall(UMICOM_USER_CALL_ABI_QUERY,
+                UMICOM_USER_ABI_QUERY_COPY_LIMIT, 0U, 0U) != 64U) return 135U;
+        ++observation->syscallChecks;
+        if (UmicomRiscvUserSystemCall(UMICOM_USER_CALL_ABI_QUERY,
+                UMICOM_USER_ABI_QUERY_CALL_LIMIT, 0U, 0U) != 32U) return 136U;
+        ++observation->syscallChecks;
+        if (UmicomRiscvUserSystemCall(UMICOM_USER_CALL_ABI_QUERY,
+                ~(UmicomU64)0U, 0U, 0U) != UMICOM_USER_ABI_UNAVAILABLE) return 137U;
+        ++observation->syscallChecks;
+        if (UmicomRiscvUserSystemCall(UMICOM_USER_CALL_ABI_QUERY,
+                UMICOM_USER_ABI_QUERY_VERSION, 1U, 0U) != UMICOM_USER_ABI_UNAVAILABLE) return 138U;
+        ++observation->syscallChecks;
+        if (UmicomRiscvUserSystemCall(UMICOM_USER_CALL_ABI_QUERY,
+                UMICOM_USER_ABI_QUERY_VERSION, 0U, 1U) != UMICOM_USER_ABI_UNAVAILABLE) return 139U;
+        ++observation->syscallChecks;
+        observation->registerCheck = UmicomRiscvUserRegisterProbe();
+        if (observation->registerCheck != 1U) return 140U;
+        observation->completed = 1U;
+        return 0U;
+    }
+
     /* Fault cases use labelled instructions so the machine owner can check the
      * actual fault PC, not just match a generic failure message. */
     if (operation == UMICOM_USER_OPERATION_GUARD_LOAD) {

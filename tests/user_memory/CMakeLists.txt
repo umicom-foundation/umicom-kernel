@@ -30,6 +30,11 @@ endif()
 # Each case gets a new process and fresh allocator state. None of these test
 # names claims that an emulated instruction or a real U-mode transition ran.
 set(UMICOM_USER_NATIVE_CASES
+    abi-values abi-unknown abi-reserved-first abi-reserved-second abi-registers
+    abi-budget abi-origin abi-next-pc
+    span-read-boundaries span-write-boundaries span-read-refused-second
+    span-write-readonly-second span-read-unowned-second span-write-mismatched-second
+    span-missing-middle
     cross-page-read cross-page-write read-only-write supervisor-read
     unknown-page range-wrap noncanonical partial-destination oversized
     zero-length null-kernel-buffer wrong-backing-frame widened-permission
@@ -39,4 +44,5 @@ set(UMICOM_USER_NATIVE_CASES
 foreach(UMICOM_USER_CASE IN LISTS UMICOM_USER_NATIVE_CASES)
     add_test(NAME kernel.user_boundary.${UMICOM_USER_CASE}
         COMMAND umicom-user-memory-tests ${UMICOM_USER_CASE})
+    set_tests_properties(kernel.user_boundary.${UMICOM_USER_CASE} PROPERTIES TIMEOUT 30)
 endforeach()
