@@ -15,6 +15,7 @@
 
 #include "umicom/kernel/device_tree_layout.h"
 #include "umicom/kernel/device_tree.h"
+#include "boot_memory.h"
 
 static UmicomU32 Big32(const UmicomU8 *p)
 {
@@ -131,17 +132,32 @@ UmicomKernelDeviceTreeLayoutStatus UmicomKernelDeviceTreeLayoutFromReader(
         !Separate(reader->blob,reader->bytes,out,sizeof *out))
         return UMICOM_FDT_LAYOUT_ARGUMENT;
     const UmicomU8 *p=reader->blob;
+    /* Staging stays private until success; explicit bytes avoid hosted memset.
+     * The old form remains available for review of the original contract. */
+#if 0
     UmicomKernelDeviceTreeLayout staged={0};
+#endif
+    UmicomKernelDeviceTreeLayout staged;
+    UmicomBootMemoryClear(&staged, sizeof staged);
     staged.totalBytes=(UmicomU32)reader->bytes;
     staged.version=Big32(p+20U);staged.lastCompatibleVersion=Big32(p+24U);
     staged.bootCpu=Big32(p+28U);staged.structureOffset=Big32(p+8U);
     staged.structureBytes=Big32(p+36U);staged.stringsOffset=Big32(p+12U);
     staged.stringsBytes=Big32(p+32U);staged.reservationOffset=Big32(p+16U);
     staged.reservationCount=reader->reservationCount;
+    /* Scalar fields and the bounded final copy replace implicit libc calls.
+     * Preserve the equivalent aggregate form for comparison. */
+#if 0
     for(UmicomU32 i=0;i<reader->reservationCount;++i)
         staged.reservations[i]=(UmicomKernelDeviceTreeReservation){
             reader->reservations[i].address,reader->reservations[i].bytes};
     *out=staged;
+#endif
+    for (UmicomU32 i = 0U; i < reader->reservationCount; ++i) {
+        staged.reservations[i].address = reader->reservations[i].address;
+        staged.reservations[i].bytes = reader->reservations[i].bytes;
+    }
+    UmicomBootMemoryCopy(out, &staged, sizeof staged);
     return UMICOM_FDT_LAYOUT_OK;
 }
 UmicomKernelDeviceTreeLayoutStatus UmicomKernelDeviceTreeLayoutRead(

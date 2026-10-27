@@ -51,6 +51,13 @@ int main(int argc,char **argv)
     }else return 2;
     CHECK(UmicomKernelBootReservationsPlan(ram,bytes,end,dtb,&tree,&plan)==expected);
     if(!expected){CHECK(!memcmp(before,&plan,sizeof plan));return 0;}
+    /* A successful staged copy replaces every byte, including unused slots.
+     * The caller started with a nonzero sentinel; stale reservations must not
+     * escape merely because only the live prefix is consumed today. */
+    for (UmicomSize i = plan.count; i < UMICOM_KERNEL_BOOT_RESERVATION_LIMIT; ++i) {
+        CHECK(plan.ranges[i].base == 0U);
+        CHECK(plan.ranges[i].bytes == 0U);
+    }
     for(UmicomSize i=0;i<plan.count;++i){
         CHECK(plan.ranges[i].base>=base&&plan.ranges[i].bytes>0U);
         CHECK(plan.ranges[i].base+plan.ranges[i].bytes<=base+bytes);

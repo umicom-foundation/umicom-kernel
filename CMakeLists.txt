@@ -199,6 +199,9 @@ set_target_properties(
         LINK_DEPENDS "${UMICOM_KERNEL_LINKER_SCRIPT}"
 )
 
+# Small link contracts fail before a full emulator qualification is needed.
+include(cmake/BootMemoryContracts.cmake)
+
 # Discover the RISC-V QEMU system emulator.
 #
 # PATH remains the normal discovery mechanism.  The explicit hints cover the
