@@ -153,6 +153,9 @@
 
 /* Add executable loading on top of the established user-memory boundary. */
 #include "umicom/kernel/process.h"
+#ifdef UMICOM_KERNEL_CVM
+#include "umicom/kernel/cvm_validation.h"
+#endif
 
 /* Add owner-scoped lifetime management above the already loaded processes. */
 #include "umicom/kernel/process_registry.h"
@@ -1595,6 +1598,10 @@ void UmicomKernelMain(UmicomU64 hartId, UmicomAddress deviceTreeAddress)
     /* Load a separately linked program only after the existing user monitor
      * has passed. This adds a lifetime owner without replacing its trap path. */
     UmicomKernelExecutableLoadingValidate();
+#ifdef UMICOM_KERNEL_CVM
+    /* Reuse the checked ELF owner for both debug and optimized CVM runtimes. */
+    UmicomKernelCvmValidate();
+#endif
 
     /* Check handle ownership, reduced rights and shared process lifetimes only
      * after independently loaded programs have returned safely to the Kernel. */

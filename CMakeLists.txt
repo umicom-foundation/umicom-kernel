@@ -599,3 +599,6 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/DiskWritableFilesystem.cmake")
 # The earlier fixture built --target umicom-kernel directly; its replacement
 # keeps that dependency and adds evidence without altering guest behaviour.
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/Qualification.cmake")
+
+# Optional bounded-language user programs share the existing ELF loader.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/CvmPrograms.cmake")

@@ -1,0 +1,27 @@
+/*-----------------------------------------------------------------------------
+ * Umicom Kernel
+ * File: cmake/EmbeddedCvm.S.in
+ *
+ * PURPOSE:
+ *   Connect the bounded CVM runtime to the native user-program contract.
+ *
+ * AUTHOR AND ORGANISATION:
+ * Sammy Hegab
+ * Umicom Foundation
+ *
+ * LICENCE:
+ * MIT
+ *---------------------------------------------------------------------------*/
+    .section .rodata.umicom_cvm, "a", @progbits
+    .balign 16
+    .global UmicomEmbeddedCvmO0Start
+    .global UmicomEmbeddedCvmO0End
+UmicomEmbeddedCvmO0Start:
+    .incbin "@UMICOM_CVM_O0_FILE@"
+UmicomEmbeddedCvmO0End:
+    .balign 16
+    .global UmicomEmbeddedCvmO2Start
+    .global UmicomEmbeddedCvmO2End
+UmicomEmbeddedCvmO2Start:
+    .incbin "@UMICOM_CVM_O2_FILE@"
+UmicomEmbeddedCvmO2End:
