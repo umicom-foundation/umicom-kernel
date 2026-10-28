@@ -241,12 +241,16 @@ static void TestParse(const char *name)
 }
 #include "range_cases.inc"
 #include "hex_cases.inc"
+#include "seed_cases.inc"
 int main(int argc,char **argv)
 {
     if(argc!=2)return EXIT_FAILURE;
     const char *name=argv[1];
     if(!strncmp(name,"line-",5U)){TestLine(name);return EXIT_SUCCESS;}
     if(!strncmp(name,"parse-",6U)){TestParse(name);return EXIT_SUCCESS;}
+    if (!strncmp(name, "seed-", 5U) && strcmp(name, "seed-files")) {
+        SeedCase(name); return EXIT_SUCCESS;
+    }
     if(!strcmp(name,"initialisation-refusals")){
         CHECK(UmicomKernelConsoleShellInitialize(NULL,Output,NULL,NULL,0U)==UMICOM_SHELL_INVALID_ARGUMENT);
         CHECK(UmicomKernelConsoleShellInitialize(&shell,NULL,NULL,NULL,0U)==UMICOM_SHELL_INVALID_ARGUMENT);

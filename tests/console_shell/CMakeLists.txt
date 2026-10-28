@@ -75,3 +75,9 @@ foreach(case IN ITEMS all-bytes page-boundary budget tail eof zero short-read
     add_test(NAME "kernel.console.hex-${case}" COMMAND umicom-console-tests "hex-${case}")
     set_tests_properties("kernel.console.hex-${case}" PROPERTIES TIMEOUT 30)
 endforeach()
+
+# Optional program admission shares the original bounded RAMFS and loader.
+foreach(case IN ITEMS five run-fifth limit invalid-last duplicate-last rollback)
+    add_test(NAME "kernel.console.seed-${case}" COMMAND umicom-console-tests "seed-${case}")
+    set_tests_properties("kernel.console.seed-${case}" PROPERTIES TIMEOUT 30)
+endforeach()

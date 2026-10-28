@@ -34,6 +34,9 @@
 /* Structured launch adds a command token plus up to sixteen argv elements. */
 #define UMICOM_SHELL_TOKEN_LIMIT 17U
 #define UMICOM_SHELL_IMAGE_BYTES 131072U
+/* Four established tools plus one optional CVM user program. RAMFS keeps its
+ * independent page and node ceilings; admitting a name cannot bypass them. */
+#define UMICOM_SHELL_SEED_LIMIT 5U
 /* A serial range view limits source bytes, before terminal escaping. */
 #define UMICOM_SHELL_READ_BYTES 4096U
 #define UMICOM_SHELL_QUANTUM_TICKS 50000U
@@ -123,7 +126,8 @@ UmicomBoolean UmicomKernelShellUnsigned(const char *text, UmicomU64 *out);
 UmicomBoolean UmicomKernelShellUnsignedSpan(const char *text, UmicomSize bytes, UmicomU64 *out);
 
 /* Initialise once, mount RAMFS, attach file services and install supplied seed
- * images under /bin. On partial setup failure, Close still owns rollback.
+ * images under /bin, up to UMICOM_SHELL_SEED_LIMIT. On partial setup failure,
+ * Close still owns rollback. Seed spans are checked before any allocation.
  * The regular startup also creates /notes, /records, /shared and a short README. */
 UmicomKernelShellStatus UmicomKernelConsoleShellInitialize(UmicomKernelConsoleShell *shell,
     UmicomKernelShellOutput output, void *context, const UmicomKernelShellImage *images, UmicomSize imageCount);

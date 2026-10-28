@@ -194,8 +194,15 @@ static UmicomKernelVfsStatus UmicomShellInstall(UmicomKernelConsoleShell *shell,
 UmicomKernelShellStatus UmicomKernelConsoleShellInitialize(UmicomKernelConsoleShell *shell,
     UmicomKernelShellOutput output, void *context, const UmicomKernelShellImage *images, UmicomSize imageCount)
 {
+    /* The optional CVM image shares ordinary RAMFS and process ownership.
+     * Keep the original four-image admission for review; the named ceiling
+     * adds one slot without changing per-file or total RAMFS budgets. */
+#if 0
     if (!shell || !output || (imageCount != 0U && !images) || imageCount > 4U)
         return UMICOM_SHELL_INVALID_ARGUMENT;
+#endif
+    if (!shell || !output || (imageCount != 0U && !images) ||
+        imageCount > UMICOM_SHELL_SEED_LIMIT) return UMICOM_SHELL_INVALID_ARGUMENT;
     if (!UmicomKernelObjectCacheAccessAllowed()) return UMICOM_SHELL_UNSAFE;
     if (!UmicomShellZero(shell, sizeof(*shell))) return UMICOM_SHELL_BAD_STATE;
     /* Validate seed spans before publishing an owner. They are Kernel data,

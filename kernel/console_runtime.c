@@ -37,6 +37,12 @@ extern const UmicomU8 UmicomFileExecutableEnd[];
 extern const UmicomU8 UmicomLaunchExecutableStart[];
 extern const UmicomU8 UmicomLaunchExecutableEnd[];
 #endif
+#ifdef UMICOM_KERNEL_CVM
+/* A reviewed native envelope executes bytecode in its own user address space.
+ * No bytecode parser or compiler is added to this privileged command engine. */
+extern const UmicomU8 UmicomEmbeddedCvmO2Start[];
+extern const UmicomU8 UmicomEmbeddedCvmO2End[];
+#endif
 static UmicomKernelConsoleShell umicomInteractiveShell;
 #ifdef UMICOM_KERNEL_TERMINAL
 extern const UmicomU8 UmicomStreamExecutableStart[];
@@ -66,7 +72,13 @@ void UmicomKernelConsoleShellRun(void)
             (UmicomSize)(UmicomEmbeddedExecutableEnd - UmicomEmbeddedExecutableStart)},
         {"/bin/umicom-file-client.elf", UmicomFileExecutableStart,
             (UmicomSize)(UmicomFileExecutableEnd - UmicomFileExecutableStart)}
+#ifdef UMICOM_KERNEL_CVM
+        ,{"/bin/umicom-cvm.elf", UmicomEmbeddedCvmO2Start,
+            (UmicomSize)(UmicomEmbeddedCvmO2End - UmicomEmbeddedCvmO2Start)}
+#endif
     };
+    _Static_assert(sizeof(images) / sizeof(images[0]) <= UMICOM_SHELL_SEED_LIMIT,
+        "Every embedded console tool needs an admitted seed slot");
     if (UmicomKernelConsoleShellInitialize(&umicomInteractiveShell, UmicomInteractiveOutput,
             (void *)0, images, sizeof(images) / sizeof(images[0])) != UMICOM_SHELL_OK) {
         (void)UmicomKernelConsoleShellClose(&umicomInteractiveShell);
@@ -100,6 +112,9 @@ void UmicomKernelConsoleShellRun(void)
     UmicomKernelConsoleWriteLine("RAMFS is volatile. Explicit FAT16 data updates use fatwrite and fatflush.");
     UmicomKernelConsoleWriteLine("Ordered FAT16 updates use fatcommitopen, fatstage and fatcommit; unfinished stages remain dirty.");
     UmicomKernelConsoleWriteLine("Timestamped FAT16 file updates use fatfileopen, fatfilestage and fatfilecommit; supply the calendar time explicitly.");
+#ifdef UMICOM_KERNEL_CVM
+    UmicomKernelConsoleWriteLine("Optional CVM example: run /bin/umicom-cvm.elf 0 (expected exit=42).");
+#endif
     UmicomKernelConsoleShellPrompt(&umicomInteractiveShell);
     while (!umicomInteractiveShell.exitRequested) {
 #ifdef UMICOM_KERNEL_SERVICE_CONSOLE

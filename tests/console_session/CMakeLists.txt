@@ -72,3 +72,23 @@ add_test(NAME kernel.console_session.read-only-capacity
         "${UMICOM_CONSOLE_SYSTEM_IMAGE}" "${UMICOM_CONSOLE_READ_ONLY_DISK}")
 set_tests_properties(kernel.console_session.read-only-capacity PROPERTIES
     TIMEOUT 75 PASS_REGULAR_EXPRESSION "UMICOM_KERNEL_SERIAL_SESSION_PASS")
+
+# Opt-in checks require a freshly built normal system with UMICOM_KERNEL_CVM.
+# The ordinary RAM and storage journeys remain registered and unchanged.
+option(UMICOM_CONSOLE_CVM_TESTS "Exercise the optional CVM console application" OFF)
+if(UMICOM_CONSOLE_CVM_TESTS)
+    add_executable(umicom-console-cvm-session-tests session_tests.c)
+    target_compile_definitions(umicom-console-cvm-session-tests PRIVATE UMICOM_CONSOLE_SESSION_CVM=1)
+    target_link_libraries(umicom-console-cvm-session-tests PRIVATE ws2_32)
+    set_target_properties(umicom-console-cvm-session-tests PROPERTIES
+        C_STANDARD 23 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+    if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
+        target_compile_options(umicom-console-cvm-session-tests PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)
+    endif()
+    add_test(NAME kernel.console_session.cvm-program
+        COMMAND umicom-console-cvm-session-tests "${UMICOM_CONSOLE_QEMU}" "${UMICOM_CONSOLE_SYSTEM_IMAGE}")
+    set_tests_properties(kernel.console_session.cvm-program PROPERTIES
+        TIMEOUT 75 PASS_REGULAR_EXPRESSION "UMICOM_KERNEL_SERIAL_SESSION_PASS"
+        LABELS "kernel;cvm;guest;console")
+endif()

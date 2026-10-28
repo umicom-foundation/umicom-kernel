@@ -54,6 +54,16 @@ static const ConsoleStep steps[] = {
     {"append /notes/lesson.txt \".\"", "\r\nwritten=1\r\n"},
     {"cat /notes/lesson.txt", "\r\nKernel services use explicit requests.\r\n"},
     {"run /bin/umicom-diagnostic.elf 4", " calls=10\r\n"},
+#ifdef UMICOM_CONSOLE_SESSION_CVM
+    /* Exercise the optional application through ordinary console commands.
+     * Error cases are accepted user-program outcomes, never Kernel failures. */
+    {"run /bin/umicom-cvm.elf 0", "state=exited exit=42 "},
+    {"run /bin/umicom-cvm.elf 1", "state=exited exit=49153 "},
+    {"run /bin/umicom-cvm.elf 2", "state=exited exit=49154 "},
+    {"run /bin/umicom-cvm.elf 3", "state=exited exit=49155 "},
+    {"run /bin/umicom-cvm.elf 4", "state=exited exit=49156 "},
+    {"run /bin/umicom-cvm.elf 0", "state=exited exit=42 "},
+#endif
     {"poweroff", "RAM filesystem closed. Powering off.\r\nUMICOM_KERNEL_END\r\n"}
 };
 
@@ -162,6 +172,17 @@ static int ResponseAccepted(size_t step, const char *text)
             value != identity + 37U || slices == 0U || calls != 10U)
             return 0;
     }
+#ifdef UMICOM_CONSOLE_SESSION_CVM
+    if (strncmp(steps[step].command, "run /bin/umicom-cvm.elf ",
+            sizeof("run /bin/umicom-cvm.elf ") - 1U) == 0) {
+        const char *report = strstr(text, "process id=");
+        unsigned long long identity = 0U, value = 0U, slices = 0U, calls = 0U;
+        if (report == NULL || sscanf(report,
+                "process id=%llu state=exited exit=%llu slices=%llu calls=%llu",
+                &identity, &value, &slices, &calls) != 4 ||
+            identity == 0U || slices == 0U || calls != 1U) return 0;
+    }
+#endif
     return 1;
 }
 
