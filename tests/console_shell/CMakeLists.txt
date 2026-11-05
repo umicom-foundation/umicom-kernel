@@ -1,7 +1,19 @@
-# Umicom Kernel console parser, command engine and lifecycle tests.
+#-----------------------------------------------------------------------------
+# Umicom Kernel
+# File: tests/console_shell/CMakeLists.txt
+#
+# PURPOSE:
+#   Build console parser, command engine and lifecycle tests.
+#
+# AUTHOR AND ORGANISATION:
+# Sammy Hegab
+# Umicom Foundation
+#
+# LICENCE:
+# MIT
+#---------------------------------------------------------------------------
 # The real services are linked. Hardware entry/CSR/timer state is an explicit
 # reuse of the earlier native scheduling model; no RISC-V guest pass is implied.
-# Sammy Hegab, Umicom Foundation. MIT licence.
 cmake_minimum_required(VERSION 3.24)
 project(UmicomConsoleShellTests LANGUAGES C)
 set(CMAKE_C_STANDARD 23)
@@ -44,6 +56,11 @@ set(UMICOM_CONSOLE_CASES
     close-idempotent poweroff repeated-commands repeated-processes memory-and-status)
 foreach(UMICOM_CONSOLE_CASE IN LISTS UMICOM_CONSOLE_CASES)
     add_test(NAME kernel.console.${UMICOM_CONSOLE_CASE} COMMAND umicom-console-tests ${UMICOM_CONSOLE_CASE})
+endforeach()
+
+foreach(case IN ITEMS help-topics help-topic-refusals help-topic-reentry)
+    add_test(NAME "kernel.console.${case}" COMMAND umicom-console-tests "${case}")
+    set_tests_properties("kernel.console.${case}" PROPERTIES TIMEOUT 30)
 endforeach()
 
 # This optional adapter check uses ordinary RAM, never a real host UART. A

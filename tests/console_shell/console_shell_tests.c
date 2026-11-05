@@ -438,6 +438,30 @@ int main(int argc,char **argv)
     }else if(!strcmp(name,"repeated-processes")){
         umicomModelMode=UMICOM_MODEL_EXIT;
         for(unsigned i=0U;i<200U;++i){CHECK(Command("run /bin/model.elf")==UMICOM_SHELL_OK);RunToPrompt();ResetOutput();}
+    }else if(!strcmp(name,"help-topics")){
+        const UmicomU64 before=UmicomModelMemory().allocatedFrames;
+        CHECK(Command("help files")==UMICOM_SHELL_OK);
+        CHECK(strstr(transcript,"write replaces existing contents")!=NULL);
+        Missing("/notes/first.txt");
+        ResetOutput();CHECK(Command("help programs")==UMICOM_SHELL_OK);
+        CHECK(strstr(transcript,"read-only file rights")!=NULL);
+        CHECK(strstr(transcript,"bytecode file is not a native ELF")!=NULL);
+        ResetOutput();CHECK(Command("help boot")==UMICOM_SHELL_OK);
+        CHECK(strstr(transcript,"not a login service")!=NULL);
+        CHECK(!shell.exitRequested && shell.foreground==0U && !shell.busy);
+        CHECK(UmicomModelMemory().allocatedFrames==before);
+        Contents("/shared/report","Umicom report\n");
+    }else if(!strcmp(name,"help-topic-refusals")){
+        CHECK(Command("help missing")==UMICOM_SHELL_INVALID_ARGUMENT);
+        CHECK(strstr(transcript,"Unknown help topic")!=NULL);
+        CHECK(Command("help files extra")!=UMICOM_SHELL_OK);
+        CHECK(!shell.exitRequested && shell.foreground==0U && !shell.busy);
+        CHECK(Command("help")==UMICOM_SHELL_OK);
+        CHECK(strstr(transcript,"help files")!=NULL);
+    }else if(!strcmp(name,"help-topic-reentry")){
+        tryReentry=UMICOM_TRUE;CHECK(Command("help files")==UMICOM_SHELL_OK);
+        tryReentry=UMICOM_FALSE;CHECK(refusedReentries!=0U);
+        CHECK(!shell.busy && shell.foreground==0U);
     }else if(!strcmp(name,"memory-and-status")){
         CHECK(Command("mem")==UMICOM_SHELL_OK);CHECK(Command("status")==UMICOM_SHELL_OK);
         CHECK(Command("pwd")==UMICOM_SHELL_OK);CHECK(Command("about")==UMICOM_SHELL_OK);

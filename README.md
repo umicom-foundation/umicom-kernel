@@ -9,6 +9,10 @@ Licence: MIT, unless a file or imported third-party component states otherwise
 
 ## Purpose
 
+For a guided first boot, read [Your first Umicom Kernel session](docs/FIRST_SYSTEM_SESSION.md).
+It covers setup, timestamped logs, the interactive console, memory-backed files
+and the current boundaries around accounts and physical boot media.
+
 Umicom OS is a kernel-independent operating-system platform.
 
 The current production kernel for the free-system distribution track is GNU Linux-libre. FreeBSD is a portability and server/appliance evaluation target. Umicom Kernel is the original native kernel implementation under development.

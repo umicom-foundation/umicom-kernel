@@ -448,6 +448,47 @@ static UmicomKernelShellStatus UmicomShellStructured(UmicomKernelConsoleShell *s
 }
 #endif
 
+/* Topic help teaches the existing command boundary without creating files,
+ * granting process rights or probing hardware. String literals avoid startup
+ * aggregate copies in this freestanding translation unit. The caller retains
+ * its busy guard throughout output, just as it does for the complete help. */
+static UmicomKernelShellStatus UmicomShellTopicHelp(UmicomKernelConsoleShell *shell,
+    const char *topic)
+{
+    if (UmicomShellEqual(topic, "files")) {
+        UmicomShellText(shell,
+            "Files in RAM: use absolute paths such as /notes/first.txt.\r\n"
+            "create /notes/first.txt\r\n"
+            "write /notes/first.txt \"First note\"\r\n"
+            "cat /notes/first.txt\r\n"
+            "append /notes/first.txt \" and more\"\r\n"
+            "write replaces existing contents; append adds to the end.\r\n"
+            "ls /notes lists names; stat PATH inspects a file.\r\n"
+            "read PATH OFFSET BYTES shows text; hex PATH OFFSET BYTES shows bytes.\r\n"
+            "These commands use RAM-only storage, lost at shutdown. Disk commands\r\n"
+            "are separate; use the complete help for enabled disk adapters.\r\n");
+    } else if (UmicomShellEqual(topic, "programs")) {
+        UmicomShellText(shell,
+            "ls /bin lists the programs included in this particular image.\r\n"
+            "run PATH [UNSIGNED] starts a compatible native ELF with read-only file rights.\r\n"
+            "runrw PATH [UNSIGNED] explicitly grants shared-filesystem writes.\r\n"
+            "Ctrl-C cancels the foreground program; status shows its completion.\r\n"
+            "A bytecode file is not a native ELF. A compatible interpreter must\r\n"
+            "be included before bytecode can run; help does not install one.\r\n");
+    } else if (UmicomShellEqual(topic, "boot")) {
+        UmicomShellText(shell,
+            "about describes the system; abi shows the compiled native interface.\r\n"
+            "mem reports memory; status reports console and process state.\r\n"
+            "This is a trusted development console, not a login service.\r\n"
+            "There is no user-account creation or computer installer here.\r\n"
+            "poweroff closes this guest. Keep important work on the host.\r\n");
+    } else {
+        UmicomShellText(shell, "Unknown help topic. Use help files, help programs or help boot.\r\n");
+        return UMICOM_SHELL_INVALID_ARGUMENT;
+    }
+    return UMICOM_SHELL_OK;
+}
+
 UmicomKernelShellStatus UmicomKernelConsoleShellExecute(UmicomKernelConsoleShell *shell,
     const char *line, UmicomSize bytes)
 {
@@ -588,7 +629,13 @@ UmicomKernelShellStatus UmicomKernelConsoleShellExecute(UmicomKernelConsoleShell
     if (fileCommitHandled) { shell->busy = UMICOM_FALSE; return fileCommitResult; }
 #endif
     UmicomBoolean poweroff = UMICOM_FALSE;
+    if (UmicomShellEqual(name, "help") && command.count == 2U) {
+        result = UmicomShellTopicHelp(shell, path);
+        shell->busy = UMICOM_FALSE;
+        return result;
+    }
     if (UmicomShellEqual(name, "help") && command.count == 1U) {
+        UmicomShellText(shell, "Focused guides: help files | help programs | help boot\r\n");
         UmicomShellText(shell, "abi (compiled native interface metadata; no authority granted)\r\n");
 #ifdef UMICOM_KERNEL_FAT16_FILE_COMMIT
         UmicomShellText(shell, "fatfileopen SLOT PART | fatfiletime YYYY-MM-DDTHH:MM:SS | fatfilestage PATH OFFSET \"TEXT\" | fatfilecommit | fatfileinfo | fatfileclose\r\n");
