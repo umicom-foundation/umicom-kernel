@@ -1,4 +1,18 @@
-# Umicom Kernel | Sammy Hegab, Umicom Foundation | MIT
+#-----------------------------------------------------------------------------
+# Umicom Kernel
+# File: cmake/BootMemoryContracts.cmake
+#
+# PURPOSE:
+#   Link boot admission code at debug and optimised settings without a hosted runtime.
+#
+# AUTHOR AND ORGANISATION:
+# Sammy Hegab
+# Umicom Foundation
+#
+# LICENCE:
+# MIT
+#-----------------------------------------------------------------------------
+
 # Link the actual boot code without a hosted runtime at debug and optimised
 # settings. Hosted unit tests cannot detect compiler-inserted libc calls.
 if(BUILD_TESTING)
@@ -7,7 +21,7 @@ if(BUILD_TESTING)
         set(_boot_target "umicom-boot-memory-${_boot_mode}-link")
         add_executable(${_boot_target}
             tests/device_tree/freestanding_link.c
-            kernel/address.c kernel/boot_reservations.c
+            kernel/address.c kernel/boot_reservations.c kernel/boot_handoff.c
             kernel/device_tree_layout.c kernel/device_tree_reader.c)
         target_include_directories(${_boot_target} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
         target_compile_options(${_boot_target} PRIVATE ${_boot_contract_options})
