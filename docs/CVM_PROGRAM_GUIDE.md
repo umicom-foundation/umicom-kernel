@@ -22,6 +22,10 @@ The source checkout is selected explicitly using `UMICOM_C_SOURCE_DIR`. No compi
 | 2 | 0xc002 | Division by zero rejected |
 | 3 | 0xc003 | Reserved wire flag rejected before execution |
 | 4 | 0xc004 | Unknown selector refused |
+| 5 | 0xc005 | Complete caller-owned execution trace |
+| 6 | 0xc006 | Trace retains the rejected RETURN at fuel exhaustion |
+| 7 | 0xc007 | Failed divide retains its two-input stack |
+| 8 | 0xc008 | Insufficient trace storage executes nothing |
 
 The diagnostic guest repeats the cases for both optimization modes. Only after every result and teardown check succeeds does it print `UMICOM_KERNEL_CVM_READY`.
 
@@ -95,3 +99,30 @@ ctest --test-dir build/host-cvm-session -R "^kernel[.]console_session[.]cvm-prog
 Build the CVM profile immediately before this session. A standalone session test does not rebuild the supplied ELF or establish its source identity. Run the earlier `kernel.riscv64.cvm` receipt check as well. No pass is implied by these instructions.
 
 If the program is missing, check the option and the exact ELF path used by QEMU. If the serial session times out, keep its transcript and report the last command. Do not treat a timeout or an empty test selection as a pass. This profile currently targets the RISC-V QEMU machine described above; it is not a claim of boot support on arbitrary PCs or phones.
+
+## Trace qualification
+
+Selectors 5 through 8 use the same Umicom C executor as ordinary execution. The user program owns four trace entries and checks both successful and rejected states before its single EXIT call. These selectors are separate from 0 through 4; existing results are preserved. In the normal console, expected decimal exits are 49157, 49158, 49159 and 49160. Run selector 0 again afterward to check continued launchability.
+
+The diagnostic guest now checks nine selectors at each optimization setting. The receipt includes `include/umicom_c/trace.h`, and the host identity fixtures reject an edited or missing trace header. Rebuild both native programs after changing that header or the runtime. Reusing an old image because it still prints 42 does not qualify the new trace contract.
+
+The console-session fixture includes all four trace selectors. This is a compact arithmetic observation inside a user program, not an interactive Kernel debugger or a syscall facility for bytecode. Host runtime tests, source receipts, guest execution and normal console interaction remain distinct evidence.
+
+## Comparison profile and host entry checks
+
+Selectors 9–12 extend the existing diagnostic without changing selectors 0–8. They check minimum-versus-maximum signed comparison (true), the reversed comparison (false), a format-2 comparison deliberately mislabelled as format 1, and an execution budget that stops immediately before the comparison. Expected results are `0xc009`, `0xc00a`, `0xc00b` and `0xc00c`. A false comparison is a completed calculation, not an execution failure.
+
+The interpreter remains the canonical Umicom C runtime. Its comparison records use format 2; old arithmetic records retain format 1. Build from matching source and headers with `UMC_COMPARISON_PROFILE`. A stale arithmetic-only runtime is not sufficient for the extended diagnostic. No source compiler, host allocation or system call is introduced into the guest interpreter.
+
+Before guest qualification, you can exercise the real `programs/cvm/main.c` entry function on the host. From a terminal with a C23 compiler, CMake and Ninja on PATH:
+
+```powershell
+Set-Location C:\umicom\umicom-kernel
+cmake -S tests/cvm_runtime -B build/cvm-envelope-host -G Ninja -DUMICOM_C_SOURCE_DIR=C:/umicom/umicom-c
+cmake --build build/cvm-envelope-host
+ctest --test-dir build/cvm-envelope-host --output-on-failure
+```
+
+Stop after any failed command. The expected suite contains fifteen entry-contract cases, including both unknown selector boundaries. Its result describes host execution only: it does not load an ELF image, switch privilege modes or inspect Kernel frame ownership. Follow the earlier RISC-V build and guest commands separately. The guest validator runs selectors 0–12 under O0 and O2, checks their exit results, rejects terminal reentry and compares frame snapshots after destruction. Record all thirteen case markers for each optimisation and the final ready marker; a host pass cannot substitute for those observations.
+
+If the host build reports a missing comparison profile, check the selected Umicom C path and revision before rebuilding. If the guest receipt refuses stale source, rebuild its two images and capture the new identity through the existing workflow; do not edit a receipt to make it agree. These commands are qualification instructions, not a claim that the checks have already passed.

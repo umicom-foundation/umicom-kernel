@@ -34,10 +34,32 @@ static void Require(UmicomBoolean condition, const char *reason)
 static void CheckImage(const UmicomU8 *begin, const UmicomU8 *end, const char *mode)
 {
     const UmicomSize bytes = (UmicomSize)((UmicomAddress)end - (UmicomAddress)begin);
+    /* Additional user selectors qualify the same traced runtime at O0 and O2.
+     * Retain the former table for comparison; original result codes are stable. */
+#if 0
     static const UmicomU64 expected[] = {42U, 0xc001U, 0xc002U, 0xc003U, 0xc004U};
+#endif
+    /* Preserve the previous trace table; appended comparison selectors receive
+     * the same user-mode, terminal-reentry and frame-restoration checks. */
+#if 0
+    static const UmicomU64 expected[] = {
+        42U, 0xc001U, 0xc002U, 0xc003U, 0xc004U,
+        0xc005U, 0xc006U, 0xc007U, 0xc008U
+    };
+#endif
+    static const UmicomU64 expected[] = {
+        42U, 0xc001U, 0xc002U, 0xc003U, 0xc004U,
+        0xc005U, 0xc006U, 0xc007U, 0xc008U,
+        0xc009U, 0xc00aU, 0xc00bU, 0xc00cU
+    };
     UmicomKernelConsoleWrite("cvm.optimization=");
     UmicomKernelConsoleWriteLine(mode);
+    /* Derive the bound from the result contract so new selectors cannot be
+     * omitted from frame-restoration and terminal-reentry qualification. */
+#if 0
     for (UmicomSize selector = 0U; selector < 5U; ++selector) {
+#endif
+    for (UmicomSize selector = 0U; selector < sizeof expected / sizeof expected[0]; ++selector) {
         UmicomKernelPhysicalMemorySnapshot before;
         UmicomKernelPhysicalMemorySnapshot after;
         UmicomKernelExecutableStatus inspected = UMICOM_EXECUTABLE_INVALID_ARGUMENT;

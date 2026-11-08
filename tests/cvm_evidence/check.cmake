@@ -22,6 +22,7 @@ endforeach()
 file(MAKE_DIRECTORY "${WORK}/runtime" "${WORK}/kernel")
 set(runtime_files src/status.c src/vm.c src/bytecode.c src/comparison.c
     src/internal.h include/umicom_c/umicom_c.h include/umicom_c/comparison.h
+    include/umicom_c/trace.h
     cmake/UmicomCRuntime.cmake)
 set(kernel_files programs/cvm/main.c programs/cvm/entry.S
     programs/cvm/CMakeLists.txt programs/diagnostic/linker.ld cmake/CvmPrograms.cmake)
@@ -52,6 +53,10 @@ if(CASE STREQUAL "unchanged")
     set(expect_success TRUE)
 elseif(CASE STREQUAL "source-edit")
     file(APPEND "${WORK}/runtime/src/vm.c" "changed source")
+elseif(CASE STREQUAL "trace-header-edit")
+    file(APPEND "${WORK}/runtime/include/umicom_c/trace.h" "changed trace layout")
+elseif(CASE STREQUAL "trace-header-missing")
+    file(REMOVE "${WORK}/runtime/include/umicom_c/trace.h")
 elseif(CASE STREQUAL "image-edit")
     file(APPEND "${WORK}/o2.fixture" "changed image")
 elseif(CASE STREQUAL "recipe-edit")
@@ -77,7 +82,10 @@ endif()
 
 # A failure for an unrelated reason must not masquerade as successful rejection.
 if(NOT expect_success)
-    if(CASE STREQUAL "source-missing")
+    # Both missing implementation and missing trace layout require the source diagnostic.
+    # The former condition is retained for engineering review.
+    # if(CASE STREQUAL "source-missing")
+    if(CASE STREQUAL "source-missing" OR CASE STREQUAL "trace-header-missing")
         set(reason "Missing CVM source")
     elseif(CASE STREQUAL "receipt-missing")
         set(reason "build the CVM image before guest qualification")

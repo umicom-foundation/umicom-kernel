@@ -62,6 +62,11 @@ static const ConsoleStep steps[] = {
     {"run /bin/umicom-cvm.elf 2", "state=exited exit=49154 "},
     {"run /bin/umicom-cvm.elf 3", "state=exited exit=49155 "},
     {"run /bin/umicom-cvm.elf 4", "state=exited exit=49156 "},
+    /* Trace selectors are separate outcomes; they preserve the ordinary run. */
+    {"run /bin/umicom-cvm.elf 5", "state=exited exit=49157 "},
+    {"run /bin/umicom-cvm.elf 6", "state=exited exit=49158 "},
+    {"run /bin/umicom-cvm.elf 7", "state=exited exit=49159 "},
+    {"run /bin/umicom-cvm.elf 8", "state=exited exit=49160 "},
     {"run /bin/umicom-cvm.elf 0", "state=exited exit=42 "},
 #endif
     {"poweroff", "RAM filesystem closed. Powering off.\r\nUMICOM_KERNEL_END\r\n"}
