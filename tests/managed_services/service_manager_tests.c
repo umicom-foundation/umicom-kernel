@@ -2,11 +2,18 @@
  * Umicom Kernel managed-service native tests
  * File: tests/managed_services/service_manager_tests.c
  *
+ * PURPOSE:
  * Use the established synthetic ELF and hardware model, but compile the actual
  * new controller, monitor hook and scheduler additions with their real lower
  * C services. No native test claims to run RISC-V instructions. The release
  * wrapper injects failure without replacing the allocator's normal behaviour.
- * Author: Sammy Hegab, Umicom Foundation. Licence: MIT.
+ *
+ * AUTHOR AND ORGANISATION:
+ * Sammy Hegab
+ * Umicom Foundation
+ *
+ * LICENCE:
+ * MIT
  *---------------------------------------------------------------------------*/
 #define UmicomPlatformTimerRead UmicomManagedPreviousTimerRead
 #define main UmicomManagedPreviousModelMain
@@ -102,6 +109,11 @@ static void Capture(void *context, const char *name, const UmicomKernelStreamPac
     CHECK(UmicomModelMemory().allocatedFrames != 0U);
     if (reentry) {
         UmicomKernelManagedServiceInfo info;
+        UmicomKernelManagedServiceSnapshot snapshot;
+        memset(&snapshot, 0x5a, sizeof(snapshot));
+        UmicomKernelManagedServiceSnapshot unchanged = snapshot;
+        CHECK(UmicomKernelServiceManagerSnapshot(&manager, &snapshot) == UMICOM_MANAGER_BUSY);
+        CHECK(!memcmp(&snapshot, &unchanged, sizeof(snapshot)));
         CHECK(UmicomKernelServiceManagerStep(&manager, 1000U) == UMICOM_MANAGER_BUSY);
         CHECK(UmicomKernelServiceManagerClose(&manager) == UMICOM_MANAGER_BUSY);
         CHECK(UmicomKernelServiceManagerRestart(&manager, 0U) == UMICOM_MANAGER_BUSY);
@@ -357,6 +369,38 @@ int main(int argc,char **argv)
         CHECK(Command(&testShell, "daemons restart 3") == UMICOM_SHELL_BAD_STATE);
         CHECK(Command(&testShell, "daemons restart -1") == UMICOM_SHELL_BAD_STATE);
         CHECK(UmicomKernelServiceConsoleClose(&testShell) == UMICOM_SHELL_OK); UmicomModelNoLeaks();
+    } else if (!strcmp(name, "owned-snapshot")) {
+        Init(2); Step(); Step();
+        UmicomKernelManagedServiceSnapshot snapshot;
+        CHECK(UmicomKernelServiceManagerSnapshot(&manager, &snapshot) == UMICOM_MANAGER_OK);
+        CHECK(snapshot.count == 2U && snapshot.phase == UMICOM_MANAGER_HEALTHY);
+        CHECK(snapshot.observedAt == manager.now && !snapshot.closed);
+        CHECK(snapshot.services[0].identity != snapshot.services[1].identity);
+        const unsigned char *unused = (const unsigned char *)&snapshot.services[2];
+        for (size_t byte = 0; byte < sizeof(snapshot.services[2]); ++byte)
+            CHECK(unused[byte] == 0);
+        const UmicomU64 identity = snapshot.services[0].identity;
+        CHECK(UmicomKernelServiceManagerRestart(&manager, 0U) == UMICOM_MANAGER_OK);
+        CHECK(snapshot.services[0].state == UMICOM_MANAGED_HEALTHY);
+        CHECK(snapshot.services[0].identity == identity);
+        CHECK(UmicomKernelServiceManagerSnapshot(&manager, &snapshot) == UMICOM_MANAGER_OK);
+        CHECK(snapshot.phase != UMICOM_MANAGER_HEALTHY);
+        CHECK(snapshot.services[0].state == UMICOM_MANAGED_STOPPING);
+        Close();
+        CHECK(UmicomKernelServiceManagerSnapshot(&manager, &snapshot) == UMICOM_MANAGER_OK);
+        CHECK(snapshot.closed && snapshot.phase == UMICOM_MANAGER_STOPPED);
+    } else if (!strcmp(name, "snapshot-refusal")) {
+        Init(1);
+        UmicomKernelManagedServiceSnapshot snapshot;
+        memset(&snapshot, 0xa5, sizeof(snapshot));
+        UmicomKernelManagedServiceSnapshot before = snapshot;
+        CHECK(UmicomKernelServiceManagerSnapshot(0, &snapshot) == UMICOM_MANAGER_INVALID_ARGUMENT);
+        CHECK(UmicomKernelServiceManagerSnapshot(&manager, 0) == UMICOM_MANAGER_INVALID_ARGUMENT);
+        manager.count = UMICOM_MANAGED_SERVICE_LIMIT + 1U;
+        CHECK(UmicomKernelServiceManagerSnapshot(&manager, &snapshot) == UMICOM_MANAGER_INVALID_ARGUMENT);
+        manager.count = 1U;
+        CHECK(!memcmp(&before, &snapshot, sizeof(snapshot)));
+        Close();
     } else Invalid(name);
     printf("PASS %s (%u checks)\n",name,umicomModelChecks);return EXIT_SUCCESS;
 }

@@ -2,6 +2,7 @@
  * Umicom Kernel live-service readiness, health and replacement policy
  * File: kernel/service_manager.c
  *
+ * PURPOSE:
  * A healthy instance is live evidence, not a permanent success flag. Losing a
  * prerequisite revokes its consumers before another quantum is selected. Old
  * instances are collected before replacements are admitted, so two generations
@@ -10,7 +11,13 @@
  * The existing supervisor, scheduler, stream owner and loader retain all their
  * mechanisms. This controller supplies policy and a small reporting boundary.
  * It does not renew execution budgets or parse stdout as a readiness signal.
- * Author: Sammy Hegab, Umicom Foundation. Licence: MIT.
+ *
+ * AUTHOR AND ORGANISATION:
+ * Sammy Hegab
+ * Umicom Foundation
+ *
+ * LICENCE:
+ * MIT
  *---------------------------------------------------------------------------*/
 #include "umicom/kernel/service_manager.h"
 #include "umicom/kernel/object_cache.h"
@@ -459,6 +466,27 @@ UmicomKernelServiceManagerStatus UmicomKernelServiceManagerQuery(UmicomKernelSer
     UmicomManagedCopy(out, &m->records[index].info, sizeof(*out));
     return UMICOM_MANAGER_OK;
 }
+/* Keep diagnostics in the policy owner so clients do not walk live records or
+ * combine a phase from one step with service records from another step. This
+ * is an owner-thread copy, not an SMP synchronization primitive. */
+UmicomKernelServiceManagerStatus UmicomKernelServiceManagerSnapshot(
+    const UmicomKernelServiceManager *m, UmicomKernelManagedServiceSnapshot *out)
+{
+    if (!m || !out || m->self != m || !m->initialised ||
+        m->count == 0U || m->count > UMICOM_MANAGED_SERVICE_LIMIT)
+        return UMICOM_MANAGER_INVALID_ARGUMENT;
+    if (m->active) return UMICOM_MANAGER_BUSY;
+    UmicomManagedClear(out, sizeof(*out));
+    out->phase = m->phase;
+    out->count = m->count;
+    out->observedAt = m->now;
+    out->closed = m->closed;
+    out->recovery = m->recovery;
+    for (UmicomSize i = 0U; i < m->count; ++i)
+        UmicomManagedCopy(&out->services[i], &m->records[i].info, sizeof(out->services[i]));
+    return UMICOM_MANAGER_OK;
+}
+
 const char *UmicomKernelManagedServiceStateName(UmicomKernelManagedServiceState state)
 {
     switch (state) {

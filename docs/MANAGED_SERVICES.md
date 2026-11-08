@@ -247,3 +247,23 @@ ctest --test-dir build/native-managed-services --output-on-failure
 
 That optional host suite models privileged entry. It is not an extra installation
 step for the normal Windows-to-RISC-V build.
+
+## Owned service observations
+
+UmicomKernelServiceManagerSnapshot captures the phase, count, last observed clock,
+closed/recovery flags and copied service information in one serialized call.
+It complements the existing per-service Query API. The snapshot owns its values;
+it contains no live handles, ELF pointers or callbacks.
+
+Call between quanta on the same serialized hart-zero owner context as the other
+manager operations. The output must not overlap the manager. An invalid owner,
+invalid count or active callback refuses the call without changing the output.
+Unused entries are zeroed on success. Closed and unsafe managers remain
+inspectable; inspection neither authorizes restart nor refreshes a health lease.
+The timestamp is the last controller observation, not a fresh clock sample.
+
+The native managed-service suite includes owned-snapshot and snapshot-refusal,
+and callback-reentry now covers snapshot refusal. Expected checks include a
+retained healthy copy surviving a restart, a fresh copy showing revocation, a
+closed-state observation and unchanged output after refusal. These additions
+require owner execution; source inspection is not a native or guest test result.

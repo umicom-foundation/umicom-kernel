@@ -2,6 +2,7 @@
  * Umicom Kernel managed native-service lifetimes
  * File: include/umicom/kernel/service_manager.h
  *
+ * PURPOSE:
  * The Master Controller keeps native Slave Controller processes alive only
  * while their explicit readiness and health leases remain valid. Dependencies
  * refer to live healthy instances, unlike the terminal-success dependencies of
@@ -11,7 +12,13 @@
  * All calls are serial on hart zero, between user quanta. This is neither an
  * SMP lock nor Kernel pre-emption. Names and launch strings are copied; ELF
  * buffers must remain immutable and alive until the manager has closed.
- * Author: Sammy Hegab, Umicom Foundation. Licence: MIT.
+ *
+ * AUTHOR AND ORGANISATION:
+ * Sammy Hegab
+ * Umicom Foundation
+ *
+ * LICENCE:
+ * MIT
  *---------------------------------------------------------------------------*/
 #ifndef UMICOM_KERNEL_SERVICE_MANAGER_H
 #define UMICOM_KERNEL_SERVICE_MANAGER_H
@@ -79,6 +86,18 @@ typedef struct UmicomKernelManagedServiceInfo {
     UmicomU64 retryAt;
     UmicomKernelProcessCompletion completion; /* Last collected attempt, not a live pointer. */
 } UmicomKernelManagedServiceInfo;
+/* One owned diagnostic observation, captured between quanta. It includes the
+ * manager's last observed clock, not a newly sampled time or a readiness lease
+ * for future use. No live handles, ELF buffers or callback pointers escape. */
+typedef struct UmicomKernelManagedServiceSnapshot {
+    UmicomKernelServiceManagerPhase phase;
+    UmicomSize count;
+    UmicomU64 observedAt;
+    UmicomBoolean closed;
+    UmicomBoolean recovery;
+    UmicomKernelManagedServiceInfo services[UMICOM_MANAGED_SERVICE_LIMIT];
+} UmicomKernelManagedServiceSnapshot;
+
 typedef void (*UmicomKernelManagedServiceOutput)(void *context, const char *name,
     const UmicomKernelStreamPacket *packet);
 
@@ -132,6 +151,12 @@ UmicomKernelServiceManagerStatus UmicomKernelServiceManagerRestart(
 UmicomKernelServiceManagerStatus UmicomKernelServiceManagerClose(UmicomKernelServiceManager *manager);
 UmicomKernelServiceManagerStatus UmicomKernelServiceManagerQuery(
     UmicomKernelServiceManager *manager, UmicomSize index, UmicomKernelManagedServiceInfo *outInfo);
+/* Serialize with all manager calls on hart zero. Storage must not overlap the
+ * manager. Refusal leaves outSnapshot unchanged; unused entries are zeroed on
+ * success. UNSAFE/closed managers remain inspectable, never restart-authorized.
+ * Existing Query remains available for callers needing one service. */
+UmicomKernelServiceManagerStatus UmicomKernelServiceManagerSnapshot(
+    const UmicomKernelServiceManager *manager, UmicomKernelManagedServiceSnapshot *outSnapshot);
 const char *UmicomKernelManagedServiceReasonName(UmicomKernelManagedServiceReason reason);
 const char *UmicomKernelManagedServiceStateName(UmicomKernelManagedServiceState state);
 
