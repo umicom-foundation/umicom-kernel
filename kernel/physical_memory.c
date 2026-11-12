@@ -601,6 +601,87 @@ UmicomKernelMemoryStatus UmicomKernelPhysicalMemoryReleaseReservedRange(
     return UMICOM_KERNEL_MEMORY_OK;
 }
 
+/* Contiguous ownership belongs in the allocator, where both bitmaps and their
+ * counters can be admitted together. Repeating AllocateFrame cannot promise
+ * adjacency and would require rollback after partial success. This bounded
+ * scan examines each represented frame at most once before committing a run. */
+UmicomKernelMemoryStatus UmicomKernelPhysicalMemoryAllocateFrames(
+    UmicomSize frameCount, UmicomSize alignmentFrames, UmicomAddress *outFirstFrame)
+{
+    if (outFirstFrame == (UmicomAddress *)0 || frameCount == 0U)
+        return UMICOM_KERNEL_MEMORY_INVALID_ARGUMENT;
+    if (UmicomKernelIsPowerOfTwo(alignmentFrames) == UMICOM_FALSE)
+        return UMICOM_KERNEL_MEMORY_INVALID_ALIGNMENT;
+    if (gInitialised == UMICOM_FALSE)
+        return UMICOM_KERNEL_MEMORY_NOT_INITIALISED;
+    if (gReservedCount > gFrameCount ||
+        gAllocatedCount > gFrameCount - gReservedCount)
+        return UMICOM_KERNEL_MEMORY_INVARIANT_FAILURE;
+    if (frameCount > gFrameCount - gReservedCount - gAllocatedCount)
+        return UMICOM_KERNEL_MEMORY_OUT_OF_MEMORY;
+
+    UmicomSize first = 0U;
+    UmicomSize length = 0U;
+    for (UmicomSize index = 0U; index < gFrameCount; ++index) {
+        if (BitmapRead(gReservedBitmap, index) != UMICOM_FALSE ||
+            BitmapRead(gAllocatedBitmap, index) != UMICOM_FALSE) {
+            length = 0U;
+            continue;
+        }
+        if (length == 0U) {
+            /* Align the absolute physical frame number, not the index relative
+             * to RAM. Division avoids multiplying a possibly huge alignment by
+             * page size. Even the largest power of two remains well-defined. */
+            const UmicomU64 number =
+                (UmicomU64)FrameAddress(index) / (UmicomU64)UMICOM_KERNEL_PAGE_SIZE;
+            if ((number & (alignmentFrames - 1U)) != 0U) continue;
+            first = index;
+        }
+        ++length;
+        if (length != frameCount) continue;
+
+        /* No callback, allocation or fallible operation separates admission
+         * from publication. The caller must serialize all allocator access. */
+        for (UmicomSize offset = 0U; offset < frameCount; ++offset)
+            BitmapSet(gAllocatedBitmap, first + offset);
+        gAllocatedCount += frameCount;
+        *outFirstFrame = FrameAddress(first);
+        return UMICOM_KERNEL_MEMORY_OK;
+    }
+    /* Enough free pages may exist in total while no eligible run exists. */
+    return UMICOM_KERNEL_MEMORY_OUT_OF_MEMORY;
+}
+
+UmicomKernelMemoryStatus UmicomKernelPhysicalMemoryFreeFrames(
+    UmicomAddress firstFrame, UmicomSize frameCount)
+{
+    if (frameCount == 0U) return UMICOM_KERNEL_MEMORY_INVALID_ARGUMENT;
+    UmicomSize first = 0U;
+    const UmicomKernelMemoryStatus status = FrameAddressToIndex(firstFrame, &first);
+    if (status != UMICOM_KERNEL_MEMORY_OK) return status;
+    /* Subtract before comparing instead of multiplying an untrusted count. */
+    if (frameCount > gFrameCount - first)
+        return UMICOM_KERNEL_MEMORY_OUTSIDE_RAM;
+
+    for (UmicomSize offset = 0U; offset < frameCount; ++offset) {
+        const UmicomSize index = first + offset;
+        if (BitmapRead(gReservedBitmap, index) != UMICOM_FALSE)
+            return UMICOM_KERNEL_MEMORY_RESERVED_FRAME;
+        if (BitmapRead(gAllocatedBitmap, index) == UMICOM_FALSE)
+            return UMICOM_KERNEL_MEMORY_NOT_ALLOCATED;
+    }
+    if (gAllocatedCount < frameCount)
+        return UMICOM_KERNEL_MEMORY_INVARIANT_FAILURE;
+    for (UmicomSize offset = 0U; offset < frameCount; ++offset)
+        BitmapClear(gAllocatedBitmap, first + offset);
+    gAllocatedCount -= frameCount;
+    return UMICOM_KERNEL_MEMORY_OK;
+}
+
+/* The original one-page algorithms are retained for review. Their public
+ * entry points below now delegate to the run service with count/alignment one,
+ * preserving first-fit ownership while centralising admission and accounting. */
+#if 0
 UmicomKernelMemoryStatus UmicomKernelPhysicalMemoryAllocateFrame(
     UmicomAddress *outFrameAddress
 )
@@ -688,6 +769,20 @@ UmicomKernelMemoryStatus UmicomKernelPhysicalMemoryFreeFrame(
 
     /* The page is now free for deterministic reuse. */
     return UMICOM_KERNEL_MEMORY_OK;
+}
+
+#endif
+
+UmicomKernelMemoryStatus UmicomKernelPhysicalMemoryAllocateFrame(
+    UmicomAddress *outFrameAddress)
+{
+    return UmicomKernelPhysicalMemoryAllocateFrames(1U, 1U, outFrameAddress);
+}
+
+UmicomKernelMemoryStatus UmicomKernelPhysicalMemoryFreeFrame(
+    UmicomAddress frameAddress)
+{
+    return UmicomKernelPhysicalMemoryFreeFrames(frameAddress, 1U);
 }
 
 UmicomKernelMemoryStatus UmicomKernelPhysicalMemorySnapshotRead(

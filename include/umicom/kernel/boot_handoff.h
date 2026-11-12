@@ -79,4 +79,18 @@ typedef struct UmicomKernelBootHandoff {
  * See docs/BOOT_HANDOFF.md for the exact little-endian wire format and limits. */
 UmicomBootHandoffStatus UmicomKernelBootHandoffRead(const void *bytes,
     UmicomSize accessibleBytes, UmicomKernelBootHandoff *out);
+/* Produce the same canonical version-1 bytes accepted by the reader. The
+ * complete input object, destination capacity and written counter must be
+ * accessible, stable and pairwise nonoverlapping. Input and counter must have
+ * their declared alignment. Capacity is 1 through MAX_BYTES; success writes
+ * only the encoded record, leaves its destination tail untouched, and updates
+ * written. Both outputs are unchanged on every refusal.
+ *
+ * The writer bounds counts/text before encoding, then calls the existing reader
+ * to admit all memory and optional-descriptor rules. Unused input array slots
+ * and command bytes after the first zero are not serialized. No physical
+ * address is followed; this is not a firmware adapter or new boot entry. */
+UmicomBootHandoffStatus UmicomKernelBootHandoffWrite(
+    const UmicomKernelBootHandoff *record,void *destination,
+    UmicomSize capacity,UmicomSize *written);
 #endif

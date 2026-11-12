@@ -1,7 +1,20 @@
 /*-----------------------------------------------------------------------------
- * Umicom Kernel normal system entry and independent recovery
+ * Umicom Kernel
  * File: kernel/normal_boot.c
  *
+ * PURPOSE:
+ *   Select normal startup or independent recovery, preserving service and frame ownership.
+ *
+ * AUTHOR AND ORGANISATION:
+ * Sammy Hegab
+ * Umicom Foundation
+ *
+ * LICENCE:
+ * MIT
+ *---------------------------------------------------------------------------*/
+
+
+/* Original startup scope, retained with the coordinator for engineering review:
  * Normal startup does not run the cumulative test sequence. It protects boot
  * memory, runs an explicit native startup plan and then calls the existing
  * interactive shell. The separate recovery image bypasses memory allocation
@@ -9,9 +22,7 @@
  *
  * The packaged jobs verify native launch/environment contracts, not fictional
  * disk or networking services. The controller's completed records remain
- * visible after the actual task images have been collected.
- * Sammy Hegab, Umicom Foundation. MIT licence.
- *---------------------------------------------------------------------------*/
+ * visible after the actual task images have been collected. */
 /* Inventory is observational; independent recovery still skips this path. */
 #include "umicom/kernel/hardware_catalogue.h"
 #include "umicom/kernel/startup.h"
@@ -31,6 +42,18 @@ static UmicomBoolean umicomSystemSelected;
 static UmicomBoolean umicomSystemMemoryReady;
 static UmicomBoolean umicomStartupLineStart = UMICOM_TRUE;
 static const char *umicomStartupOutputOwner;
+static UmicomU64 umicomStartupOutputSelector;
+
+/* A partial job line must end before Kernel-owned status text begins. This
+ * does not discard accepted bytes or print an extra line after a complete line. */
+static void UmicomStartupOutputFinish(void)
+{
+    if (!umicomStartupLineStart) UmicomKernelConsoleWriteLine("");
+    umicomStartupLineStart = UMICOM_TRUE;
+    umicomStartupOutputOwner = (const char *)0;
+    umicomStartupOutputSelector = 0U;
+}
+
 
 static UmicomSize UmicomStartupLength(const char *text)
 {
@@ -81,11 +104,22 @@ static void UmicomStartupRecoveryReport(void *context)
 static void UmicomStartupServiceOutput(void *context, const char *name, const UmicomKernelStreamPacket *packet)
 {
     (void)context;
+/* Retain the earlier name-only boundary for review. The active boundary also tracks the stream selector and ignores empty records. The previous implementation is retained for review. */
+#if 0
     if (umicomStartupOutputOwner != name && !umicomStartupLineStart) {
         UmicomKernelConsoleWriteLine("");
         umicomStartupLineStart = UMICOM_TRUE;
     }
     umicomStartupOutputOwner = name; /* Names belong to the stable closed-report owner. */
+#endif
+    /* A stream change is also an ownership boundary: stderr must not inherit
+     * an unfinished stdout prefix from the same job. Zero-byte records carry
+     * no text, so they cannot break a line or change its owner. */
+    if (!packet->bytes) return;
+    if (umicomStartupOutputOwner != name || umicomStartupOutputSelector != packet->selector)
+        UmicomStartupOutputFinish();
+    umicomStartupOutputOwner = name; /* Names belong to the stable closed-report owner. */
+    umicomStartupOutputSelector = packet->selector;
     static const char hex[] = "0123456789abcdef";
     for (UmicomSize i = 0U; i < packet->bytes; ++i) {
         if (umicomStartupLineStart) {
@@ -116,6 +150,7 @@ static _Noreturn void UmicomStartupPoweroff(void)
 }
 static _Noreturn void UmicomStartupRecovery(const char *reason, UmicomBoolean expectedSelection)
 {
+    UmicomStartupOutputFinish();
     UmicomKernelConsoleWrite("recovery.reason="); UmicomKernelConsoleWriteLine(reason);
     UmicomKernelConsoleWriteLine("UMICOM_KERNEL_RECOVERY_READY");
 #ifdef UMICOM_KERNEL_STARTUP_AUTOMATED
@@ -198,7 +233,17 @@ _Noreturn void UmicomKernelNormalBoot(UmicomU64 hart, UmicomAddress deviceTree)
     static const UmicomKernelLaunchString runtimeArguments[] = {{"/boot/launch-check",18U},{"runtime-contract",16U}};
     static const UmicomKernelLaunchString sessionArguments[] = {{"/boot/launch-check",18U},{"session-environment",19U}};
     static const UmicomKernelLaunchString environment[] = {{"LANG=C",6U},{"UMICOM_BOOT=normal",18U}};
+/* The prior pointer subtraction is retained for review. Linker addresses now use the existing target-address contract with an ordered-range check. The previous implementation is retained for review. */
+#if 0
     const UmicomSize imageBytes = (UmicomSize)(UmicomLaunchExecutableEnd - UmicomLaunchExecutableStart);
+#endif
+    /* Linker boundary symbols represent addresses, not two C array objects.
+     * Use the established target-address conversion before subtraction. A bad
+     * linked range must select recovery before any service admission. */
+    const UmicomAddress imageStart = UMICOM_KERNEL_LINKER_ADDRESS(UmicomLaunchExecutableStart);
+    const UmicomAddress imageEnd = UMICOM_KERNEL_LINKER_ADDRESS(UmicomLaunchExecutableEnd);
+    if (imageEnd <= imageStart) UmicomStartupRecovery("startup-image-range", UMICOM_FALSE);
+    const UmicomSize imageBytes = (UmicomSize)(imageEnd - imageStart);
     UmicomKernelBootServiceSpec specs[2];
     UmicomConsoleClear(specs, sizeof(specs));
     for (UmicomSize i=0U; i<2U; ++i) {
@@ -234,6 +279,7 @@ _Noreturn void UmicomKernelNormalBoot(UmicomU64 hart, UmicomAddress deviceTree)
         afterServices.reservedFrames != beforeServices.reservedFrames ||
         UmicomKernelPhysicalMemoryValidate() != UMICOM_KERNEL_MEMORY_OK)
         UmicomStartupRecovery("startup-frame-accounting", UMICOM_FALSE);
+    UmicomStartupOutputFinish();
     UmicomKernelNormalBootReport((void *)0, UmicomStartupUart);
     if (!ready) {
         UmicomBoolean expected = UMICOM_FALSE;

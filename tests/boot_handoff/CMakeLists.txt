@@ -30,3 +30,17 @@ if(BUILD_TESTING)
         set_tests_properties("kernel.boot_handoff.${_case}" PROPERTIES TIMEOUT 10)
     endforeach()
 endif()
+
+# Producer cases use the same reader and checked-address implementation as boot.
+add_executable(umicom-boot-handoff-write-tests write_tests.c
+    ../../kernel/boot_handoff_write.c ../../kernel/boot_handoff.c ../../kernel/address.c)
+target_include_directories(umicom-boot-handoff-write-tests PRIVATE ../../include)
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(umicom-boot-handoff-write-tests PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)
+endif()
+if(BUILD_TESTING)
+    foreach(_case IN ITEMS golden architectures roundtrip maximum unused unaligned tail capacity capacity_limit zero_capacity ram_count reserved_count text_termination text_control pixel_tag table_tag architecture_tag kernel_range ram_overlap reservation firmware framebuffer overlap_record overlap_counter counter_in_record input_alignment counter_alignment arguments)
+        add_test(NAME "kernel.boot_handoff.write.${_case}" COMMAND umicom-boot-handoff-write-tests "${_case}")
+        set_tests_properties("kernel.boot_handoff.write.${_case}" PROPERTIES TIMEOUT 10)
+    endforeach()
+endif()

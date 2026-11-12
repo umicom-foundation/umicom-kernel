@@ -95,6 +95,7 @@ add_executable(
     kernel/device_tree_layout.c
     kernel/boot_reservations.c
     kernel/boot_handoff.c
+    kernel/boot_handoff_write.c
     kernel/main.c
     kernel/supervisor_payload.c
     kernel/supervisor_validation.c

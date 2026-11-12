@@ -302,3 +302,9 @@ The roadmap originally placed threads/scheduling after physical memory.  Before
 scheduler work, the next implementation should review whether a small page-table
 foundation is needed for safe per-thread/kernel-stack work, while preserving the
 roadmap's rule that the physical-memory foundation itself remains purely physical memory.
+
+## Aligned contiguous ownership
+
+The allocator also exposes UmicomKernelPhysicalMemoryAllocateFrames and UmicomKernelPhysicalMemoryFreeFrames. They allocate the lowest eligible aligned run and admit a complete release before changing ownership. Existing single-frame entry points use the same service; their earlier implementations remain preserved in source.
+
+Read [Aligned physical frame runs](PHYSICAL_FRAME_RUNS.md) for the current contract, isolated host commands, expected observations and platform limits. The historical milestone discussion above remains useful design history; it does not establish the qualification state of this extension or the rest of the Kernel.

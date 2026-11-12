@@ -25,7 +25,8 @@ cmake --build build/host-boot-handoff --parallel 2
 ctest --test-dir build/host-boot-handoff --output-on-failure --no-tests=error
 ```
 
-Expected result: all 18 `kernel.boot_handoff.*` cases pass. This is an acceptance criterion, not a statement that these commands have already run. A failed assertion prints the source line and condition. Fix the first failure and rerun its named case before rerunning the group.
+<!-- The earlier reader-only expectation is retained for review: all 18 kernel.boot_handoff.* cases pass. The group now includes 28 producer cases. -->
+Expected result: all 46 `kernel.boot_handoff.*` cases pass. This is an acceptance criterion, not a statement that these commands have already run. A failed assertion prints the source line and condition. Fix the first failure and rerun its named case before rerunning the group.
 
 ## Buffer contract
 
@@ -73,8 +74,34 @@ The sections follow in one order: RAM spans, reserved spans, one firmware span, 
 
 ## Freestanding link qualification
 
-After configuring the existing `riscv64-clang-debug` preset, build `umicom-boot-memory-contracts`. The debug and optimised link images include the real reader, retain uncalled code, and link without the hosted C runtime. They are link checks, not bootable images. A reference to `memcpy` or `memset` in this step is a failure to investigate, not a reason to remove the check.
+After configuring the existing `riscv64-clang-debug` preset, build `umicom-boot-memory-contracts`. The debug and optimised link images include the real reader and writer, retain uncalled code, and link without the hosted C runtime. They are link checks, not bootable images. A reference to `memcpy` or `memset` in this step is a failure to investigate, not a reason to remove the check.
 
 ## Extension boundary
 
 The next integration step is a startup adapter that creates this record from validated platform data, reserves the record and its referenced memory, and passes the observation into existing memory admission. That adapter is not present here. Continue using the existing RISC-V boot path. ARM and x86 boot entries, UEFI handling, ACPI parsing and hardware framebuffer ownership require their own implementation and qualification.
+
+## Produce a validated record
+
+`UmicomKernelBootHandoffWrite` is the producer for this same version-1 format. It accepts a typed `UmicomKernelBootHandoff`, caller-owned destination bytes, destination capacity and a separate written-length counter. The complete input object, the full destination capacity and the counter must be accessible, stable and pairwise nonoverlapping. The input and counter need their declared C alignment. These requirements are the adapter's responsibility; integer checks cannot establish memory accessibility.
+
+~~~c
+unsigned char bytes[UMICOM_BOOT_HANDOFF_MAX_BYTES];
+UmicomSize written = 0;
+UmicomBootHandoffStatus status =
+    UmicomKernelBootHandoffWrite(&record, bytes, sizeof bytes, &written);
+if (status == UMICOM_BOOT_HANDOFF_OK) {
+    /* bytes[0..written) is the exact record; the remaining tail is untouched. */
+}
+~~~
+
+Here `record` must already describe validated platform observations. A zero-initialised record alone is refused because it has no RAM span or covered kernel. Study the complete synthetic example in Bits2Banking's `labs/native/boot-handoff/write.c`; it runs on the host and never dereferences a physical address.
+
+The writer bounds array counts and command text before encoding. It checks complete enum values before converting to narrower wire fields, so an unknown value cannot truncate into a recognised pixel format. Unused array slots and command bytes after the first terminating zero are not serialized. It then constructs little-endian fields in private storage and calls the existing reader for all range, reservation, firmware and framebuffer rules. Only successful admission allows a final byte copy and length update. Either refusal leaves both caller outputs unchanged.
+
+The largest current record is 1903 bytes, while the API permits destination capacity from 1 through 4096. Larger capacities are deliberately refused rather than silently clamped. The writer uses bounded stack storage and calls the reader, which also stages an observation. A future startup adapter must budget this nested stack use before calling it; no heap allocation or physical reservation occurs here.
+
+### Review independent producer checks
+
+The additional 28 `kernel.boot_handoff.write.*` cases cover literal golden bytes, architectures, optional fields, maximum counts, unused input storage, unaligned byte destinations, untouched tails, insufficient capacity, malformed text, enum narrowing, semantic refusals and overlapping storage. Literal byte expectations provide an independent reference: a writer and reader agreeing on the same mistaken field offset must not be accepted as sufficient evidence.
+
+Run the isolated host commands above to include both reader and writer cases. The `umicom-boot-memory-contracts` link targets include the writer at both debug and optimised settings. A hosted test can pass while a compiler inserts a forbidden `memcpy` call into freestanding code, so both forms of qualification are needed. Neither these authored checks nor a successful host round trip establishes a new firmware entry, x86 boot path or usable bootable ISO.

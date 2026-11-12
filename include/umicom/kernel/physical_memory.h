@@ -138,6 +138,29 @@ UmicomKernelMemoryStatus UmicomKernelPhysicalMemoryReleaseReservedRange(
     UmicomSize bytes
 );
 
+/* Allocate a consecutive run using the same ownership maps as AllocateFrame.
+ * frameCount must be nonzero. alignmentFrames must be a nonzero power of two;
+ * the first address divided by page size is a multiple of alignmentFrames.
+ * Alignment is absolute, not relative to ramBase. A valid request with no
+ * complete eligible run returns OUT_OF_MEMORY, including fragmentation.
+ * Success publishes the lowest eligible first address and owns every frame.
+ * Failure leaves the output and allocator state unchanged.
+ *
+ * FreeFrames admits the entire aligned managed range before clearing any bit.
+ * Every frame must currently be allocated. It does not track allocation groups:
+ * a caller may release a subrange, but must exclusively own every released
+ * frame. It cannot identify another owner's allocated frame or a stale address
+ * that was freed and reused. Zero count is invalid; oversized ranges are refused.
+ *
+ * All access to this global allocator must be serialized by the caller. These
+ * operations do not zero RAM, map addresses, configure DMA or perform I/O.
+ * Managed addresses are numbers; callers must establish accessibility before
+ * dereferencing them. Existing boot reservations remain mandatory. */
+UmicomKernelMemoryStatus UmicomKernelPhysicalMemoryAllocateFrames(
+    UmicomSize frameCount, UmicomSize alignmentFrames, UmicomAddress *outFirstFrame);
+UmicomKernelMemoryStatus UmicomKernelPhysicalMemoryFreeFrames(
+    UmicomAddress firstFrame, UmicomSize frameCount);
+
 /* Allocate the lowest-addressed free page and return its physical address. */
 UmicomKernelMemoryStatus UmicomKernelPhysicalMemoryAllocateFrame(
     UmicomAddress *outFrameAddress

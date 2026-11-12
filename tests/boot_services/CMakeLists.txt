@@ -75,3 +75,43 @@ foreach(UMICOM_STARTUP_SUPPORT_CASE IN LISTS UMICOM_STARTUP_SUPPORT_CASES)
     set_tests_properties(kernel.startup_support.${UMICOM_STARTUP_SUPPORT_CASE} PROPERTIES
         ENVIRONMENT "UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1;ASAN_OPTIONS=detect_leaks=1:halt_on_error=1")
 endforeach()
+
+
+# Compile the actual coordinator with explicit hosted boundaries. The existing
+# real-owner/controller suites remain separate, and no hosted case substitutes
+# for the RISC-V image's machine entry or interactive console qualification.
+foreach(UMICOM_COORDINATOR_PROFILE IN ITEMS normal forced retry interactive)
+    set(UMICOM_COORDINATOR_TARGET umicom-normal-boot-${UMICOM_COORDINATOR_PROFILE}-tests)
+    add_executable(${UMICOM_COORDINATOR_TARGET} normal_boot_tests.c
+        ../../kernel/recovery_console.c ../../kernel/console_line.c)
+    target_include_directories(${UMICOM_COORDINATOR_TARGET} PRIVATE ../../include)
+    if(UMICOM_COORDINATOR_PROFILE STREQUAL "forced")
+        target_compile_definitions(${UMICOM_COORDINATOR_TARGET} PRIVATE UMICOM_KERNEL_FORCED_RECOVERY=1)
+        set(UMICOM_COORDINATOR_CASES forced-ready forced-owner-present)
+    elseif(UMICOM_COORDINATOR_PROFILE STREQUAL "retry")
+        target_compile_definitions(${UMICOM_COORDINATOR_TARGET} PRIVATE UMICOM_KERNEL_STARTUP_FAILURE=1)
+        set(UMICOM_COORDINATOR_CASES expected-failure wrong-attempts wrong-reason dependent-started)
+    elseif(UMICOM_COORDINATOR_PROFILE STREQUAL "interactive")
+        target_compile_definitions(${UMICOM_COORDINATOR_TARGET} PRIVATE UMICOM_COORDINATOR_INTERACTIVE=1)
+        set(UMICOM_COORDINATOR_CASES ready report-boundary)
+    else()
+        set(UMICOM_COORDINATOR_CASES
+            ready memory-input memory-snapshot empty-image reversed-image startup-plan startup-step startup-cleanup accounting-read allocated-changed free-changed reserved-changed accounting-invalid required-failure report-boundary recovery-boundary report-null report-not-selected report-unadmitted stream-fragments stream-switch stream-owner stream-empty stream-controls)
+    endif()
+    if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
+        target_compile_options(${UMICOM_COORDINATOR_TARGET} PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)
+        if(UMICOM_BOOT_SANITIZERS)
+            target_compile_options(${UMICOM_COORDINATOR_TARGET} PRIVATE
+                -fsanitize=address,undefined -fno-omit-frame-pointer)
+            target_link_options(${UMICOM_COORDINATOR_TARGET} PRIVATE -fsanitize=address,undefined)
+        endif()
+    endif()
+    foreach(UMICOM_COORDINATOR_CASE IN LISTS UMICOM_COORDINATOR_CASES)
+        add_test(NAME kernel.normal_boot.${UMICOM_COORDINATOR_PROFILE}.${UMICOM_COORDINATOR_CASE}
+            COMMAND ${UMICOM_COORDINATOR_TARGET} ${UMICOM_COORDINATOR_CASE})
+        set_tests_properties(kernel.normal_boot.${UMICOM_COORDINATOR_PROFILE}.${UMICOM_COORDINATOR_CASE}
+            PROPERTIES TIMEOUT 10
+            ENVIRONMENT "UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1;ASAN_OPTIONS=detect_leaks=1:halt_on_error=1")
+    endforeach()
+endforeach()

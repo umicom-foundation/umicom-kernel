@@ -1,3 +1,5 @@
+![Umicom](../assets/branding/umicom-logo.svg)
+
 # Understanding Kernel targets and boot media
 
 A target identifies the processor, machine, firmware and devices expected by a build. The current native Umicom Kernel implementation is for a RISC-V64 virtual machine. The repository contains `arch/riscv64` and `platform/qemu-riscv64`; its configured preset is `riscv64-clang-debug`. This source does not yet provide an x86-64 or ARM64 Kernel port, a universal USB image or an optical boot ISO.
@@ -34,3 +36,7 @@ A multi-architecture medium needs separate native loaders and matching payloads.
 A useful result records the image digest, source revisions, compiler, machine model, processor features, firmware and exact observed checks. Serial output is an initial bring-up result. Normal startup, recovery, input, storage and shutdown each need their own checks. A physical machine is supported only after its named profile has evidence; a virtual-board pass is not evidence for every machine using the same CPU family.
 
 Secure Boot checks whether firmware trusts the image's signing chain. It needs separate signing and trust qualification. This guide does not ask you to change firmware security settings or write an unqualified image to a physical disk.
+
+## Choose a startup purpose as well as an architecture
+
+The diagnostic Kernel, interactive system, independent recovery and automatic startup-check images share an architecture but have different entry decisions. Read [Follow the normal-boot coordinator](NORMAL_BOOT_COORDINATOR.md) to trace their ownership sequence and distinguish hosted decision checks from an actual guest boot. Keep the diagnostic checks available when using the normal system image; a successful normal session does not replace them.

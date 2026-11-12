@@ -21,8 +21,9 @@ if(BUILD_TESTING)
         set(_boot_target "umicom-boot-memory-${_boot_mode}-link")
         add_executable(${_boot_target}
             tests/device_tree/freestanding_link.c
-            kernel/address.c kernel/boot_reservations.c kernel/boot_handoff.c
-            kernel/device_tree_layout.c kernel/device_tree_reader.c)
+            kernel/address.c kernel/boot_reservations.c kernel/boot_handoff.c kernel/boot_handoff_write.c
+            kernel/device_tree_layout.c kernel/device_tree_reader.c
+            kernel/physical_memory.c)
         target_include_directories(${_boot_target} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
         target_compile_options(${_boot_target} PRIVATE ${_boot_contract_options})
         if(_boot_mode STREQUAL "debug")
