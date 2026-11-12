@@ -39,6 +39,9 @@
  *   MIT
  *---------------------------------------------------------------------------*/
 
+/* Diagnostic-only acceptance entry; normal startup returns before this path. */
+void UmicomKernelPacketAdmissionValidateExecution(void);
+
 /* Qualify and test read-only transport ownership after hardware discovery. */
 /* Separate disk-fixture entry; existing diagnostic and normal paths remain. */
 #include "umicom/kernel/disk_console.h"
@@ -1673,6 +1676,10 @@ void UmicomKernelMain(UmicomU64 hartId, UmicomAddress deviceTreeAddress)
 
     /* Compare the copied inventory with this exact QEMU qualification profile. */
     UmicomKernelHardwareValidateExecution();
+
+    /* Parse synthetic stable RAM captures inside the real guest. This does
+     * not bind a NIC or claim queue, DMA or live-network qualification. */
+    UmicomKernelPacketAdmissionValidateExecution();
 
     /* Absence is a distinct result; only the attached synthetic disk test may
      * publish actual read-path acceptance. No disk-write command is issued. */

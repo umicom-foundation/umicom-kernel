@@ -96,6 +96,9 @@ add_executable(
     kernel/boot_reservations.c
     kernel/boot_handoff.c
     kernel/boot_handoff_write.c
+    # Admission is freestanding; no device or network activity is started.
+    kernel/network_packet.c
+    kernel/network_packet_validation.c
     kernel/main.c
     kernel/supervisor_payload.c
     kernel/supervisor_validation.c
@@ -604,3 +607,6 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/Qualification.cmake")
 
 # Optional bounded-language user programs share the existing ELF loader.
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/CvmPrograms.cmake")
+
+# Exercise packet admission in the existing diagnostic image with no NIC.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/PacketAdmission.cmake")

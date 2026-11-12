@@ -1,13 +1,23 @@
 /*-----------------------------------------------------------------------------
- * Umicom Kernel native block-protocol qualification
+ * Umicom Kernel
+ * File: tests/virtio_block/virtio_block_tests.c
  *
- * The model implements register side effects, selector banks and descriptor
+ * PURPOSE:
+ *   Exercise the real block driver with modelled MMIO, DMA and caller-output ownership faults.
+ *
+ * AUTHOR AND ORGANISATION:
+ * Sammy Hegab
+ * Umicom Foundation
+ *
+ * LICENCE:
+ * MIT
+ *---------------------------------------------------------------------------*/
+/* The model implements register side effects, selector banks and descriptor
  * consumption. It does not replace the driver, physical allocator or parser.
  * A DMA/reset failure is injectable so retained memory can be checked without
  * manufacturing a real device that continues corrupting a developer's machine.
  * These tests are not evidence of executing RISC-V fences or QEMU itself.
- * Author: Sammy Hegab, Umicom Foundation. Licence: MIT.
- *---------------------------------------------------------------------------*/
+ */
 #include "umicom/kernel/virtio_block.h"
 #include "umicom/kernel/virtio_block_protocol.h"
 #include "umicom/kernel/physical_memory.h"
@@ -647,6 +657,58 @@ static void Console(const char *name)
         CHECK(UmicomKernelBlockRetryClose() == UMICOM_BLOCK_OK && Allocated() == 0U);
     } else CHECK(0);
 }
+
+/* Caller outputs never become part of the driver owner or device-owned RAM.
+ * The full snapshots distinguish a refusal from a partial publication, and
+ * register counters require refusal before the first MMIO read or write. */
+static void OutputOwnership(const char *name)
+{
+    const UmicomBoolean probe = !strncmp(name, "probe_", 6U);
+    const UmicomBoolean retained = strstr(name, "retained") != NULL;
+    const UmicomBoolean queue = strstr(name, "queue") != NULL;
+    const UmicomBoolean data = strstr(name, "data") != NULL;
+    UmicomKernelBlockHandle handle = 0U;
+    if (queue || data) {
+        handle = Open();
+        if (retained) {
+            model.stuckReset = UMICOM_TRUE;
+            CHECK(UmicomKernelBlockClose(&domain, handle) == UMICOM_BLOCK_RESET_PENDING);
+            CHECK(domain.slots[0].exposed && Allocated() == 2U);
+        }
+    }
+    _Alignas(UmicomKernelBlockInfo) UmicomU8 storage[sizeof(UmicomKernelBlockInfo) + 16U] = {0};
+    UmicomKernelBlockHandle nonzero = 77U;
+    void *output = storage;
+    if (strstr(name, "owner")) output = &domain.slots[1].sectors;
+    else if (queue) output = (void *)domain.slots[0].queueFrame;
+    else if (data) output = (void *)domain.slots[0].dataFrame;
+    else if (strstr(name, "misaligned")) output = storage + 1U;
+    else if (strstr(name, "wrapped")) output = (void *)(~(UmicomAddress)0U - 7U);
+    else if (strstr(name, "nonzero")) output = &nonzero;
+    else CHECK(0);
+    UmicomU8 ownerBefore[sizeof(domain)], ramBefore[sizeof(ram)], storageBefore[sizeof(storage)];
+    memcpy(ownerBefore, &domain, sizeof(domain));
+    memcpy(ramBefore, ram, sizeof(ram));
+    memcpy(storageBefore, storage, sizeof(storage));
+    const UmicomU32 reads = model.reads, writes = model.writes;
+    const UmicomU32 allocations = model.allocateCalls, releases = model.freeCalls;
+    const UmicomKernelBlockStatus status = probe ?
+        UmicomKernelBlockProbe(&domain, 0U, (UmicomKernelBlockInfo *)output) :
+        UmicomKernelBlockOpen(&domain, 0U, 32U, (UmicomKernelBlockHandle *)output);
+    CHECK(status == UMICOM_BLOCK_INVALID_ARGUMENT);
+    CHECK(memcmp(ownerBefore, &domain, sizeof(domain)) == 0);
+    CHECK(memcmp(ramBefore, ram, sizeof(ram)) == 0);
+    CHECK(memcmp(storageBefore, storage, sizeof(storage)) == 0 && nonzero == 77U);
+    CHECK(model.reads == reads && model.writes == writes);
+    CHECK(model.allocateCalls == allocations && model.freeCalls == releases);
+    /* Refusal must leave the domain usable, including a retained cleanup debt. */
+    UmicomKernelBlockInfo info = {0};
+    CHECK(UmicomKernelBlockProbe(&domain, 0U, &info) == UMICOM_BLOCK_OK);
+    CHECK(info.heldFrames == (handle ? 2U : 0U));
+    if (handle) { model.stuckReset = UMICOM_FALSE; Close(handle); }
+    else { handle = Open(); Close(handle); }
+}
+
 int main(int argc, char **argv)
 {
     if (argc == 3 && !strcmp(argv[1], "fixture_bytes")) {
@@ -669,6 +731,21 @@ int main(int argc, char **argv)
     else if (!strcmp(name,"first_sector") || !strcmp(name,"last_sector") || !strcmp(name,"multi_sector")) Success(name);
     else if (!strcmp(name,"bounds")) Bounds();
     else if (!strcmp(name,"output_overlap")) Overlap();
+    else if (!strcmp(name,"probe_owner") ||
+        !strcmp(name,"probe_queue") ||
+        !strcmp(name,"probe_data") ||
+        !strcmp(name,"probe_retained_queue") ||
+        !strcmp(name,"probe_retained_data") ||
+        !strcmp(name,"probe_misaligned") ||
+        !strcmp(name,"probe_wrapped") ||
+        !strcmp(name,"open_owner") ||
+        !strcmp(name,"open_nonzero") ||
+        !strcmp(name,"open_queue") ||
+        !strcmp(name,"open_data") ||
+        !strcmp(name,"open_retained_queue") ||
+        !strcmp(name,"open_retained_data") ||
+        !strcmp(name,"open_misaligned") ||
+        !strcmp(name,"open_wrapped")) OutputOwnership(name);
     else if (!strcmp(name,"used_id") || !strcmp(name,"short_length") || !strcmp(name,"long_length") ||
         !strcmp(name,"zero_length") || !strcmp(name,"used_jump") || !strcmp(name,"status_unwritten") ||
         !strcmp(name,"status_unknown") || !strcmp(name,"device_needs_reset") || !strcmp(name,"config_changed") ||

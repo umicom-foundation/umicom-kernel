@@ -47,10 +47,39 @@ static void CheckImage(const UmicomU8 *begin, const UmicomU8 *end, const char *m
         0xc005U, 0xc006U, 0xc007U, 0xc008U
     };
 #endif
+    /* Retain comparison-only expectations; profile discovery appends one
+     * selector and inherits the same exit, reentry and frame-accounting checks. */
+#if 0
     static const UmicomU64 expected[] = {
         42U, 0xc001U, 0xc002U, 0xc003U, 0xc004U,
         0xc005U, 0xc006U, 0xc007U, 0xc008U,
         0xc009U, 0xc00aU, 0xc00bU, 0xc00cU
+    };
+#endif
+    /* Keep earlier selector results; locals extend the same frame ownership checks. */
+#if 0
+    static const UmicomU64 expected[] = {
+        42U, 0xc001U, 0xc002U, 0xc003U, 0xc004U,
+        0xc005U, 0xc006U, 0xc007U, 0xc008U,
+        0xc009U, 0xc00aU, 0xc00bU, 0xc00cU, 0xc00dU
+    };
+#endif
+    /* Branch selectors inherit real exit, reentry and frame accounting.
+     * Keep the local-only table as historical contract evidence. */
+#if 0
+    static const UmicomU64 expected[] = {
+        42U, 0xc001U, 0xc002U, 0xc003U, 0xc004U,
+        0xc005U, 0xc006U, 0xc007U, 0xc008U,
+        0xc009U, 0xc00aU, 0xc00bU, 0xc00cU, 0xc00dU,
+        0xc00eU, 0xc00fU, 0xc010U, 0xc011U, 0xc012U
+    };
+#endif
+    static const UmicomU64 expected[] = {
+        42U, 0xc001U, 0xc002U, 0xc003U, 0xc004U,
+        0xc005U, 0xc006U, 0xc007U, 0xc008U,
+        0xc009U, 0xc00aU, 0xc00bU, 0xc00cU, 0xc00dU,
+        0xc00eU, 0xc00fU, 0xc010U, 0xc011U, 0xc012U,
+        0xc013U, 0xc014U, 0xc015U, 0xc016U, 0xc017U, 0xc018U, 0xc019U
     };
     UmicomKernelConsoleWrite("cvm.optimization=");
     UmicomKernelConsoleWriteLine(mode);

@@ -23,6 +23,8 @@ file(MAKE_DIRECTORY "${WORK}/runtime" "${WORK}/kernel")
 set(runtime_files src/status.c src/vm.c src/bytecode.c src/comparison.c
     src/internal.h include/umicom_c/umicom_c.h include/umicom_c/comparison.h
     include/umicom_c/trace.h
+    # Capability queries are compiled into the external runtime object.
+    include/umicom_c/profile.h
     cmake/UmicomCRuntime.cmake)
 set(kernel_files programs/cvm/main.c programs/cvm/entry.S
     programs/cvm/CMakeLists.txt programs/diagnostic/linker.ld cmake/CvmPrograms.cmake)
@@ -57,6 +59,10 @@ elseif(CASE STREQUAL "trace-header-edit")
     file(APPEND "${WORK}/runtime/include/umicom_c/trace.h" "changed trace layout")
 elseif(CASE STREQUAL "trace-header-missing")
     file(REMOVE "${WORK}/runtime/include/umicom_c/trace.h")
+elseif(CASE STREQUAL "profile-header-edit")
+    file(APPEND "${WORK}/runtime/include/umicom_c/profile.h" "changed profile definitions")
+elseif(CASE STREQUAL "profile-header-missing")
+    file(REMOVE "${WORK}/runtime/include/umicom_c/profile.h")
 elseif(CASE STREQUAL "image-edit")
     file(APPEND "${WORK}/o2.fixture" "changed image")
 elseif(CASE STREQUAL "recipe-edit")
@@ -85,7 +91,9 @@ if(NOT expect_success)
     # Both missing implementation and missing trace layout require the source diagnostic.
     # The former condition is retained for engineering review.
     # if(CASE STREQUAL "source-missing")
-    if(CASE STREQUAL "source-missing" OR CASE STREQUAL "trace-header-missing")
+    # Preserve the trace-only condition; profile headers now have the same source requirement.
+    # if(CASE STREQUAL "source-missing" OR CASE STREQUAL "trace-header-missing")
+    if(CASE STREQUAL "source-missing" OR CASE STREQUAL "trace-header-missing" OR CASE STREQUAL "profile-header-missing")
         set(reason "Missing CVM source")
     elseif(CASE STREQUAL "receipt-missing")
         set(reason "build the CVM image before guest qualification")

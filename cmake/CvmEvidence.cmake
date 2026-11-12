@@ -22,6 +22,8 @@ foreach(_relative IN ITEMS src/status.c src/vm.c src/bytecode.c src/comparison.c
     src/internal.h include/umicom_c/umicom_c.h include/umicom_c/comparison.h
     # Trace layout is a runtime input and must be bound to the linked images.
     include/umicom_c/trace.h
+    # Capability queries are compiled into the external runtime object.
+    include/umicom_c/profile.h
     cmake/UmicomCRuntime.cmake)
     if(NOT EXISTS "${SOURCE}/${_relative}")
         message(FATAL_ERROR "Missing CVM source: ${_relative}")

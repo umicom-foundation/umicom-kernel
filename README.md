@@ -250,3 +250,7 @@ Start with the [Umicom Kernel user guide](docs/USER_GUIDE.md) for a complete Win
 ## Wiki and learning routes
 
 Start with the [Kernel wiki](docs/wiki/index.md) to choose a user journey, a source-reading topic or a beginner course. The wiki links existing guides and distinguishes emulator examples from physical-device and full application support.
+
+## Packet capture admission
+
+[Read packet captures before building a network driver](docs/NETWORK_PACKET_ADMISSION.md) explains the bounded Ethernet-II/IPv4 parser, malformed-input host tests and freestanding link checks. No network adapter, socket service or live traffic path is enabled by this foundation.

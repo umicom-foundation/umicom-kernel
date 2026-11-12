@@ -2,11 +2,18 @@
  * Umicom Kernel
  * File: kernel/virtio_block_validation.c
  *
+ * PURPOSE:
  * Exercise the actual modern VirtIO transport and synthetic host fixture. A
  * normal diagnostic run without a disk proves only safe discovery/refusal; it
  * must not emit the read-path acceptance marker. The dedicated CTest attaches
  * the checked fixture read-only and requires actual sector contents and cleanup.
- * Author: Sammy Hegab, Umicom Foundation. Licence: MIT.
+ *
+ * AUTHOR AND ORGANISATION:
+ * Sammy Hegab
+ * Umicom Foundation
+ *
+ * LICENCE:
+ * MIT
  *---------------------------------------------------------------------------*/
 #include "umicom/kernel/virtio_block.h"
 #include "umicom/kernel/physical_memory.h"
@@ -85,6 +92,16 @@ void UmicomKernelBlockValidateExecution(void)
         return;
     }
     UmicomBlockExpect(found == 1U, "dedicated disk test expects exactly one fixture device");
+    /* Reject an occupied destination before device admission. The known token
+     * is a sentinel, not a lease, and must survive the refusal unchanged. */
+    UmicomKernelBlockHandle occupied = 77U;
+    UmicomBlockExpect(UmicomKernelBlockOpen(domain, index, 10000000U, &occupied) ==
+        UMICOM_BLOCK_INVALID_ARGUMENT && occupied == 77U, "occupied handle output refused");
+    UmicomBlockExpect(UmicomKernelBlockProbe(domain, index, (UmicomKernelBlockInfo *)domain) ==
+        UMICOM_BLOCK_INVALID_ARGUMENT, "probe cannot overwrite its owner");
+    UmicomBlockExpect(UmicomKernelBlockOpen(domain, index, 10000000U,
+        (UmicomKernelBlockHandle *)&domain->slots[index].sectors) == UMICOM_BLOCK_INVALID_ARGUMENT,
+        "open cannot publish into owner metadata");
     UmicomKernelBlockHandle handle = 0U;
     const UmicomKernelBlockStatus opened = UmicomKernelBlockOpen(domain, index, 10000000U, &handle);
     if (opened != UMICOM_BLOCK_OK) {
@@ -96,6 +113,19 @@ void UmicomKernelBlockValidateExecution(void)
     UmicomBlockLocalClear(&info, sizeof(info));
     UmicomBlockExpect(UmicomKernelBlockProbe(domain, index, &info) == UMICOM_BLOCK_OK &&
         info.sectors == UMICOM_BLOCK_FIXTURE_SECTORS && info.heldFrames == 2U, "fixture capacity and two DMA pages");
+    /* These are the actual QEMU-exposed pages, not arbitrary caller buffers.
+     * Refusals must leave their descriptor contents usable for the reads below. */
+    UmicomBlockExpect(UmicomKernelBlockProbe(domain, index,
+        (UmicomKernelBlockInfo *)domain->slots[index].queueFrame) == UMICOM_BLOCK_INVALID_ARGUMENT &&
+        UmicomKernelBlockProbe(domain, index,
+        (UmicomKernelBlockInfo *)domain->slots[index].dataFrame) == UMICOM_BLOCK_INVALID_ARGUMENT,
+        "diagnostics cannot overwrite live DMA pages");
+    UmicomBlockExpect(UmicomKernelBlockOpen(domain, index, 10000000U,
+        (UmicomKernelBlockHandle *)domain->slots[index].queueFrame) == UMICOM_BLOCK_INVALID_ARGUMENT &&
+        UmicomKernelBlockOpen(domain, index, 10000000U,
+        (UmicomKernelBlockHandle *)domain->slots[index].dataFrame) == UMICOM_BLOCK_INVALID_ARGUMENT,
+        "open cannot publish into live DMA pages");
+    UmicomKernelConsoleWriteLine("block.output-ownership=refused-before-io");
     UmicomBlockExpect(UmicomKernelBlockRead(domain, handle, 0U, 1U, umicomBlockValidationBytes,
         sizeof(umicomBlockValidationBytes)) == UMICOM_BLOCK_OK, "first sector read");
     UmicomBlockCheckBytes(0U, 1U);

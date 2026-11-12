@@ -2,6 +2,7 @@
  * Umicom Kernel
  * File: kernel/virtio_block.c
  *
+ * PURPOSE:
  * Modern MMIO transport ownership and a deliberately small read-only block path.
  * Two independently allocated frames are sufficient: one contains the split
  * queue, request header and status; the other is a device-writable bounce page.
@@ -11,7 +12,13 @@
  * Reset acknowledgement, not a timeout, proves that queue memory is no longer
  * in use. Every failure path below keeps enough ownership to retry that reset
  * and release. A malicious DMA-capable device is outside this no-IOMMU model.
- * Author: Sammy Hegab, Umicom Foundation. Licence: MIT.
+ *
+ * AUTHOR AND ORGANISATION:
+ * Sammy Hegab
+ * Umicom Foundation
+ *
+ * LICENCE:
+ * MIT
  *---------------------------------------------------------------------------*/
 /* The retained introduction describes the original read-only entry points.
  * The explicit writable admission below shares their transport, queue and
@@ -254,6 +261,12 @@ UmicomKernelBlockStatus UmicomKernelBlockProbe(UmicomKernelBlockDomain *d,
     if (!outInfo) return UMICOM_BLOCK_INVALID_ARGUMENT;
     UmicomKernelBlockStatus status = UmicomBlockEnter(d);
     if (status != UMICOM_BLOCK_OK) return status;
+    /* Diagnostics are CPU output too: reject owner/DMA aliases before MMIO.
+     * A timeout can leave any slot's pages exposed, so use the same complete
+     * ownership check as mutation outcomes rather than inspecting this slot only. */
+    if ((UmicomAddress)outInfo % alignof(UmicomKernelBlockInfo) ||
+        !UmicomBlockIndependent(d, (UmicomAddress)outInfo, sizeof(*outInfo)))
+        return UmicomBlockLeave(d, UMICOM_BLOCK_INVALID_ARGUMENT);
     if (index >= d->count) return UmicomBlockLeave(d, UMICOM_BLOCK_INVALID_ARGUMENT);
     const UmicomKernelBlockSlot *s = &d->slots[index];
     /* Appended diagnostics enlarge this aggregate: explicitly clear/copy it
@@ -315,8 +328,17 @@ static UmicomKernelBlockStatus UmicomBlockOpenMode(UmicomKernelBlockDomain *d,
     if (status != UMICOM_BLOCK_OK) return status;
     /* A writable lease publishes cleanup debt into this object before MMIO
      * writes. Its result must not overwrite an owner or another live DMA page. */
+    /* Both admission paths publish a cleanup handle and therefore need the
+     * same aligned, independent, initially empty destination. Retain the old
+     * writable-only check for review; read-only admission now obeys its existing
+     * zero-handle contract before claiming a slot or touching device registers. */
+#if 0
     if (writable && ((UmicomAddress)outHandle % alignof(UmicomKernelBlockHandle) ||
         !UmicomBlockIndependent(d, (UmicomAddress)outHandle, sizeof(*outHandle)) || *outHandle))
+        return UmicomBlockLeave(d, UMICOM_BLOCK_INVALID_ARGUMENT);
+#endif
+    if ((UmicomAddress)outHandle % alignof(UmicomKernelBlockHandle) ||
+        !UmicomBlockIndependent(d, (UmicomAddress)outHandle, sizeof(*outHandle)) || *outHandle)
         return UmicomBlockLeave(d, UMICOM_BLOCK_INVALID_ARGUMENT);
     if (index >= d->count) return UmicomBlockLeave(d, UMICOM_BLOCK_INVALID_ARGUMENT);
     UmicomKernelBlockSlot *s = &d->slots[index];

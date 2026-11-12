@@ -325,3 +325,28 @@ No PCI transport, legacy fallback, async I/O, multi-queue, interrupts-driven
 completion, hotplug, live resize, SMP locking, noncoherent cache maintenance or
 IOMMU mapping is included. Partition and filesystem readers are subsequent work;
 persistent writing requires separate safety and recovery qualification.
+
+## Caller output ownership for probes and admission
+
+A probe writes CPU memory even though it performs no MMIO writes. Its output record
+must be aligned and disjoint from the domain and every retained queue/bounce page.
+Both Open and OpenWritable impose the same requirements on the handle destination,
+and require its incoming value to be zero. These checks happen before MMIO, frame
+allocation or result publication. Invalid storage returns INVALID_ARGUMENT without
+changing that storage. An aligned independent probe destination still receives
+observations for empty or unsupported slots as before.
+
+The common range check includes pages retained after an unsuccessful reset, even
+when a different slot is requested. It is a trusted-storage ownership check, not a
+page mapper or user-pointer validator. Callers remain responsible for accessible
+Kernel storage and for preserving a nonzero cleanup handle after a failed Open.
+
+The native suite includes fifteen probe/open output cases: owner overlap, active
+and retained DMA overlap, misalignment, wrapping ranges and an occupied handle.
+It compares complete owner/RAM snapshots and MMIO/allocation counters, then checks
+that valid operations and cleanup still work. The diagnostic guest additionally
+checks owner and actual exposed-page refusals before reading the synthetic disk;
+its new marker is `block.output-ownership=refused-before-io`. Host counters directly
+check the absence of MMIO; the guest checks refusal and continued queue operation.
+Historical results in READ_ONLY_BLOCK_VALIDATION.md describe their original source
+and environment; they are not fresh qualification of this extension.

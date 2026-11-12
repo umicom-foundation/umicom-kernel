@@ -29,6 +29,11 @@ endif()
 if(NOT EXISTS "${UMICOM_C_SOURCE_DIR}/include/umicom_c/trace.h")
     message(FATAL_ERROR "The CVM diagnostic requires Umicom C source with the caller-owned trace API")
 endif()
+# The profile selector calls an additive runtime API, so refuse an older SDK
+# at configuration before a missing header becomes an opaque compiler failure.
+if(NOT EXISTS "${UMICOM_C_SOURCE_DIR}/include/umicom_c/profile.h")
+    message(FATAL_ERROR "The CVM diagnostic requires Umicom C linked-profile queries")
+endif()
 include("${UMICOM_C_SOURCE_DIR}/cmake/UmicomCRuntime.cmake")
 get_filename_component(_kernel "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
 set(_flags -march=rv64imac_zicsr -mabi=lp64 -mcmodel=medany

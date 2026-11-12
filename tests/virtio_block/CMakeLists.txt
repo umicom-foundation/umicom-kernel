@@ -1,6 +1,18 @@
-# Umicom Kernel host qualification of the actual read-only driver and ownership.
-# The model supplies register side effects and DMA completions, not a new driver.
-# Author: Sammy Hegab, Umicom Foundation. Licence: MIT.
+#-----------------------------------------------------------------------------
+# Umicom Kernel
+# File: tests/virtio_block/CMakeLists.txt
+#
+# PURPOSE:
+#   Qualify the actual read-only driver and ownership with a host model.
+#   The model supplies register side effects and DMA completions, not a new driver.
+#
+# AUTHOR AND ORGANISATION:
+# Sammy Hegab
+# Umicom Foundation
+#
+# LICENCE:
+# MIT
+#---------------------------------------------------------------------------
 cmake_minimum_required(VERSION 3.24)
 project(UmicomReadOnlyBlockTests LANGUAGES C)
 set(CMAKE_C_STANDARD 23)
@@ -29,6 +41,7 @@ if(UMICOM_BLOCK_SANITIZERS)
     target_link_options(umicom-block-tests PRIVATE -fsanitize=address,undefined)
 endif()
 set(UMICOM_BLOCK_CASES
+    probe_owner probe_queue probe_data probe_retained_queue probe_retained_data probe_misaligned probe_wrapped open_owner open_nonzero open_queue open_data open_retained_queue open_retained_data open_misaligned open_wrapped
     initialise invalid_initialise probe empty_slot legacy_transport bad_magic other_device
     missing_modern_feature writable_device features_rejected queue_absent queue_too_small
     queue_enable_refused driver_ok_refused zero_capacity unstable_capacity foreign_active_driver

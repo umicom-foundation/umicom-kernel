@@ -2,6 +2,7 @@
  * Umicom Kernel
  * File: include/umicom/kernel/virtio_block.h
  *
+ * PURPOSE:
  * Own a modern VirtIO MMIO block transport and two DMA frames for read-only
  * requests. The caller supplies a previously qualified transport catalogue;
  * addresses in an arbitrary device tree are not, by themselves, MMIO authority.
@@ -14,7 +15,12 @@
  * interrupts-disabled context. Domains and callback contexts must stay alive at
  * their original addresses. Never copy or reinitialise an established domain.
  *
- * Author: Sammy Hegab, Umicom Foundation. Licence: MIT.
+ * AUTHOR AND ORGANISATION:
+ * Sammy Hegab
+ * Umicom Foundation
+ *
+ * LICENCE:
+ * MIT
  *---------------------------------------------------------------------------*/
 /* The original read-only admission contract remains available unchanged.
  * OpenWritable is a separate, explicit authority to issue bounded writes and
@@ -166,10 +172,17 @@ UmicomKernelBlockStatus UmicomKernelBlockDomainInitialize(UmicomKernelBlockDomai
     const UmicomKernelBlockTransport *transports, UmicomSize count,
     const UmicomKernelBlockOperations *operations);
 /* Probe has no MMIO writes. DeviceID zero ends discovery immediately: even
- * VendorID must not be read for an unpopulated modern transport slot. */
+ * VendorID must not be read for an unpopulated modern transport slot.
+ * outInfo must be aligned and disjoint from the domain and every retained DMA
+ * page. Invalid output ownership returns INVALID_ARGUMENT without publication
+ * or MMIO. A valid independent output still receives empty/unsupported slot
+ * observations; this storage check does not map or validate arbitrary memory. */
 UmicomKernelBlockStatus UmicomKernelBlockProbe(UmicomKernelBlockDomain *domain,
     UmicomSize index, UmicomKernelBlockInfo *outInfo);
 /* Open refuses a writable backend. Set *outHandle to zero before calling.
+ * Both Open forms require an aligned destination disjoint from the domain and
+ * every retained DMA page. Invalid storage or a nonzero incoming handle is
+ * refused before MMIO, allocation or publication; the destination is unchanged.
  * Success returns an owned handle. A setup error normally resets and releases
  * everything; if cleanup is incomplete, the returned handle remains nonzero
  * and MUST be closed/retried. lastError preserves the original setup failure.
