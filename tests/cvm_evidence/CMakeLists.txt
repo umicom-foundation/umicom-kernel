@@ -21,7 +21,9 @@ endif()
 # foreach(case IN ITEMS unchanged source-edit image-edit recipe-edit receipt-missing source-missing unknown-mode)
 foreach(case IN ITEMS unchanged source-edit image-edit recipe-edit receipt-missing source-missing unknown-mode
     trace-header-edit trace-header-missing
-    profile-header-edit profile-header-missing)
+    profile-header-edit profile-header-missing
+    remainder-header-edit remainder-header-missing complement-header-edit complement-header-missing
+    bitwise-header-edit bitwise-header-missing)
     add_test(NAME "kernel.cvm.evidence.${case}"
         COMMAND "${CMAKE_COMMAND}" "-DCASE=${case}" "-DWORK=${CMAKE_CURRENT_BINARY_DIR}/${case}"
             "-DEVIDENCE=${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/CvmEvidence.cmake"

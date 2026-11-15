@@ -26,7 +26,9 @@ set(runtime_files src/status.c src/vm.c src/bytecode.c src/comparison.c
     # Capability queries are compiled into the external runtime object.
     include/umicom_c/profile.h
     cmake/UmicomCRuntime.cmake)
-set(kernel_files programs/cvm/main.c programs/cvm/entry.S
+# Preserve the previous inventory line; the bitwise fixture is now a required compiled input.
+# set(kernel_files programs/cvm/main.c programs/cvm/remainder_checks.h programs/cvm/complement_checks.h programs/cvm/entry.S
+set(kernel_files programs/cvm/main.c programs/cvm/remainder_checks.h programs/cvm/complement_checks.h programs/cvm/bitwise_checks.h programs/cvm/entry.S
     programs/cvm/CMakeLists.txt programs/diagnostic/linker.ld cmake/CvmPrograms.cmake)
 foreach(relative IN LISTS runtime_files)
     get_filename_component(parent "${WORK}/runtime/${relative}" DIRECTORY)
@@ -63,6 +65,18 @@ elseif(CASE STREQUAL "profile-header-edit")
     file(APPEND "${WORK}/runtime/include/umicom_c/profile.h" "changed profile definitions")
 elseif(CASE STREQUAL "profile-header-missing")
     file(REMOVE "${WORK}/runtime/include/umicom_c/profile.h")
+elseif(CASE STREQUAL "remainder-header-edit")
+    file(APPEND "${WORK}/kernel/programs/cvm/remainder_checks.h" "changed guest fixture")
+elseif(CASE STREQUAL "remainder-header-missing")
+    file(REMOVE "${WORK}/kernel/programs/cvm/remainder_checks.h")
+elseif(CASE STREQUAL "complement-header-edit")
+    file(APPEND "${WORK}/kernel/programs/cvm/complement_checks.h" "changed complement fixture")
+elseif(CASE STREQUAL "complement-header-missing")
+    file(REMOVE "${WORK}/kernel/programs/cvm/complement_checks.h")
+elseif(CASE STREQUAL "bitwise-header-edit")
+    file(APPEND "${WORK}/kernel/programs/cvm/bitwise_checks.h" "changed bitwise fixture")
+elseif(CASE STREQUAL "bitwise-header-missing")
+    file(REMOVE "${WORK}/kernel/programs/cvm/bitwise_checks.h")
 elseif(CASE STREQUAL "image-edit")
     file(APPEND "${WORK}/o2.fixture" "changed image")
 elseif(CASE STREQUAL "recipe-edit")
@@ -93,7 +107,13 @@ if(NOT expect_success)
     # if(CASE STREQUAL "source-missing")
     # Preserve the trace-only condition; profile headers now have the same source requirement.
     # if(CASE STREQUAL "source-missing" OR CASE STREQUAL "trace-header-missing")
-    if(CASE STREQUAL "source-missing" OR CASE STREQUAL "trace-header-missing" OR CASE STREQUAL "profile-header-missing")
+    # The earlier missing-input set remains documented; the guest header shares its diagnostic.
+    # if(CASE STREQUAL "source-missing" OR CASE STREQUAL "trace-header-missing" OR CASE STREQUAL "profile-header-missing")
+    # Earlier missing-input condition retained; complement shares the same source contract.
+    # if(CASE STREQUAL "source-missing" OR CASE STREQUAL "trace-header-missing" OR CASE STREQUAL "profile-header-missing" OR CASE STREQUAL "remainder-header-missing")
+    # Retain the prior refusal condition; the new required header shares this diagnostic.
+    # if(CASE STREQUAL "source-missing" OR CASE STREQUAL "trace-header-missing" OR CASE STREQUAL "profile-header-missing" OR CASE STREQUAL "remainder-header-missing" OR CASE STREQUAL "complement-header-missing")
+    if(CASE STREQUAL "source-missing" OR CASE STREQUAL "trace-header-missing" OR CASE STREQUAL "profile-header-missing" OR CASE STREQUAL "remainder-header-missing" OR CASE STREQUAL "complement-header-missing" OR CASE STREQUAL "bitwise-header-missing")
         set(reason "Missing CVM source")
     elseif(CASE STREQUAL "receipt-missing")
         set(reason "build the CVM image before guest qualification")

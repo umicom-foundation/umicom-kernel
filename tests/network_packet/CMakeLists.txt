@@ -53,3 +53,37 @@ if(BUILD_TESTING)
         set_tests_properties("kernel.network_udp.${_case}" PROPERTIES TIMEOUT 10)
     endforeach()
 endif()
+
+# Echo admission extends the same production parser without replacing UDP tests.
+add_executable(umicom-network-icmp-tests icmp_tests.c
+    ../../kernel/network_packet.c ../../kernel/address.c)
+target_include_directories(umicom-network-icmp-tests PRIVATE ../../include)
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(umicom-network-icmp-tests PRIVATE
+        -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)
+endif()
+if(BUILD_TESTING)
+    foreach(_case IN ITEMS golden reply empty even maximum padding unaligned truncation short_header protocol type code ip_checksum fragment corruption zero_checksum address_scope identifiers arguments overlap output_alignment address_wrap lifetime capture_limit)
+        add_test(NAME "kernel.network_icmp.${_case}" COMMAND umicom-network-icmp-tests "${_case}")
+        set_tests_properties("kernel.network_icmp.${_case}" PROPERTIES TIMEOUT 10)
+    endforeach()
+endif()
+
+
+# TCP is a capture contract; all earlier IPv4, UDP and ICMP checks remain.
+add_executable(umicom-network-tcp-tests tcp_tests.c
+    ../../kernel/network_packet.c ../../kernel/address.c)
+target_include_directories(umicom-network-tcp-tests PRIVATE ../../include)
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(umicom-network-tcp-tests PRIVATE
+        -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)
+endif()
+if(BUILD_TESTING)
+    foreach(_case IN ITEMS golden empty even maximum padding unaligned truncation short_header
+        data_offset options option_truncation protocol ip_checksum fragments corruption source_address
+        destination_address checksum_zero flags reserved ports sequence window_urgent extra_ip_payload
+        arguments overlap output_alignment address_wrap lifetime capture_limit)
+        add_test(NAME "kernel.network_tcp.${_case}" COMMAND umicom-network-tcp-tests "${_case}")
+        set_tests_properties("kernel.network_tcp.${_case}" PROPERTIES TIMEOUT 10)
+    endforeach()
+endif()

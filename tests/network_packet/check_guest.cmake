@@ -36,7 +36,15 @@ foreach(_marker IN ITEMS "UMICOM_KERNEL_BOOT_READY" "packet-admission-test=begin
         # Require all old groups and all new transport groups before success.
         "packet-admission.case=udp-golden" "packet-admission.case=udp-refusals"
         "packet-admission.case=udp-padding" "packet-admission.case=udp-checksum-policy"
-        "packet-admission.cases=11"
+        # The previous eleven groups remain, followed by echo checks.
+        # "packet-admission.cases=11"
+        "packet-admission.case=icmp-golden" "packet-admission.case=icmp-reply"
+        "packet-admission.case=icmp-refusals" "packet-admission.case=icmp-padding-lifetime"
+        # Earlier total preserved; all fifteen groups still precede TCP.
+        # "packet-admission.cases=15"
+        "packet-admission.case=tcp-golden" "packet-admission.case=tcp-refusals"
+        "packet-admission.case=tcp-zero-checksum" "packet-admission.case=tcp-padding-lifetime"
+        "packet-admission.cases=19"
         "UMICOM_KERNEL_PACKET_ADMISSION_READY" "UMICOM_KERNEL_END")
     string(FIND "${_stdout}" "${_marker}" _position)
     if(_position LESS_EQUAL _previous)
@@ -45,4 +53,6 @@ foreach(_marker IN ITEMS "UMICOM_KERNEL_BOOT_READY" "packet-admission-test=begin
     set(_previous ${_position})
 endforeach()
 # Previous status retained: Seven packet groups completed in the current diagnostic guest without a NIC.
-message(STATUS "Eleven packet groups completed in the current diagnostic guest without a NIC")
+# Previous report retained: Eleven packet groups completed in the current diagnostic guest without a NIC.
+# Previous report retained: Fifteen packet groups completed in the current diagnostic guest without a NIC.
+message(STATUS "Nineteen packet groups completed in the current diagnostic guest without a NIC")

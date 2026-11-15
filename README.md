@@ -254,3 +254,5 @@ Start with the [Kernel wiki](docs/wiki/index.md) to choose a user journey, a sou
 ## Packet capture admission
 
 [Read packet captures before building a network driver](docs/NETWORK_PACKET_ADMISSION.md) explains the bounded Ethernet-II/IPv4 parser, malformed-input host tests and freestanding link checks. No network adapter, socket service or live traffic path is enabled by this foundation.
+
+The same boundary now admits fixed-profile UDP datagrams with explicit checksum policy and ICMP echo requests/replies with mandatory checksum verification. Copied metadata and payload coordinates preserve caller ownership. The guide separates 70 hosted test groups, O0/O2 no-libc linkage and fifteen synthetic diagnostic-guest groups; none establishes live network connectivity.

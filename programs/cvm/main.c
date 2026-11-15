@@ -182,6 +182,54 @@ static UmicomU64 CheckBranches(UmicomU64 argument)
         steps[2].instruction_index==6U && steps[3].instruction_index==7U ? 0xc013U : 0xe020U;
 }
 
+
+/* Model the records emitted for a braced conditional update independently of
+ * the hosted parser. The Kernel links only the freestanding runtime; it does
+ * not gain source compilation or host services from this check. */
+static UmicomU64 CheckConditionalUpdate(UmicomU64 argument)
+{
+    static const UmcInstruction input[] = {
+        {UMC_PUSH,1,21U},{UMC_STORE_LOCAL,0,19U},
+        {UMC_PUSH,0,26U},{UMC_JUMP_IF_ZERO,7,23U},
+        {UMC_PUSH,7,31U},{UMC_STORE_LOCAL,0,29U},{UMC_JUMP,9,34U},
+        {UMC_PUSH,42,41U},{UMC_STORE_LOCAL,0,39U},
+        {UMC_LOAD_LOCAL,0,52U},{UMC_RETURN,0,45U}
+    };
+    uint8_t bytes[UMC_BYTECODE_HEADER_SIZE+11U*UMC_BYTECODE_RECORD_SIZE];
+    UmcInstruction decoded[11];UmcTraceStep steps[11];UmcDiagnostic d;
+    UmcResult r={19,0U};size_t size=0U,count=99U,used=99U;
+    if(umc_encode(input,11U,bytes,sizeof bytes,&size,&d)!=UMC_OK || bytes[4]!=4U)return 0xe021U;
+    if(argument==30U)bytes[4]=3U;
+    UmcStatus status=umc_decode(bytes,size,decoded,11U,&count,&d);
+    if(argument==30U)return status==UMC_BAD_BYTECODE && count==0U ? 0xc01eU : 0xe022U;
+    if(status!=UMC_OK || count!=11U)return 0xe023U;
+    if(argument==29U) {
+        /* The malformed true arm must fail admission even with a false
+         * condition. A local load cannot replace a stack-consuming store. */
+        decoded[5].opcode=UMC_LOAD_LOCAL;steps[0].top=113;
+        return umc_execute_trace(decoded,count,0U,&r,steps,11U,&used,&d)==UMC_BAD_BYTECODE &&
+            used==0U && steps[0].top==113 && r.value==19 && r.instructions_executed==0U ?
+            0xc01dU : 0xe024U;
+    }
+    if(argument==27U)decoded[2].operand=1;
+    status=umc_execute_trace(decoded,count,argument==28U ? 7U : 11U,&r,steps,11U,&used,&d);
+    if(argument==28U)return status==UMC_FUEL_EXHAUSTED && used==8U &&
+        steps[7].instruction_index==10U && steps[7].status==UMC_FUEL_EXHAUSTED &&
+        r.value==19 && r.instructions_executed==0U ? 0xc01cU : 0xe025U;
+    const size_t expected_steps=argument==27U ? 9U : 8U;
+    const int32_t expected_value=argument==27U ? 7 : 42;
+    if(status!=UMC_OK || r.value!=expected_value || r.instructions_executed!=expected_steps ||
+        used!=expected_steps || steps[3].stack_depth!=0U ||
+        steps[4].instruction_index!=(argument==27U ? 4U : 7U) ||
+        steps[used-1U].instruction_index!=10U)return 0xe026U;
+    return argument==27U ? 0xc01bU : 0xc01aU;
+}
+
+/* Native remainder fixtures reuse the canonical runtime rather than implementing arithmetic here. */
+#include "remainder_checks.h"
+#include "complement_checks.h"
+#include "bitwise_checks.h"
+
 UmicomU64 UmicomProgramMain(UmicomU64 argument)
 {
     /* Keep selectors 0..4 compatible. New trace checks use separate selectors;
@@ -202,10 +250,15 @@ UmicomU64 UmicomProgramMain(UmicomU64 argument)
         const uint32_t features = umc_runtime_profile(UMC_PROFILE_FEATURES);
         const uint32_t required = UMC_FEATURE_ARITHMETIC | UMC_FEATURE_COMPARISON |
             UMC_FEATURE_EXECUTION_TRACE | UMC_FEATURE_PROGRAM_INSPECTION | UMC_FEATURE_LOCAL_INTEGERS |
-            UMC_FEATURE_FORWARD_BRANCHES;
+            UMC_FEATURE_FORWARD_BRANCHES | UMC_FEATURE_REMAINDER | UMC_FEATURE_BINARY_BITWISE;
         return umc_runtime_profile(UMC_PROFILE_API) == UMC_API_VERSION &&
             (features & required) == required && !(features & (UMC_FEATURE_LOGICAL_NOT | UMC_FEATURE_LOGICAL_CONNECTIVES |
                 UMC_FEATURE_CONDITIONAL_EXPRESSIONS)) &&
+            /* Compound assignment is hosted source lowering. The freestanding
+             * runtime must not advertise a parser merely because the shared
+             * header describes its capability bit. */
+            !(features & UMC_FEATURE_COMPOUND_ASSIGNMENTS) &&
+            !(features & UMC_FEATURE_IF_STATEMENTS) &&
             /* Literal spellings belong to the hosted compiler. A freestanding
              * runtime must not advertise parser features it does not contain. */
             !(features & (UMC_FEATURE_HEXADECIMAL_LITERALS | UMC_FEATURE_BINARY_LITERALS)) &&
@@ -217,7 +270,15 @@ UmicomU64 UmicomProgramMain(UmicomU64 argument)
 #if 0
             umc_runtime_profile(UMC_PROFILE_WIRE_VERSIONS) == 14U &&
 #endif
+            /* Preserve the previous supported set; remainder adds format 5. */
+#if 0
             umc_runtime_profile(UMC_PROFILE_WIRE_VERSIONS) == 30U &&
+#endif
+            /* Preserve the previous set; eager bitwise adds format 6. */
+#if 0
+            umc_runtime_profile(UMC_PROFILE_WIRE_VERSIONS) == 62U &&
+#endif
+            umc_runtime_profile(UMC_PROFILE_WIRE_VERSIONS) == 126U &&
             umc_runtime_profile(UMC_PROFILE_LOCAL_VALUES) == 32U &&
             umc_runtime_profile(UMC_PROFILE_IDENTIFIER_BYTES) == 0U &&
             umc_runtime_profile(UMC_PROFILE_PROGRAM_INSTRUCTIONS) == UMC_PROGRAM_LIMIT &&
@@ -233,7 +294,27 @@ UmicomU64 UmicomProgramMain(UmicomU64 argument)
 #if 0
     if (argument == 4U || argument > 18U) return 0xc004U;
 #endif
+    /* Retain the previous boundary; conditional-update checks append 26..30. */
+#if 0
     if (argument == 4U || argument > 25U) return 0xc004U;
+#endif
+    /* Keep earlier selectors unchanged; remainder qualification appends 31..37. */
+#if 0
+    if (argument == 4U || argument > 30U) return 0xc004U;
+#endif
+    /* Preserve earlier selectors; complement arithmetic checks append 38..42. */
+#if 0
+    if (argument == 4U || argument > 37U) return 0xc004U;
+#endif
+    /* Keep all earlier selectors; bitwise checks append 43..51. */
+#if 0
+    if (argument == 4U || argument > 42U) return 0xc004U;
+#endif
+    if (argument == 4U || argument > 51U) return 0xc004U;
+    if (argument >= 43U) return CheckBitwise(argument);
+    if (argument >= 38U) return CheckComplement(argument);
+    if (argument >= 31U) return CheckRemainder(argument);
+    if (argument >= 26U) return CheckConditionalUpdate(argument);
     if (argument >= 19U) return CheckBranches(argument);
     if (argument >= 14U) return CheckLocals(argument);
     if (argument >= 9U) return CheckComparison(argument);

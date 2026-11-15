@@ -15,6 +15,8 @@
 
 #include "umicom/kernel/network_packet.h"
 #include "umicom/kernel/network_udp.h"
+#include "umicom/kernel/network_icmp.h"
+#include "umicom/kernel/network_tcp.h"
 #include "umicom/kernel/address.h"
 #include "boot_memory.h"
 
@@ -151,6 +153,129 @@ UmicomNetworkPacketStatus UmicomKernelEthernetIpv4UdpRead(
     staged.checksumPresent = checksum ? UMICOM_TRUE : UMICOM_FALSE;
     staged.payloadOffset = ip.payloadOffset + 8U;
     staged.payloadBytes = (UmicomSize)length - 8U;
+    UmicomBootMemoryCopy(out, &staged, sizeof staged);
+    return UMICOM_NETWORK_PACKET_OK;
+}
+
+/* Reuse IPv4's complete admission rather than independently interpreting its
+ * length, fragmentation or header checksum. ICMP's checksum starts at its type
+ * byte and has no UDP-style IPv4 pseudo-header. */
+UmicomNetworkPacketStatus UmicomKernelEthernetIpv4IcmpEchoRead(
+    const void *bytes, UmicomSize accessibleBytes, UmicomEthernetIpv4IcmpEchoView *out)
+{
+    if (!bytes || !out) return UMICOM_NETWORK_PACKET_ARGUMENT;
+    if (accessibleBytes < UMICOM_ETHERNET_IPV4_PAYLOAD_OFFSET)
+        return UMICOM_NETWORK_PACKET_LENGTH;
+    if (accessibleBytes > UMICOM_ETHERNET_IPV4_CAPTURE_MAX_BYTES)
+        return UMICOM_NETWORK_PACKET_LIMIT;
+    const UmicomAddress start = (UmicomAddress)bytes;
+    const UmicomAddress output = (UmicomAddress)out;
+    UmicomAddress end = 0U, outputEnd = 0U;
+    if (output % _Alignof(UmicomEthernetIpv4IcmpEchoView) ||
+        !UmicomKernelAddressAddChecked(start, accessibleBytes, &end) ||
+        !UmicomKernelAddressAddChecked(output, sizeof *out, &outputEnd) ||
+        (start < outputEnd && output < end)) return UMICOM_NETWORK_PACKET_ARGUMENT;
+
+    UmicomEthernetIpv4View ip;
+    const UmicomNetworkPacketStatus status =
+        UmicomKernelEthernetIpv4Read(bytes, accessibleBytes, &ip);
+    if (status != UMICOM_NETWORK_PACKET_OK) return status;
+    if (ip.protocol != 1U) return UMICOM_NETWORK_PACKET_UNSUPPORTED;
+    if (ip.payloadBytes < 8U) return UMICOM_NETWORK_PACKET_LENGTH;
+    const UmicomU8 *icmp = (const UmicomU8 *)bytes + ip.payloadOffset;
+    if (icmp[0] != UMICOM_ICMP_ECHO_REQUEST && icmp[0] != UMICOM_ICMP_ECHO_REPLY)
+        return UMICOM_NETWORK_PACKET_UNSUPPORTED;
+    if (icmp[1] != 0U) return UMICOM_NETWORK_PACKET_HEADER;
+    UmicomU32 sum = 0U;
+    for (UmicomSize i = 0U; i + 1U < ip.payloadBytes; i += 2U)
+        sum += ReadNetwork16(icmp + i);
+    /* Conceptual odd-byte padding never reads beyond the IP message or mutates
+     * a capture. The admitted 1480-byte maximum fits the 32-bit accumulator. */
+    if (ip.payloadBytes & 1U) sum += (UmicomU32)icmp[ip.payloadBytes - 1U] << 8U;
+    while (sum >> 16U) sum = (sum & 0xffffU) + (sum >> 16U);
+    if (sum != 0xffffU) return UMICOM_NETWORK_PACKET_CHECKSUM;
+
+    UmicomEthernetIpv4IcmpEchoView staged;
+    UmicomBootMemoryClear(&staged, sizeof staged);
+    UmicomBootMemoryCopy(&staged.ipv4, &ip, sizeof ip);
+    staged.messageType = icmp[0];
+    staged.identifier = ReadNetwork16(icmp + 4U);
+    staged.sequenceNumber = ReadNetwork16(icmp + 6U);
+    staged.messageBytes = (UmicomU16)ip.payloadBytes;
+    staged.payloadOffset = ip.payloadOffset + 8U;
+    staged.payloadBytes = ip.payloadBytes - 8U;
+    UmicomBootMemoryCopy(out, &staged, sizeof staged);
+    return UMICOM_NETWORK_PACKET_OK;
+}
+
+
+/* Decode sequence fields from bytes, preserving support for unaligned captures
+ * and hosts whose native word order differs from the packet's network order. */
+static UmicomU32 ReadNetwork32(const UmicomU8 *p)
+{
+    return ((UmicomU32)ReadNetwork16(p) << 16U) | (UmicomU32)ReadNetwork16(p + 2U);
+}
+
+UmicomNetworkPacketStatus UmicomKernelEthernetIpv4TcpRead(
+    const void *bytes, UmicomSize accessibleBytes, UmicomEthernetIpv4TcpView *out)
+{
+    if (!bytes || !out) return UMICOM_NETWORK_PACKET_ARGUMENT;
+    if (accessibleBytes < UMICOM_ETHERNET_IPV4_PAYLOAD_OFFSET)
+        return UMICOM_NETWORK_PACKET_LENGTH;
+    if (accessibleBytes > UMICOM_ETHERNET_IPV4_CAPTURE_MAX_BYTES)
+        return UMICOM_NETWORK_PACKET_LIMIT;
+    const UmicomAddress start = (UmicomAddress)bytes;
+    const UmicomAddress output = (UmicomAddress)out;
+    UmicomAddress end = 0U, outputEnd = 0U;
+    if (output % _Alignof(UmicomEthernetIpv4TcpView) ||
+        !UmicomKernelAddressAddChecked(start, accessibleBytes, &end) ||
+        !UmicomKernelAddressAddChecked(output, sizeof *out, &outputEnd) ||
+        (start < outputEnd && output < end)) return UMICOM_NETWORK_PACKET_ARGUMENT;
+
+    /* IPv4 owns capture/IP lengths, fragmentation and its header checksum.
+     * Preflight above covers the larger transport output before any read. */
+    UmicomEthernetIpv4View ip;
+    const UmicomNetworkPacketStatus status =
+        UmicomKernelEthernetIpv4Read(bytes, accessibleBytes, &ip);
+    if (status != UMICOM_NETWORK_PACKET_OK) return status;
+    if (ip.protocol != 6U) return UMICOM_NETWORK_PACKET_UNSUPPORTED;
+    if (ip.payloadBytes < 20U) return UMICOM_NETWORK_PACKET_LENGTH;
+    const UmicomU8 *tcp = (const UmicomU8 *)bytes + ip.payloadOffset;
+    const UmicomSize headerBytes = (UmicomSize)(tcp[12] >> 4U) * 4U;
+    if (headerBytes < 20U) return UMICOM_NETWORK_PACKET_HEADER;
+    if (headerBytes > ip.payloadBytes) return UMICOM_NETWORK_PACKET_LENGTH;
+    if (headerBytes != 20U) return UMICOM_NETWORK_PACKET_UNSUPPORTED;
+
+    /* TCP has no checksum-absent policy. The pseudo-header binds its full
+     * segment length, protocol and IPv4 addresses to the captured data. It is
+     * conceptual input, never a prefix read before the caller's buffer. */
+    UmicomU32 sum = 6U + (UmicomU32)ip.payloadBytes;
+    for (UmicomSize i = 0U; i < 4U; i += 2U) {
+        sum += ReadNetwork16(ip.sourceAddress + i);
+        sum += ReadNetwork16(ip.destinationAddress + i);
+    }
+    for (UmicomSize i = 0U; i + 1U < ip.payloadBytes; i += 2U)
+        sum += ReadNetwork16(tcp + i);
+    if (ip.payloadBytes & 1U) sum += (UmicomU32)tcp[ip.payloadBytes - 1U] << 8U;
+    /* At most 746 words are admitted. Final carry folding fits the 32-bit
+     * accumulator; odd-byte zero padding never reads a captured pad byte. */
+    while (sum >> 16U) sum = (sum & 0xffffU) + (sum >> 16U);
+    if (sum != 0xffffU) return UMICOM_NETWORK_PACKET_CHECKSUM;
+
+    UmicomEthernetIpv4TcpView staged;
+    UmicomBootMemoryClear(&staged, sizeof staged);
+    UmicomBootMemoryCopy(&staged.ipv4, &ip, sizeof ip);
+    staged.sourcePort = ReadNetwork16(tcp);
+    staged.destinationPort = ReadNetwork16(tcp + 2U);
+    staged.sequenceNumber = ReadNetwork32(tcp + 4U);
+    staged.acknowledgmentNumber = ReadNetwork32(tcp + 8U);
+    staged.window = ReadNetwork16(tcp + 14U);
+    staged.urgentPointer = ReadNetwork16(tcp + 18U);
+    staged.segmentBytes = (UmicomU16)ip.payloadBytes;
+    staged.flags = tcp[13];
+    staged.reservedBits = tcp[12] & 15U;
+    staged.payloadOffset = ip.payloadOffset + headerBytes;
+    staged.payloadBytes = ip.payloadBytes - headerBytes;
     UmicomBootMemoryCopy(out, &staged, sizeof staged);
     return UMICOM_NETWORK_PACKET_OK;
 }

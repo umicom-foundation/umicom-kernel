@@ -31,8 +31,15 @@ foreach(_relative IN ITEMS src/status.c src/vm.c src/bytecode.c src/comparison.c
     file(SHA256 "${SOURCE}/${_relative}" _digest)
     string(APPEND _identity "umicom-c/${_relative}=${_digest}\n")
 endforeach()
-foreach(_relative IN ITEMS programs/cvm/main.c programs/cvm/entry.S
+# Preserve the previous inventory line; the bitwise fixture is now a required compiled input.
+# foreach(_relative IN ITEMS programs/cvm/main.c programs/cvm/remainder_checks.h programs/cvm/complement_checks.h programs/cvm/entry.S
+foreach(_relative IN ITEMS programs/cvm/main.c programs/cvm/remainder_checks.h programs/cvm/complement_checks.h programs/cvm/bitwise_checks.h programs/cvm/entry.S
     programs/cvm/CMakeLists.txt programs/diagnostic/linker.ld cmake/CvmPrograms.cmake)
+    # Guest helper headers are compiled input, not optional commentary. Refuse
+    # a missing one explicitly before attempting to fingerprint the image set.
+    if(NOT EXISTS "${KERNEL}/${_relative}")
+        message(FATAL_ERROR "Missing CVM source: ${_relative}")
+    endif()
     file(SHA256 "${KERNEL}/${_relative}" _digest)
     string(APPEND _identity "kernel/${_relative}=${_digest}\n")
 endforeach()

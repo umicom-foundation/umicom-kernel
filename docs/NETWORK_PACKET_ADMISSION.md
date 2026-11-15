@@ -34,7 +34,9 @@ ctest --test-dir build/host-network-packet --output-on-failure --no-tests=error
 ```
 
 <!-- Earlier host suite contained 19 IPv4 groups, retained unchanged. -->
-Expected result: 46 test groups pass: 19 IPv4 groups and 27 UDP groups. This is the expected result of these commands, not a claim
+<!-- The previous expected total was 46: all 19 IPv4 and 27 UDP groups remain. -->
+<!-- Previous expected result: 70 test groups pass: 19 IPv4, 27 UDP and 24 ICMP echo groups. All remain in the suite. -->
+Expected result: 100 test groups pass: 19 IPv4, 27 UDP, 24 ICMP echo and 30 TCP groups. This is the expected result of these commands, not a claim
 about every platform. A missing compiler or nonzero test exit needs investigation before proceeding.
 
 ## The capture contract
@@ -105,7 +107,8 @@ Do not broaden the accepted packet profile simply to make a test pass.
 
 A future driver must establish DMA ownership, buffer lifetime, bounded receive queues, shutdown and
 error handling before it calls this parser. <!-- Earlier future-work list included all transport checksums. The bounded UDP reader below implements only its declared IPv4 transport checksum contract. -->
-ARP, fragmentation/reassembly, IPv6, TCP checksums, sockets and live networking each need their own supported contract and evidence.
+<!-- Earlier future boundary: ARP, fragmentation/reassembly, IPv6, TCP checksums, sockets and live networking each need their own supported contract and evidence. The fixed-header TCP checksum reader below now covers only its declared capture profile. -->
+ARP, fragmentation/reassembly, IPv6, TCP connection state, sockets and live networking each need their own supported contract and evidence.
 
 
 ## Exercise the parser inside the diagnostic guest
@@ -187,3 +190,121 @@ If an output-preservation or bounds case fails, stop and investigate that exact
 input before processing any real traffic. Host and guest success cover stable
 synthetic RAM only. A future NIC integration must still establish DMA completion,
 queue ownership and shutdown before handing a capture to either reader.
+
+
+## Read an ICMP echo request or reply
+
+The additive API in [network_icmp.h](../include/umicom/kernel/network_icmp.h)
+reuses the existing IPv4 reader. Its fixed profile admits protocol 1, echo request
+type 8 or echo reply type 0, code zero, and at least eight message bytes.
+ICMP error messages and the datagrams they quote require a different parser.
+This function neither generates a reply nor matches one to an outstanding request.
+
+~~~c
+#include "umicom/kernel/network_icmp.h"
+
+UmicomEthernetIpv4IcmpEchoView echo;
+UmicomNetworkPacketStatus status = UmicomKernelEthernetIpv4IcmpEchoRead(
+    capture, capture_bytes, &echo);
+if (status == UMICOM_NETWORK_PACKET_OK) {
+    /* echo.identifier and echo.sequenceNumber are copied observations.
+     * Retain capture ownership before consuming its payload coordinates. */
+}
+~~~
+
+The fragment assumes readable stable capture storage. The result contains copied
+metadata and offsets; the payload remains in caller-owned RAM. A failed read leaves
+the entire output unchanged, including padding bytes. Overlap with any part of the
+accessible capture, including Ethernet padding, is refused before parsing.
+
+### Understand the checksum difference
+
+[RFC 792](https://www.rfc-editor.org/rfc/rfc792.html) defines the echo layout and
+checksum. The message checksum covers the type byte through the final message byte,
+with conceptual zero padding for an odd length. It has no UDP pseudo-header.
+Consequently, changing an IP address and repairing the IPv4 header checksum does
+not invalidate an otherwise unchanged echo message. Neither checksum authenticates
+the address, identifier, sequence number or payload.
+
+Zero in the ICMP checksum field never means optional checking. A zero field can be
+valid when the complete folded sum is all ones; otherwise the reader refuses it.
+The zero_checksum regression checks both situations. Do not copy UDP absence
+policy into this reader.
+
+### Work through the native checks
+
+1. Run the complete host commands above; alternatively select kernel.network_icmp with CTest -R.
+2. Open tests/network_packet/icmp_tests.c and read the independent golden bytes. They describe a 47-byte capture, a 33-byte IPv4 datagram and a 13-byte echo message.
+3. Locate the five payload bytes at offset 42. The literal ICMP checksum is f62b for the request and fe2b for the corresponding reply.
+4. Compare corruption, address_scope and zero_checksum. Explain the different checksum boundaries before modifying the fixture.
+5. Inspect truncation, overlap and lifetime. Admission copies observations but does not extend the input storage lifetime.
+
+The diagnostic guest preserves all eleven earlier groups and adds icmp-golden,
+icmp-reply, icmp-refusals and icmp-padding-lifetime. Its final count at the ICMP checkpoint was
+packet-admission.cases=15. The guest wrapper requires the complete ordered transcript
+and successful process exit with -nic none. The existing O0/O2 no-libc link targets
+also include the new function through the shared production source.
+
+If a checksum case fails, inspect its exact bytes and length before changing the
+expected result. If a guest marker is absent, first check the current-image fixture
+and selected artifact identity. A host pass cannot substitute for a guest that
+never ran. These checks establish synthetic capture behavior only; NIC drivers,
+DMA completion, sockets, routing, live ping and physical hardware remain separate work.
+
+
+## Inspect a fixed-header TCP capture
+
+The additive [network_tcp.h](../include/umicom/kernel/network_tcp.h) API reuses
+the bounded IPv4 reader and admits protocol 6 with a 20-byte TCP header.
+A TCP data offset below five words is malformed. A header that exceeds the IP
+payload is truncated; a fully present longer header is unsupported.
+This profile does not parse options, establish connections, match acknowledgments,
+reassemble streams, retransmit segments, implement sockets or attach a NIC.
+
+~~~c
+#include "umicom/kernel/network_tcp.h"
+
+UmicomEthernetIpv4TcpView tcp;
+UmicomNetworkPacketStatus status = UmicomKernelEthernetIpv4TcpRead(
+    capture, capture_bytes, &tcp);
+if (status == UMICOM_NETWORK_PACKET_OK) {
+    /* Retain capture ownership before consuming tcp.payloadOffset and
+     * tcp.payloadBytes. Copied sequence and flag values are observations,
+     * not accepted connection state. */
+}
+~~~
+
+The fragment assumes readable stable capture storage. The result copies ports,
+sequence and acknowledgment numbers, flags, reserved bits, window and urgent
+pointer. Reserved bits are observed rather than rejected. There is no state
+machine to interpret these fields. Refusal leaves the complete output unchanged;
+the output must be aligned and separate from the whole accessible capture.
+
+### Check the mandatory transport checksum
+
+TCP verifies a pseudo-header containing the IPv4 addresses, protocol and segment
+length, together with the complete TCP header and payload. An odd final byte
+gets conceptual zero padding. Ethernet padding is excluded by the IP length.
+A zero stored checksum never disables verification, although it can be valid
+when the complete folded sum is all ones. See
+[RFC 9293, section 3.1](https://www.rfc-editor.org/rfc/rfc9293.html#section-3.1).
+A checksum is not sender authentication or a security policy.
+
+1. Run the host commands above, or select "^kernel[.]network_tcp[.]" with CTest -R.
+2. Inspect the independent golden vector in tests/network_packet/tcp_tests.c. It has 59 capture bytes, 45 IP bytes and 25 TCP bytes; the five-byte hello payload starts at offset 54.
+3. Compare its literal IP checksum 0x3c60 and TCP checksum 0x77ed with the independent fixture helper.
+4. Read source_address and destination_address: the IPv4 checksum is repaired after changing an address, but the stale TCP checksum must still refuse.
+5. Compare the two checksum_zero outcomes. The valid zero-field fixture changes the window to 0x87ed, while merely clearing the original checksum refuses.
+6. Inspect overlap, lifetime, output_alignment, truncation and data_offset before proposing a caller.
+
+The guest preserves all fifteen earlier packet groups and adds tcp-golden,
+tcp-refusals, tcp-zero-checksum and tcp-padding-lifetime. The current required
+count is packet-admission.cases=19. Run the same evidence target and selected
+guest commands above; the wrapper uses -nic none and requires normal completion.
+The O0/O2 no-libc link targets compile the same production function.
+
+If checksum verification fails, inspect the exact bytes, IP length and
+pseudo-header before changing expectations. If a guest marker is absent,
+establish the current ELF identity and fixture result first. These checks
+cover synthetic RAM captures, not DMA synchronization, live traffic, TCP
+interoperability or physical hardware.

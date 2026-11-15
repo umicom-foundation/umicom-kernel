@@ -216,3 +216,11 @@ The renderer and shared read owner are in `kernel/console_file_range.inc`.
 Host tests check all 256 byte values and split reads; the serial-session
 fixture checks a live guest command. Neither constitutes physical-device
 qualification.
+
+## Follow the optional Umicom C program through the console
+
+The optional CVM serial journey covers the current selectors, unknown-selector
+refusals and a final successful launch. Read [the console evidence lesson](CVM_CONSOLE_EVIDENCE.md)
+for the 55-launch contract, exact process reports, host serial transport and the
+distinction between interpreter, diagnostic guest and normal-console results.
+The ordinary RAM-file and read-only storage journeys remain independent checks.

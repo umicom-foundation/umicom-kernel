@@ -67,6 +67,53 @@ static const ConsoleStep steps[] = {
     {"run /bin/umicom-cvm.elf 6", "state=exited exit=49158 "},
     {"run /bin/umicom-cvm.elf 7", "state=exited exit=49159 "},
     {"run /bin/umicom-cvm.elf 8", "state=exited exit=49160 "},
+    /* Extend the ordinary console journey through every reviewed language
+     * profile. Keep the earlier cases and final recovery launch intact. */
+    {"run /bin/umicom-cvm.elf 9", "state=exited exit=49161 "},
+    {"run /bin/umicom-cvm.elf 10", "state=exited exit=49162 "},
+    {"run /bin/umicom-cvm.elf 11", "state=exited exit=49163 "},
+    {"run /bin/umicom-cvm.elf 12", "state=exited exit=49164 "},
+    {"run /bin/umicom-cvm.elf 13", "state=exited exit=49165 "},
+    {"run /bin/umicom-cvm.elf 14", "state=exited exit=49166 "},
+    {"run /bin/umicom-cvm.elf 15", "state=exited exit=49167 "},
+    {"run /bin/umicom-cvm.elf 16", "state=exited exit=49168 "},
+    {"run /bin/umicom-cvm.elf 17", "state=exited exit=49169 "},
+    {"run /bin/umicom-cvm.elf 18", "state=exited exit=49170 "},
+    {"run /bin/umicom-cvm.elf 19", "state=exited exit=49171 "},
+    {"run /bin/umicom-cvm.elf 20", "state=exited exit=49172 "},
+    {"run /bin/umicom-cvm.elf 21", "state=exited exit=49173 "},
+    {"run /bin/umicom-cvm.elf 22", "state=exited exit=49174 "},
+    {"run /bin/umicom-cvm.elf 23", "state=exited exit=49175 "},
+    {"run /bin/umicom-cvm.elf 24", "state=exited exit=49176 "},
+    {"run /bin/umicom-cvm.elf 25", "state=exited exit=49177 "},
+    {"run /bin/umicom-cvm.elf 26", "state=exited exit=49178 "},
+    {"run /bin/umicom-cvm.elf 27", "state=exited exit=49179 "},
+    {"run /bin/umicom-cvm.elf 28", "state=exited exit=49180 "},
+    {"run /bin/umicom-cvm.elf 29", "state=exited exit=49181 "},
+    {"run /bin/umicom-cvm.elf 30", "state=exited exit=49182 "},
+    {"run /bin/umicom-cvm.elf 31", "state=exited exit=49183 "},
+    {"run /bin/umicom-cvm.elf 32", "state=exited exit=49184 "},
+    {"run /bin/umicom-cvm.elf 33", "state=exited exit=49185 "},
+    {"run /bin/umicom-cvm.elf 34", "state=exited exit=49186 "},
+    {"run /bin/umicom-cvm.elf 35", "state=exited exit=49187 "},
+    {"run /bin/umicom-cvm.elf 36", "state=exited exit=49188 "},
+    {"run /bin/umicom-cvm.elf 37", "state=exited exit=49189 "},
+    {"run /bin/umicom-cvm.elf 38", "state=exited exit=49190 "},
+    {"run /bin/umicom-cvm.elf 39", "state=exited exit=49191 "},
+    {"run /bin/umicom-cvm.elf 40", "state=exited exit=49192 "},
+    {"run /bin/umicom-cvm.elf 41", "state=exited exit=49193 "},
+    {"run /bin/umicom-cvm.elf 42", "state=exited exit=49194 "},
+    {"run /bin/umicom-cvm.elf 43", "state=exited exit=49195 "},
+    {"run /bin/umicom-cvm.elf 44", "state=exited exit=49196 "},
+    {"run /bin/umicom-cvm.elf 45", "state=exited exit=49197 "},
+    {"run /bin/umicom-cvm.elf 46", "state=exited exit=49198 "},
+    {"run /bin/umicom-cvm.elf 47", "state=exited exit=49199 "},
+    {"run /bin/umicom-cvm.elf 48", "state=exited exit=49200 "},
+    {"run /bin/umicom-cvm.elf 49", "state=exited exit=49201 "},
+    {"run /bin/umicom-cvm.elf 50", "state=exited exit=49202 "},
+    {"run /bin/umicom-cvm.elf 51", "state=exited exit=49203 "},
+    {"run /bin/umicom-cvm.elf 52", "state=exited exit=49156 "},
+    {"run /bin/umicom-cvm.elf 18446744073709551615", "state=exited exit=49156 "},
     {"run /bin/umicom-cvm.elf 0", "state=exited exit=42 "},
 #endif
     {"poweroff", "RAM filesystem closed. Powering off.\r\nUMICOM_KERNEL_END\r\n"}
@@ -186,9 +233,65 @@ static int ResponseAccepted(size_t step, const char *text)
                 "process id=%llu state=exited exit=%llu slices=%llu calls=%llu",
                 &identity, &value, &slices, &calls) != 4 ||
             identity == 0U || slices == 0U || calls != 1U) return 0;
+        /* Match the parsed report's exit too. A matching substring elsewhere
+         * in the response must not validate a different process report. */
+        unsigned long long expected = 0U;
+        if (sscanf(steps[step].reply, "state=exited exit=%llu", &expected) != 1 ||
+            value != expected) return 0;
     }
 #endif
     return 1;
+}
+
+/* This standalone Kernel qualification fixture does not link product runtime
+ * services. Pass only explicit diagnostic handles to the QEMU child: serial
+ * remains on its loopback socket and no listener or unrelated host handle is
+ * inherited. Forward stderr to CTest so startup failures retain their cause. */
+static int StartQemu(const char *program, char *command, PROCESS_INFORMATION *child)
+{
+    SECURITY_ATTRIBUTES security = {sizeof security, NULL, TRUE};
+    HANDLE input = INVALID_HANDLE_VALUE, diagnostic = NULL;
+    STARTUPINFOEXA startup = {0};
+    SIZE_T attribute_bytes = 0U;
+    int attributes_ready = 0, started = 0;
+    DWORD error = ERROR_SUCCESS;
+    input = CreateFileA("NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+        &security, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (input == INVALID_HANDLE_VALUE) goto finish;
+    if (!DuplicateHandle(GetCurrentProcess(), GetStdHandle(STD_ERROR_HANDLE),
+            GetCurrentProcess(), &diagnostic, 0U, TRUE, DUPLICATE_SAME_ACCESS))
+        goto finish;
+    (void)InitializeProcThreadAttributeList(NULL, 1U, 0U, &attribute_bytes);
+    if (attribute_bytes == 0U) goto finish;
+    startup.lpAttributeList = HeapAlloc(GetProcessHeap(), 0U, attribute_bytes);
+    if (startup.lpAttributeList == NULL) {
+        SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+        goto finish;
+    }
+    if (!InitializeProcThreadAttributeList(startup.lpAttributeList, 1U, 0U,
+            &attribute_bytes)) goto finish;
+    attributes_ready = 1;
+    HANDLE inherited[] = {input, diagnostic};
+    if (!UpdateProcThreadAttribute(startup.lpAttributeList, 0U,
+            PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherited, sizeof inherited, NULL, NULL))
+        goto finish;
+    startup.StartupInfo.cb = sizeof startup;
+    startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+    startup.StartupInfo.hStdInput = input;
+    startup.StartupInfo.hStdOutput = diagnostic;
+    startup.StartupInfo.hStdError = diagnostic;
+    started = CreateProcessA(program, command, NULL, NULL, TRUE,
+        CREATE_NO_WINDOW | EXTENDED_STARTUPINFO_PRESENT, NULL, NULL,
+        &startup.StartupInfo, child) != 0;
+finish:
+    error = GetLastError();
+    if (attributes_ready) DeleteProcThreadAttributeList(startup.lpAttributeList);
+    if (startup.lpAttributeList != NULL)
+        HeapFree(GetProcessHeap(), 0U, startup.lpAttributeList);
+    if (diagnostic != NULL) CloseHandle(diagnostic);
+    if (input != INVALID_HANDLE_VALUE) CloseHandle(input);
+    SetLastError(error);
+    return started;
 }
 
 int main(int argc, char **argv)
@@ -238,7 +341,13 @@ int main(int argc, char **argv)
     const int count = snprintf(command, sizeof command,
         "\"%s\" -machine virt,aclint=off -bios \"%s\" -display none -monitor none "
         "-chardev socket,id=serial,host=127.0.0.1,port=%u -serial chardev:serial "
+        /* Explicitly exclude guest networking. The host loopback socket is
+         * only a serial transport and is not a guest network device. */
+#if 0
         "-m 128M -smp 1 -no-reboot",
+#else
+        "-m 128M -smp 1 -no-reboot -nic none",
+#endif
         argv[1], argv[2], (unsigned)ntohs(address.sin_port));
     if (count < 0 || (size_t)count >= sizeof command) goto cleanup;
 #ifdef UMICOM_CONSOLE_SESSION_STORAGE
@@ -257,10 +366,16 @@ int main(int argc, char **argv)
         argv[3]);
     if (diskCount < 0 || (size_t)diskCount >= remaining) goto cleanup;
 #endif
+    /* Preserve the earlier silent launch for review. Explicit standard
+     * handles now retain startup diagnostics without inheriting the socket. */
+#if 0
     STARTUPINFOA startup = {0};
     startup.cb = sizeof startup;
     if (!CreateProcessA(argv[1], command, NULL, NULL, FALSE, CREATE_NO_WINDOW,
             NULL, NULL, &startup, &child)) {
+#else
+    if (!StartQemu(argv[1], command, &child)) {
+#endif
         fprintf(stderr, "QEMU could not start; Windows error %lu\n", GetLastError());
         goto cleanup;
     }
@@ -274,6 +389,9 @@ int main(int argc, char **argv)
         if (ready > 0) connection = accept(listener, NULL, NULL);
         if (WaitForSingleObject(child.hProcess, 0U) == WAIT_OBJECT_0 &&
             connection == INVALID_SOCKET) {
+            DWORD early_exit = 0U;
+            if (GetExitCodeProcess(child.hProcess, &early_exit))
+                fprintf(stderr, "QEMU early exit code: 0x%08lx\n", early_exit);
             fprintf(stderr, "QEMU exited before connecting its serial channel.\n");
             goto cleanup;
         }
@@ -329,6 +447,16 @@ int main(int argc, char **argv)
                 fprintf(stderr, "Unexpected response before step %zu.\n", sent);
                 goto cleanup;
             }
+#ifdef UMICOM_CONSOLE_SESSION_CVM
+            if (sent != 0U && strncmp(steps[sent - 1U].command,
+                    "run /bin/umicom-cvm.elf ",
+                    sizeof("run /bin/umicom-cvm.elf ") - 1U) == 0) {
+                /* Emit host evidence only after the complete prompt-delimited
+                 * response passed its exit, identity, slice and call checks. */
+                printf("UMICOM_KERNEL_CVM_CONSOLE_CASE command=%s expected=%s\n",
+                    steps[sent - 1U].command, steps[sent - 1U].reply);
+            }
+#endif
             responseStart = (size_t)(prompt - transcript) + strlen("umicom> ");
             if (!SendCommand(connection, steps[sent].command, deadline)) goto cleanup;
             ++sent;

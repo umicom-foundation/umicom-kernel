@@ -31,7 +31,13 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(umicom-cvm-envelope PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)
 endif()
 if(BUILD_TESTING)
-    foreach(case IN ITEMS arithmetic fuel fault reserved-flags reserved-selector trace trace-fuel trace-fault trace-capacity comparison-true comparison-false comparison-version comparison-fuel unknown-selector maximum-selector)
+    foreach(case IN ITEMS arithmetic fuel fault reserved-flags reserved-selector trace trace-fuel trace-fault trace-capacity comparison-true comparison-false comparison-version comparison-fuel profile locals locals-isolation locals-fuel locals-version locals-index
+        branch-skip branch-fault branch-fuel branch-version branch-initialization branch-backward branch-stack
+        conditional-false conditional-true conditional-fuel conditional-join conditional-version
+        remainder-positive remainder-negative remainder-zero remainder-overflow remainder-version remainder-fuel remainder-operand
+        complement-minimum complement-maximum complement-zero complement-fuel complement-wire
+        bitwise-and bitwise-xor bitwise-or bitwise-fuel bitwise-old-version bitwise-operand bitwise-profile bitwise-minimum bitwise-canonical
+        unknown-selector maximum-selector)
         add_test(NAME "kernel.cvm.envelope.${case}" COMMAND umicom-cvm-envelope "${case}")
         set_tests_properties("kernel.cvm.envelope.${case}" PROPERTIES TIMEOUT 10 LABELS "kernel;cvm;host;consumer")
     endforeach()

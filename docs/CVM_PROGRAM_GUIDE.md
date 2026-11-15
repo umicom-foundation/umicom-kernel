@@ -1,4 +1,14 @@
+![Umicom](../assets/branding/umicom-logo.svg)
+
 # Run the bounded CVM inside a native user program
+
+## Current envelope and qualification scope
+
+The diagnostic currently runs selectors **0–51** at **O0 and O2**, producing **104 case markers** before UMICOM_KERNEL_CVM_READY. The host entry suite contains **54 tests**: the 52 selectors plus two unknown-selector boundaries. The source-identity suite contains **17 checks**. Earlier sections below describe how individual profiles were introduced; their smaller historical counts do not describe the current suite. A successful configured test registration is not an executed result.
+
+The optional Windows serial-console fixture now requests selectors **0–51**, the unknown-selector boundaries **52** and **UINT64_MAX**, then repeats selector **0**. That is **55 CVM launches** through the normal console. These are separate from the 104 diagnostic-image markers and require their own execution evidence.
+
+The current runtime feature mask is **82331** and supported wire-version mask is **126**. Query the linked runtime and retain its source receipt. The guest does not link the compiler, so source-only complement bit 32768 must remain absent even though arithmetic bytecode can represent complement.
 
 Umicom C's interpreter can be linked into a RISC-V ELF user program. ELF is the file format that describes machine code, read-only data and writable storage. The Kernel loads that native program into its own user address space. The program then interprets arithmetic bytecode as data.
 
@@ -126,3 +136,69 @@ ctest --test-dir build/cvm-envelope-host --output-on-failure
 Stop after any failed command. The expected suite contains fifteen entry-contract cases, including both unknown selector boundaries. Its result describes host execution only: it does not load an ELF image, switch privilege modes or inspect Kernel frame ownership. Follow the earlier RISC-V build and guest commands separately. The guest validator runs selectors 0–12 under O0 and O2, checks their exit results, rejects terminal reentry and compares frame snapshots after destruction. Record all thirteen case markers for each optimisation and the final ready marker; a host pass cannot substitute for those observations.
 
 If the host build reports a missing comparison profile, check the selected Umicom C path and revision before rebuilding. If the guest receipt refuses stale source, rebuild its two images and capture the new identity through the existing workflow; do not edit a receipt to make it agree. These commands are qualification instructions, not a claim that the checks have already passed.
+
+<!-- Earlier section title retained: Current remainder envelope -->
+## Remainder envelope history
+
+The current diagnostic executes selectors 0 through 37 at both O0 and O2. The earlier sections describe how its individual profiles were introduced; their historical counts are not the current suite size. The host entry suite now contains 40 cases, including two unknown-selector boundaries. Every guest selector must preserve process teardown and frame ownership before the final ready marker is emitted.
+
+Selectors 31–37 are implemented in [remainder_checks.h](../programs/cvm/remainder_checks.h), shared by the real guest entry and host entry tests:
+
+| Selector | Expected exit | Checked behavior |
+| --- | --- | --- |
+| 31 | 0xc01f | Positive remainder and independent format-5 fixture |
+| 32 | 0xc020 | Negative dividend retains a negative remainder |
+| 33 | 0xc021 | Zero divisor preserves result and trace operands |
+| 34 | 0xc022 | Minimum integer / -1 pair rejected before native remainder |
+| 35 | 0xc023 | Remainder record mislabelled as format 4 refused |
+| 36 | 0xc024 | Instruction budget stops before remainder |
+| 37 | 0xc025 | Nonzero reserved remainder operand refused |
+
+Both linked components must advertise the remainder profile. The guest runtime feature mask is 16795 and its supported-format mask is 62. The source receipt now includes the envelope helper itself; an edited or missing helper invalidates old evidence. Reconfigure and rebuild the two native images after changing either the helper or the selected Umicom C runtime.
+
+Run the host and RISC-V commands above against matching checkouts. For receipt regression checks, select **kernel.cvm.evidence.** in the configured root build. Those host fixtures deliberately edit or remove copied inputs and must reject the stale identity. They do not execute guest instructions. Capture all 38 selector results for each optimization mode and the final ready marker for guest qualification. A successful host remainder test, a configured Framework preview test, or an unchanged older image does not establish those guest results.
+
+## Complement and binary bitwise selectors
+
+Selectors 38–42 qualify complement lowered through existing arithmetic: signed minimum, signed maximum, zero, fuel and canonical legacy wire encoding. Selectors 43–51 use [bitwise_checks.h](../programs/cvm/bitwise_checks.h), whose bytes are independent of the encoder. The entry and host tests share this guest contract.
+
+| Selector | Exit code | Contract |
+| --- | --- | --- |
+| 43 | 0xc02b | AND of -1 and 42 is 42 |
+| 44 | 0xc02c | XOR of -1 and 42 is -43 |
+| 45 | 0xc02d | OR of -1 and 42 is -1 |
+| 46 | 0xc02e | Fuel stops before the operation without publishing a result |
+| 47 | 0xc02f | Format 5 refuses a binary bitwise record |
+| 48 | 0xc030 | Nonzero reserved operand is refused |
+| 49 | 0xc031 | Runtime advertises bitwise and format 6, but not compiler-only complement |
+| 50 | 0xc032 | Minimum signed value XOR -1 yields maximum signed value |
+| 51 | 0xc033 | Format 6 on a legacy arithmetic program is noncanonical |
+
+The source receipt includes bitwise_checks.h. Its edited and missing-header fixtures must invalidate stale evidence. Rebuild both images before running kernel.riscv64.cvm; the current-image fixture performs the scoped build when invoked through CTest. Preserve all 104 marker observations and the final ready marker. Normal interactive-console workflows and Framework preview qualification are separate checks and are not established by this diagnostic.
+
+## Check the complete normal-console journey
+
+The serial fixture now covers comparisons, locals, branches, conditional updates,
+remainder, complement lowering and binary bitwise operations through the ordinary
+run command. For selectors 1 through 51, successful contract checks return decimal
+49152 plus the selector. Selector 0 returns 42. Unknown selectors 52 and
+18446744073709551615 return 49156, the existing refusal result; selector 4 is
+itself the historical refusal case. These application exit values are independent
+of the QEMU process exit code.
+
+Every accepted CVM response must report a nonzero process identity, at least one
+execution slice and exactly one EXIT call. The fixture compares the exit value in
+the parsed process report with the expected value, then emits
+UMICOM_KERNEL_CVM_CONSOLE_CASE. The final selector-0 run checks that refusals did
+not prevent another launch. Expect 55 such host evidence lines and the final
+UMICOM_KERNEL_SERIAL_SESSION_PASS marker, with QEMU itself exiting successfully.
+
+The fixture attaches no guest NIC. Its ephemeral 127.0.0.1 connection transports
+serial bytes between the host test and its QEMU child; it is not guest networking.
+The separate storage journey uses only its named synthetic image opened read-only.
+Rebuild current system and console images before using the earlier qualification
+commands. Test registration alone cannot show that this longer journey completed.
+
+Read [the console evidence lesson](CVM_CONSOLE_EVIDENCE.md) to compare host runtime,
+diagnostic guest and normal-console evidence without treating one as a substitute
+for another.
