@@ -177,3 +177,18 @@ if(BUILD_TESTING)
         set_tests_properties("kernel.network_neighbor6.${_case}" PROPERTIES TIMEOUT 10)
     endforeach()
 endif()
+
+# Generic framing is independent of the retained untagged protocol readers.
+add_executable(umicom-network-ethernet-tests ethernet_tests.c
+    ../../kernel/network_packet.c ../../kernel/address.c)
+target_include_directories(umicom-network-ethernet-tests PRIVATE ../../include)
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(umicom-network-ethernet-tests PRIVATE
+        -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)
+endif()
+if(BUILD_TESTING)
+    foreach(_case IN ITEMS plain ipv6 arp unknown-type first-type last-type single-c single-s double-sc double-cs double-cc double-ss header-only-plain header-only-single header-only-double maximum-plain maximum-single maximum-double over-plain over-single over-double truncation-plain truncation-single truncation-double third-tag llc-zero llc-maximum gap-first gap-last inner-length priority-zero priority-maximum priority-bits dei-bit vid-zero vid-reserved opaque-tpid padding unaligned lifetime overlap output-alignment address-wrap arguments capture-limit)
+        add_test(NAME "kernel.network_ethernet.${_case}" COMMAND umicom-network-ethernet-tests "${_case}")
+        set_tests_properties("kernel.network_ethernet.${_case}" PROPERTIES TIMEOUT 10)
+    endforeach()
+endif()

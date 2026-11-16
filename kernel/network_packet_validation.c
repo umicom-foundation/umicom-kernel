@@ -14,6 +14,7 @@
  *---------------------------------------------------------------------------*/
 
 #include "umicom/kernel/network_packet.h"
+#include "umicom/kernel/network_ethernet.h"
 #include "umicom/kernel/network_arp.h"
 #include "umicom/kernel/network_ipv6.h"
 #include "umicom/kernel/network_udp6.h"
@@ -530,6 +531,57 @@ static void Ipv6NeighborValidateExecution(void)
     UmicomKernelConsoleWriteLine("packet-admission.case=neighbor6-padding-lifetime");
 }
 
+
+/* The guest uses independent synthetic captures. No NIC or network state is
+ * needed to establish tag ordering, byte alignment and copied metadata. */
+static void EthernetValidateExecution(void)
+{
+    static const UmicomU8 raw[] = {2,0,0,0,0,2, 2,0,0,0,0,1, 0x08,0, 0xaa};
+    static const UmicomU8 tagged[] = {2,0,0,0,0,2, 2,0,0,0,0,1,
+        0x88,0xa8, 0xf0,0x01, 0x81,0, 0x20,0x09, 0x86,0xdd, 0xab,0xcd};
+    UmicomEthernetFrameView view,before;
+    PacketRequire(UmicomKernelEthernetFrameRead(raw,sizeof raw,&view)==UMICOM_NETWORK_PACKET_OK &&
+        view.tagCount==0U && view.etherType==0x0800U && view.payloadOffset==14U &&
+        view.payloadBytes==1U && view.sourceMac[5]==1U,"Ethernet plain metadata");
+    UmicomKernelConsoleWriteLine("packet-admission.case=ethernet-plain");
+    PacketRequire(UmicomKernelEthernetFrameRead(tagged,sizeof tagged,&view)==UMICOM_NETWORK_PACKET_OK &&
+        view.tagCount==2U && view.tags[0].protocolIdentifier==0x88a8U &&
+        view.tags[0].priority==7U && view.tags[0].dropEligible==UMICOM_TRUE &&
+        view.tags[0].vlanIdentifier==1U && view.tags[1].protocolIdentifier==0x8100U &&
+        view.tags[1].priority==1U && view.tags[1].dropEligible==UMICOM_FALSE &&
+        view.tags[1].vlanIdentifier==9U && view.etherType==0x86ddU &&
+        view.payloadOffset==22U && view.payloadBytes==2U,"Ethernet tag order");
+    _Alignas(16) UmicomU8 frame[1523];
+    UmicomBootMemoryCopy(frame,tagged,18U);
+    frame[16]=8U;frame[17]=6U;
+    PacketRequire(UmicomKernelEthernetFrameRead(frame,18U,&view)==UMICOM_NETWORK_PACKET_OK &&
+        view.tagCount==1U && view.etherType==0x0806U && view.payloadBytes==0U &&
+        view.tags[1].protocolIdentifier==0U,"Ethernet single header");
+    UmicomKernelConsoleWriteLine("packet-admission.case=ethernet-tags");
+
+    UmicomBootMemoryCopy(&before,&view,sizeof view);
+    for(UmicomSize n=0U;n<22U;++n)
+        PacketRequire(UmicomKernelEthernetFrameRead(tagged,n,&view)==UMICOM_NETWORK_PACKET_LENGTH &&
+            PacketBytesEqual(&before,&view,sizeof view),"Ethernet truncated tag");
+    UmicomBootMemoryClear(frame,sizeof frame);
+    UmicomBootMemoryCopy(frame,tagged,sizeof tagged);
+    frame[20]=0x81U;frame[21]=0U;
+    PacketRequire(UmicomKernelEthernetFrameRead(frame,22U,&view)==UMICOM_NETWORK_PACKET_UNSUPPORTED &&
+        PacketBytesEqual(&before,&view,sizeof view),"Ethernet tag depth");
+    UmicomBootMemoryCopy(frame,raw,sizeof raw);
+    PacketRequire(UmicomKernelEthernetFrameRead(frame,1515U,&view)==UMICOM_NETWORK_PACKET_LIMIT &&
+        PacketBytesEqual(&before,&view,sizeof view),"Ethernet payload bound");
+    UmicomKernelConsoleWriteLine("packet-admission.case=ethernet-refusals");
+
+    UmicomBootMemoryCopy(frame+1U,tagged,sizeof tagged);
+    PacketRequire(UmicomKernelEthernetFrameRead(frame+1U,sizeof tagged,&view)==UMICOM_NETWORK_PACKET_OK,
+        "Ethernet unaligned input");
+    UmicomBootMemoryClear(frame,sizeof frame);
+    PacketRequire(view.tags[0].controlInformation==0xf001U && view.tags[1].vlanIdentifier==9U &&
+        view.destinationMac[5]==2U && view.payloadOffset==22U,"Ethernet copied lifetime");
+    UmicomKernelConsoleWriteLine("packet-admission.case=ethernet-lifetime");
+}
+
 void UmicomKernelPacketAdmissionValidateExecution(void)
 {
     UmicomU8 frame[60];
@@ -628,6 +680,11 @@ void UmicomKernelPacketAdmissionValidateExecution(void)
     UmicomKernelConsoleWriteLine("packet-admission.cases=39");
 #endif
     Ipv6NeighborValidateExecution();
+/* Retain the same forty-three earlier packet groups; four generic Ethernet/VLAN groups extend the guest transcript. The former implementation is retained for owner review. */
+#if 0
     UmicomKernelConsoleWriteLine("packet-admission.cases=43");
+#endif
+    EthernetValidateExecution();
+    UmicomKernelConsoleWriteLine("packet-admission.cases=47");
     UmicomKernelConsoleWriteLine("UMICOM_KERNEL_PACKET_ADMISSION_READY");
 }

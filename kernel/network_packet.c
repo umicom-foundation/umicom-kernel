@@ -14,6 +14,7 @@
  *---------------------------------------------------------------------------*/
 
 #include "umicom/kernel/network_packet.h"
+#include "umicom/kernel/network_ethernet.h"
 #include "umicom/kernel/network_arp.h"
 #include "umicom/kernel/network_ipv6.h"
 #include "umicom/kernel/network_udp.h"
@@ -611,6 +612,64 @@ UmicomNetworkPacketStatus UmicomKernelEthernetIpv6NeighborRead(
                 if (ip.destinationAddress[i] != prefix[i]) return UMICOM_NETWORK_PACKET_HEADER;
         }
     }
+    UmicomBootMemoryCopy(out, &staged, sizeof staged);
+    return UMICOM_NETWORK_PACKET_OK;
+}
+
+
+/* Framing has its own observation boundary: do not change the established
+ * untagged transport readers or pretend that tag parsing adds routing policy.
+ * Every read is byte-based and checked against the original capture extent. */
+UmicomNetworkPacketStatus UmicomKernelEthernetFrameRead(
+    const void *bytes, UmicomSize accessibleBytes, UmicomEthernetFrameView *out)
+{
+    if (!bytes || !out) return UMICOM_NETWORK_PACKET_ARGUMENT;
+    if (accessibleBytes < UMICOM_ETHERNET_FRAME_HEADER_BYTES)
+        return UMICOM_NETWORK_PACKET_LENGTH;
+    if (accessibleBytes > UMICOM_ETHERNET_FRAME_CAPTURE_MAX_BYTES)
+        return UMICOM_NETWORK_PACKET_LIMIT;
+    const UmicomAddress start = (UmicomAddress)bytes;
+    const UmicomAddress output = (UmicomAddress)out;
+    UmicomAddress end = 0U, outputEnd = 0U;
+    if (output % _Alignof(UmicomEthernetFrameView) ||
+        !UmicomKernelAddressAddChecked(start, accessibleBytes, &end) ||
+        !UmicomKernelAddressAddChecked(output, sizeof *out, &outputEnd) ||
+        (start < outputEnd && output < end))
+        return UMICOM_NETWORK_PACKET_ARGUMENT;
+
+    const UmicomU8 *frame = bytes;
+    UmicomEthernetFrameView staged;
+    UmicomBootMemoryClear(&staged, sizeof staged);
+    UmicomSize offset = UMICOM_ETHERNET_FRAME_HEADER_BYTES;
+    UmicomU16 type = ReadNetwork16(frame + 12U);
+    while (type == 0x8100U || type == 0x88a8U) {
+        if (staged.tagCount == UMICOM_ETHERNET_FRAME_TAG_MAX_COUNT)
+            return UMICOM_NETWORK_PACKET_UNSUPPORTED;
+        if (accessibleBytes - offset < 4U)
+            return UMICOM_NETWORK_PACKET_LENGTH;
+        UmicomEthernetTagView *tag = &staged.tags[staged.tagCount];
+        tag->protocolIdentifier = type;
+        tag->controlInformation = ReadNetwork16(frame + offset);
+        tag->priority = (UmicomU8)(tag->controlInformation >> 13U);
+        tag->dropEligible = (tag->controlInformation & 0x1000U) ?
+            UMICOM_TRUE : UMICOM_FALSE;
+        tag->vlanIdentifier = (UmicomU16)(tag->controlInformation & 0x0fffU);
+        type = ReadNetwork16(frame + offset + 2U);
+        offset += 4U;
+        ++staged.tagCount;
+    }
+    if (type <= 1500U) return UMICOM_NETWORK_PACKET_UNSUPPORTED;
+    if (type < 1536U) return UMICOM_NETWORK_PACKET_HEADER;
+    if (accessibleBytes - offset > UMICOM_ETHERNET_FRAME_PAYLOAD_MAX_BYTES)
+        return UMICOM_NETWORK_PACKET_LIMIT;
+
+    /* Publish one complete value only after all extents and profile limits
+     * pass. The input is never rewritten or stripped of its captured tags. */
+    UmicomBootMemoryCopy(staged.destinationMac, frame, 6U);
+    UmicomBootMemoryCopy(staged.sourceMac, frame + 6U, 6U);
+    staged.etherType = type;
+    staged.payloadOffset = offset;
+    staged.payloadBytes = accessibleBytes - offset;
     UmicomBootMemoryCopy(out, &staged, sizeof staged);
     return UMICOM_NETWORK_PACKET_OK;
 }

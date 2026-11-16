@@ -42,7 +42,8 @@ ctest --test-dir build/host-network-packet --output-on-failure --no-tests=error
 <!-- Earlier expected total retained: 121 groups before IPv6; every group remains. -->
 <!-- Earlier expected total retained: Expected result: 150 test groups pass: 19 IPv4, 27 UDP, 24 ICMP echo, 30 TCP, 21 ARP and 29 IPv6 groups. -->
 <!-- Earlier expected total retained: 242 groups, including 33 IPv6 TCP groups. All remain. -->
-Expected result: 281 test groups pass: the previous 242 plus 39 IPv6 neighbor capture groups. This is the expected result of these commands, not a claim
+<!-- Earlier expected total retained: 281 groups, including 39 IPv6 neighbor captures. -->
+Expected result: 326 test groups pass: the preceding 281 plus 45 generic Ethernet/VLAN capture cases. This is the expected result of these commands, not a claim
 about every platform. A missing compiler or nonzero test exit needs investigation before proceeding.
 
 ## The capture contract
@@ -788,3 +789,100 @@ Expected result: 39 neighbor cases. They cover independently checksummed solicit
 The existing focused guest qualification now requires 43 ordered packet groups: the preceding 39 plus four neighbor groups. It runs with no NIC. Keep its normal identity/build checks enabled; a transcript from a different binary is not evidence for edited source. If a checksum test fails, compare the 16-byte addresses, message length and protocol byte included in the pseudo-header before changing parser policy. If an option test fails, confirm the length is expressed in eight-byte units and excludes neither the option header nor trailing data. A zero checksum field is valid when the complete ones-complement sum is correct.
 
 Hardware receive/transmit, neighbor aging, address resolution retries, routing and transport connections remain separate work.
+
+
+## Observe Ethernet and VLAN framing separately from IP
+
+A link-layer frame identifies a destination and source with six-byte MAC
+addresses. Its next two bytes are either an Ethernet-II protocol identifier
+(an EtherType) or an IEEE 802.3 length field. The generic reader in
+`umicom/kernel/network_ethernet.h` supports Ethernet-II identifiers from 1536
+upward. It refuses length-field LLC frames and the gap between 1500 and 1536.
+The [IANA IEEE 802 number registry](https://www.iana.org/assignments/ieee-802-numbers)
+documents this distinction; it is a number registry, not a complete validation
+specification.
+
+### Lesson 1: retain what the capture actually contains
+
+A VLAN tag inserts a protocol identifier and control information before the
+inner protocol. The reader recognizes tag identifiers 0x8100 and 0x88a8 and
+admits at most two captured tags. That depth is this API's bound, not a claim
+that all Ethernet networks use at most two tags. The control information holds
+priority (three bits), drop eligibility (one bit) and a VLAN identifier (twelve
+bits). The [Linux Ethernet definitions](https://raw.githubusercontent.com/torvalds/linux/master/include/uapi/linux/if_ether.h)
+and [VLAN definitions](https://raw.githubusercontent.com/torvalds/linux/master/include/linux/if_vlan.h)
+provide primary implementation references for the field constants. Umicom's
+reader is independently implemented in C.
+
+The reader copies all tag bits, including VID zero and reserved VID 4095.
+Observing these values is not permission to configure or join a VLAN. A NIC
+may strip a tag before software receives a frame; absent bytes do not establish
+that a packet was untagged on the wire. Offload metadata needs a separate
+trusted contract and is not reconstructed here.
+
+1. Keep the original capture in stable accessible RAM without preamble or FCS.
+2. Supply an aligned output object outside the entire capture span.
+3. Inspect the view only after an OK result.
+4. Keep capture ownership while using its payload coordinates.
+
+~~~c
+#include "umicom/kernel/network_ethernet.h"
+
+UmicomEthernetFrameView observation;
+UmicomNetworkPacketStatus status = UmicomKernelEthernetFrameRead(
+    capture, capture_bytes, &observation);
+if (status == UMICOM_NETWORK_PACKET_OK) {
+    for (UmicomSize i = 0; i < observation.tagCount; ++i) {
+        UmicomU16 vlan = observation.tags[i].vlanIdentifier;
+        (void)vlan; /* A copied observation, not a forwarding decision. */
+    }
+    /* Coordinates refer to the original capture, whose tags remain present. */
+    UmicomSize offset = observation.payloadOffset;
+    UmicomSize size = observation.payloadBytes;
+    (void)offset;
+    (void)size;
+}
+~~~
+
+This integration fragment requires caller-owned `capture` and `capture_bytes`.
+It performs no receive, transmit or bridge operation.
+
+### Lesson 2: distinguish framing extent from protocol payload
+
+An untagged header is 14 bytes; one tag makes it 18, two tags make it 22.
+The generic reader returns every remaining capture byte as payload, including
+padding. Its maximum is 1500 bytes after the actual header. A 1515-byte
+untagged capture is therefore refused even though a two-tag capture can reach
+1522 bytes. Header-only captures are accepted for inspection; this does not
+qualify them as valid physical transmissions.
+
+Unlike the IP readers, framing alone cannot remove Ethernet padding by reading
+a protocol length. It also does not verify the payload's checksum or version.
+An unknown EtherType is an opaque observation. Identifier 0x9100 is not treated
+as a tag in this profile. Existing IPv4, IPv6, ARP and transport APIs retain
+their untagged input requirements: generic tag support does not silently extend
+their contracts.
+
+### Lesson 3: qualify bounded parsing
+
+Run the complete host sequence at the beginning of this guide. After building,
+isolate the 45 new cases with:
+
+~~~powershell
+ctest --test-dir build/host-network-packet -R "^kernel[.]network_ethernet[.]" --output-on-failure --no-tests=error
+~~~
+
+Expected coverage includes all four recognized two-tag orders, unaligned
+captures, every truncated header prefix, the EtherType/length boundary,
+priority/DEI/VID bits, three-tag refusal, each payload limit, invalid output
+alignment and address wrap. Refusals must leave output bytes unchanged.
+The current focused guest contract requires 47 ordered groups: all 43 earlier
+groups followed by ethernet-plain, ethernet-tags, ethernet-refusals and
+ethernet-lifetime. Keep the existing build and image-identity fixtures enabled.
+
+For LENGTH, compare accessible bytes with each complete tag's four-byte extent.
+For LIMIT, subtract the actual header before checking the payload. For
+UNSUPPORTED, inspect the length-field profile or tag depth; do not remove a
+bound merely to make a fixture pass. For ARGUMENT, check output alignment,
+overlap and arithmetic. These tests use synthetic RAM and no NIC; they do not
+establish hardware, FCS, VLAN offload, network isolation or tagged IP forwarding.
