@@ -72,7 +72,11 @@ foreach(_marker IN ITEMS "UMICOM_KERNEL_BOOT_READY" "packet-admission-test=begin
         # "packet-admission.cases=43"
         "packet-admission.case=ethernet-plain" "packet-admission.case=ethernet-tags"
         "packet-admission.case=ethernet-refusals" "packet-admission.case=ethernet-lifetime"
-        "packet-admission.cases=47"
+        # Previous count retained; all forty-seven groups still precede tagged IPv4.
+        # "packet-admission.cases=47"
+        "packet-admission.case=tagged-ipv4-plain" "packet-admission.case=tagged-ipv4-tags"
+        "packet-admission.case=tagged-ipv4-refusals" "packet-admission.case=tagged-ipv4-lifetime"
+        "packet-admission.cases=51"
         "UMICOM_KERNEL_PACKET_ADMISSION_READY" "UMICOM_KERNEL_END")
     string(FIND "${_stdout}" "${_marker}" _position)
     if(_position LESS_EQUAL _previous)
@@ -90,4 +94,5 @@ endforeach()
 # Previous status retained: Thirty-five packet groups completed in the current diagnostic guest without a NIC.
 # Earlier status retained: Thirty-nine packet groups completed in the current diagnostic guest without a NIC.
 # Previous status retained: Forty-three packet groups completed in the current diagnostic guest without a NIC.
-message(STATUS "Forty-seven packet groups completed in the current diagnostic guest without a NIC")
+# Previous report retained: Forty-seven packet groups completed in the current diagnostic guest without a NIC.
+message(STATUS "Fifty-one packet groups completed in the current diagnostic guest without a NIC")

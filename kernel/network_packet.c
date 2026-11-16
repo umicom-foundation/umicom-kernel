@@ -15,6 +15,7 @@
 
 #include "umicom/kernel/network_packet.h"
 #include "umicom/kernel/network_ethernet.h"
+#include "umicom/kernel/network_tagged_ipv4.h"
 #include "umicom/kernel/network_arp.h"
 #include "umicom/kernel/network_ipv6.h"
 #include "umicom/kernel/network_udp.h"
@@ -32,6 +33,10 @@ static UmicomU16 ReadNetwork16(const UmicomU8 *p)
     return (UmicomU16)(((UmicomU16)p[0] << 8U) | (UmicomU16)p[1]);
 }
 
+/* The original untagged reader is retained for engineering review. Its fixed
+ * IPv4 logic now lives in PacketIpv4PayloadRead; the active wrapper keeps the
+ * original argument checks, status precedence and untagged EtherType policy. */
+#if 0
 UmicomNetworkPacketStatus UmicomKernelEthernetIpv4Read(
     const void *bytes, UmicomSize accessibleBytes, UmicomEthernetIpv4View *out)
 {
@@ -98,6 +103,86 @@ UmicomNetworkPacketStatus UmicomKernelEthernetIpv4Read(
     staged.payloadBytes = (UmicomSize)ipBytes - 20U;
     UmicomBootMemoryCopy(out, &staged, sizeof staged);
     return UMICOM_NETWORK_PACKET_OK;
+}
+#endif
+
+/* Both callers prove RAM extents, output separation and the Ethernet header
+ * before entering this shared decoder. Keeping one IPv4 owner prevents tagged
+ * captures from acquiring different checksum or fragmentation policies. */
+static UmicomNetworkPacketStatus PacketIpv4PayloadRead(const UmicomU8 *frame,
+    UmicomSize accessibleBytes,UmicomSize ipOffset,UmicomEthernetIpv4View *out)
+{
+    if(ipOffset>accessibleBytes || accessibleBytes-ipOffset<20U)
+        return UMICOM_NETWORK_PACKET_LENGTH;
+    const UmicomU8 *ip = frame + ipOffset;
+    if ((ip[0] >> 4U) != 4U) return UMICOM_NETWORK_PACKET_UNSUPPORTED;
+    const UmicomSize headerBytes = (UmicomSize)(ip[0] & 15U) * 4U;
+    if (headerBytes < 20U) return UMICOM_NETWORK_PACKET_HEADER;
+    if (headerBytes > accessibleBytes - ipOffset) return UMICOM_NETWORK_PACKET_LENGTH;
+    if (headerBytes != 20U) return UMICOM_NETWORK_PACKET_UNSUPPORTED;
+    const UmicomU16 ipBytes = ReadNetwork16(ip + 2U);
+    if (ipBytes < 20U) return UMICOM_NETWORK_PACKET_HEADER;
+    if (ipBytes > 1500U) return UMICOM_NETWORK_PACKET_LIMIT;
+    if ((UmicomSize)ipBytes > accessibleBytes - ipOffset)
+        return UMICOM_NETWORK_PACKET_LENGTH;
+
+    const UmicomU16 flagsAndOffset = ReadNetwork16(ip + 6U);
+    if (flagsAndOffset & 0x8000U) return UMICOM_NETWORK_PACKET_HEADER;
+    /* A complete transport payload cannot be inferred from a fragment.
+     * Reassembly needs its own bounded ownership and timeout design. */
+    if (flagsAndOffset & 0x3fffU) return UMICOM_NETWORK_PACKET_FRAGMENT;
+    UmicomU32 sum = 0U;
+    for (UmicomSize i = 0U; i < 20U; i += 2U)
+        sum += ReadNetwork16(ip + i);
+    while (sum >> 16U) sum = (sum & 0xffffU) + (sum >> 16U);
+    if (sum != 0xffffU) return UMICOM_NETWORK_PACKET_CHECKSUM;
+
+    /* Stage the complete result before publishing it. Existing freestanding
+     * RAM helpers avoid introducing a hosted memcpy/memset dependency. TTL and
+     * protocol are observations; address/routing/transport policies come later. */
+    UmicomEthernetIpv4View staged;
+    UmicomBootMemoryClear(&staged, sizeof staged);
+    UmicomBootMemoryCopy(staged.destinationMac, frame, 6U);
+    UmicomBootMemoryCopy(staged.sourceMac, frame + 6U, 6U);
+    UmicomBootMemoryCopy(staged.sourceAddress, ip + 12U, 4U);
+    UmicomBootMemoryCopy(staged.destinationAddress, ip + 16U, 4U);
+    staged.differentiatedServices = ip[1];
+    staged.timeToLive = ip[8];
+    staged.protocol = ip[9];
+    staged.dontFragment = (flagsAndOffset & 0x4000U) ? UMICOM_TRUE : UMICOM_FALSE;
+    staged.identification = ReadNetwork16(ip + 4U);
+    staged.ipBytes = ipBytes;
+    staged.payloadOffset = ipOffset + 20U;
+    staged.payloadBytes = (UmicomSize)ipBytes - 20U;
+    UmicomBootMemoryCopy(out, &staged, sizeof staged);
+    return UMICOM_NETWORK_PACKET_OK;
+}
+
+UmicomNetworkPacketStatus UmicomKernelEthernetIpv4Read(
+    const void *bytes, UmicomSize accessibleBytes, UmicomEthernetIpv4View *out)
+{
+    if (!bytes || !out) return UMICOM_NETWORK_PACKET_ARGUMENT;
+    if (accessibleBytes < UMICOM_ETHERNET_IPV4_PAYLOAD_OFFSET)
+        return UMICOM_NETWORK_PACKET_LENGTH;
+    if (accessibleBytes > UMICOM_ETHERNET_IPV4_CAPTURE_MAX_BYTES)
+        return UMICOM_NETWORK_PACKET_LIMIT;
+
+    const UmicomAddress start = (UmicomAddress)bytes;
+    const UmicomAddress output = (UmicomAddress)out;
+    UmicomAddress end = 0U, outputEnd = 0U;
+    if (output % _Alignof(UmicomEthernetIpv4View) ||
+        !UmicomKernelAddressAddChecked(start, accessibleBytes, &end) ||
+        !UmicomKernelAddressAddChecked(output, sizeof *out, &outputEnd) ||
+        (start < outputEnd && output < end))
+        return UMICOM_NETWORK_PACKET_ARGUMENT;
+
+    /* Decode bytes rather than casting a packed wire header. This remains
+     * valid for unaligned captures and for either host byte order. No field
+     * is read until the caller's span includes the complete minimum header. */
+    const UmicomU8 *frame = (const UmicomU8 *)bytes;
+    if (ReadNetwork16(frame + 12U) != 0x0800U)
+        return UMICOM_NETWORK_PACKET_UNSUPPORTED;
+    return PacketIpv4PayloadRead(frame, accessibleBytes, 14U, out);
 }
 
 /* Transport admission reuses the complete IPv4 reader, so fragmentation,
@@ -672,4 +757,28 @@ UmicomNetworkPacketStatus UmicomKernelEthernetFrameRead(
     staged.payloadBytes = accessibleBytes - offset;
     UmicomBootMemoryCopy(out, &staged, sizeof staged);
     return UMICOM_NETWORK_PACKET_OK;
+}
+
+
+/* Framing owns tag traversal; IPv4 owns its own header and payload lengths.
+ * Publish both observations together only after every shared admission passes. */
+UmicomNetworkPacketStatus UmicomKernelEthernetTaggedIpv4Read(
+    const void *bytes,UmicomSize accessibleBytes,UmicomEthernetTaggedIpv4View *out)
+{
+    if(!bytes || !out)return UMICOM_NETWORK_PACKET_ARGUMENT;
+    if(accessibleBytes<UMICOM_ETHERNET_FRAME_HEADER_BYTES)return UMICOM_NETWORK_PACKET_LENGTH;
+    if(accessibleBytes>UMICOM_ETHERNET_FRAME_CAPTURE_MAX_BYTES)return UMICOM_NETWORK_PACKET_LIMIT;
+    const UmicomAddress start=(UmicomAddress)bytes,output=(UmicomAddress)out;
+    UmicomAddress end=0U,outputEnd=0U;
+    if(output%_Alignof(UmicomEthernetTaggedIpv4View) ||
+       !UmicomKernelAddressAddChecked(start,accessibleBytes,&end) ||
+       !UmicomKernelAddressAddChecked(output,sizeof *out,&outputEnd) ||
+       (start<outputEnd && output<end))return UMICOM_NETWORK_PACKET_ARGUMENT;
+    UmicomEthernetTaggedIpv4View staged;UmicomBootMemoryClear(&staged,sizeof staged);
+    UmicomNetworkPacketStatus status=UmicomKernelEthernetFrameRead(bytes,accessibleBytes,&staged.frame);
+    if(status!=UMICOM_NETWORK_PACKET_OK)return status;
+    if(staged.frame.etherType!=0x0800U)return UMICOM_NETWORK_PACKET_UNSUPPORTED;
+    status=PacketIpv4PayloadRead(bytes,accessibleBytes,staged.frame.payloadOffset,&staged.ipv4);
+    if(status!=UMICOM_NETWORK_PACKET_OK)return status;
+    UmicomBootMemoryCopy(out,&staged,sizeof staged);return UMICOM_NETWORK_PACKET_OK;
 }

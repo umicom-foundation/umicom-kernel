@@ -43,7 +43,8 @@ ctest --test-dir build/host-network-packet --output-on-failure --no-tests=error
 <!-- Earlier expected total retained: Expected result: 150 test groups pass: 19 IPv4, 27 UDP, 24 ICMP echo, 30 TCP, 21 ARP and 29 IPv6 groups. -->
 <!-- Earlier expected total retained: 242 groups, including 33 IPv6 TCP groups. All remain. -->
 <!-- Earlier expected total retained: 281 groups, including 39 IPv6 neighbor captures. -->
-Expected result: 326 test groups pass: the preceding 281 plus 45 generic Ethernet/VLAN capture cases. This is the expected result of these commands, not a claim
+<!-- Earlier framing-suite expectation retained: 326 groups, the preceding 281 plus 45 generic Ethernet/VLAN capture cases. -->
+Expected result: 363 test groups pass: the preceding 326 plus 37 tagged IPv4 capture cases. This is the expected result of these commands, not a claim
 about every platform. A missing compiler or nonzero test exit needs investigation before proceeding.
 
 ## The capture contract
@@ -876,7 +877,7 @@ Expected coverage includes all four recognized two-tag orders, unaligned
 captures, every truncated header prefix, the EtherType/length boundary,
 priority/DEI/VID bits, three-tag refusal, each payload limit, invalid output
 alignment and address wrap. Refusals must leave output bytes unchanged.
-The current focused guest contract requires 47 ordered groups: all 43 earlier
+The Ethernet framing subset contains 47 ordered groups: all 43 earlier
 groups followed by ethernet-plain, ethernet-tags, ethernet-refusals and
 ethernet-lifetime. Keep the existing build and image-identity fixtures enabled.
 
@@ -886,3 +887,73 @@ UNSUPPORTED, inspect the length-field profile or tag depth; do not remove a
 bound merely to make a fixture pass. For ARGUMENT, check output alignment,
 overlap and arithmetic. These tests use synthetic RAM and no NIC; they do not
 establish hardware, FCS, VLAN offload, network isolation or tagged IP forwarding.
+
+
+## Compose tagged Ethernet with fixed IPv4
+
+### Lesson 1: keep one IPv4 decoder
+
+The generic Ethernet reader accepts captured tags, while the original IPv4 and
+transport entry points retain their untagged contract. The new
+UmicomKernelEthernetTaggedIpv4Read entry composes framing with the same private
+IPv4 decoder used by the original entry. The earlier full implementation remains
+in an explained disabled block for review. No packet is stripped or copied into
+a second temporary frame merely to reuse parsing.
+
+~~~c
+UmicomEthernetTaggedIpv4View view;
+UmicomNetworkPacketStatus status = UmicomKernelEthernetTaggedIpv4Read(
+    capture, capture_bytes, &view);
+if (status == UMICOM_NETWORK_PACKET_OK) {
+    UmicomSize ip_header_offset = view.frame.payloadOffset;
+    UmicomSize ip_payload_offset = view.ipv4.payloadOffset;
+    UmicomSize ip_payload_bytes = view.ipv4.payloadBytes;
+    (void)ip_header_offset;
+    (void)ip_payload_offset;
+    (void)ip_payload_bytes;
+}
+~~~
+
+This fragment assumes stable caller-owned RAM. It accepts zero, one or two
+supported tags and requires the inner EtherType to be IPv4. It applies the
+existing fixed 20-byte header, checksum, total-length and fragment rules.
+It does not validate UDP/TCP data or allow the older transport APIs to accept
+tagged frames. The IPv4 header checksum covers the IP header, not Ethernet tags;
+see [RFC 791](https://www.rfc-editor.org/rfc/rfc791) for that protocol boundary.
+
+### Lesson 2: retain original coordinates and padding scope
+
+A double-tag header places the IP header at byte 22. Its fixed header places
+IP payload at byte 42. These offsets always refer to the original capture.
+For a 60-byte capture containing a 32-byte IPv4 datagram, frame.payloadBytes is
+38, but ipv4.payloadBytes is 12. The difference includes the IP header and
+Ethernet padding. Never use the larger framing count as a transport length.
+
+Inspect a tag's VLAN identifier, priority and drop-eligible bit without treating
+those observations as authorization. The decoder neither joins a network nor
+validates offload metadata, FCS, forwarding policy or the physical interface.
+Copied metadata remains usable after capture storage is released; payload access
+does not. Output alignment and complete input/output separation are required.
+
+### Lesson 3: qualify reuse and refusals
+
+Run the complete host sequence from the beginning of this guide. It now registers
+363 cases: 326 retained packet cases and 37 tagged IPv4 cases. Isolate the addition:
+
+~~~powershell
+ctest --test-dir build/host-network-packet -R "^kernel[.]network_tagged_ipv4[.]" --output-on-failure --no-tests=error
+~~~
+
+Coverage includes recognized tag orders, padding, every truncated prefix,
+maximum datagrams, unsupported options, fragments, checksum corruption,
+unaligned input, output overlap/alignment, address wrap and unchanged legacy
+scope. The focused guest expects 51 ordered groups, including four new
+tagged-ipv4 observations after the earlier 47 groups. Keep its current-image
+build and identity checks enabled. Authored fixtures alone are not execution
+evidence; compare actual results from your selected source build.
+
+On LENGTH, compare the capture remainder after its actual tag header with the
+IPv4 total length. On CHECKSUM, inspect the 20 IP-header bytes, not tag bytes.
+On FRAGMENT, use a separately designed reassembly service rather than passing a
+partial datagram onward. These tests operate on synthetic RAM with no NIC and
+cannot qualify physical VLAN reception or end-to-end networking.

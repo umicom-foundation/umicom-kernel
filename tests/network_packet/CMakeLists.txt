@@ -192,3 +192,18 @@ if(BUILD_TESTING)
         set_tests_properties("kernel.network_ethernet.${_case}" PROPERTIES TIMEOUT 10)
     endforeach()
 endif()
+
+# Tagged IPv4 shares the original header decoder and preserves every untagged test.
+add_executable(umicom-network-tagged-ipv4-tests tagged_ipv4_tests.c
+    ../../kernel/network_packet.c ../../kernel/address.c)
+target_include_directories(umicom-network-tagged-ipv4-tests PRIVATE ../../include)
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(umicom-network-tagged-ipv4-tests PRIVATE
+        -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)
+endif()
+if(BUILD_TESTING)
+    foreach(_case IN ITEMS plain single-c single-s double-sc double-cs double-cc double-ss padding minimum maximum truncation short-ip inner-type third-tag llc gap version ihl-small options options-truncated total-small total-truncated total-limit fragment-more fragment-offset reserved checksum zero-ttl transport-opaque unaligned lifetime overlap output-alignment address-wrap arguments capture-limit legacy-scope)
+        add_test(NAME "kernel.network_tagged_ipv4.${_case}" COMMAND umicom-network-tagged-ipv4-tests "${_case}")
+        set_tests_properties("kernel.network_tagged_ipv4.${_case}" PROPERTIES TIMEOUT 10)
+    endforeach()
+endif()

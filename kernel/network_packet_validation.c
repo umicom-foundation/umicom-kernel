@@ -15,6 +15,7 @@
 
 #include "umicom/kernel/network_packet.h"
 #include "umicom/kernel/network_ethernet.h"
+#include "umicom/kernel/network_tagged_ipv4.h"
 #include "umicom/kernel/network_arp.h"
 #include "umicom/kernel/network_ipv6.h"
 #include "umicom/kernel/network_udp6.h"
@@ -582,6 +583,45 @@ static void EthernetValidateExecution(void)
     UmicomKernelConsoleWriteLine("packet-admission.case=ethernet-lifetime");
 }
 
+
+/* Use the same independent IP bytes under different envelopes; no transport
+ * decoder or network device participates in these composition checks. */
+static void TaggedIpv4ValidateExecution(void)
+{
+    UmicomU8 frame[64],unaligned[65];UmicomEthernetTaggedIpv4View view,before;
+    PacketRequire(UmicomKernelEthernetTaggedIpv4Read(packetCapture,sizeof packetCapture,&view)==UMICOM_NETWORK_PACKET_OK &&
+        view.frame.tagCount==0U && view.ipv4.payloadOffset==34U && view.ipv4.payloadBytes==12U,
+        "tagged IPv4 plain composition");
+    UmicomKernelConsoleWriteLine("packet-admission.case=tagged-ipv4-plain");
+    UmicomBootMemoryClear(frame,sizeof frame);UmicomBootMemoryCopy(frame,packetCapture,12U);
+    frame[12]=0x88U;frame[13]=0xa8U;frame[14]=0xb1U;frame[15]=0x23U;
+    frame[16]=0x81U;frame[17]=0U;frame[18]=0x4fU;frame[19]=0xffU;frame[20]=8U;frame[21]=0U;
+    UmicomBootMemoryCopy(frame+22U,packetCapture+14U,sizeof packetCapture-14U);
+    PacketRequire(UmicomKernelEthernetTaggedIpv4Read(frame,60U,&view)==UMICOM_NETWORK_PACKET_OK &&
+        view.frame.tagCount==2U && view.frame.tags[0].vlanIdentifier==0x123U &&
+        view.frame.tags[1].vlanIdentifier==4095U && view.frame.payloadOffset==22U &&
+        view.frame.payloadBytes==38U && view.ipv4.payloadOffset==42U && view.ipv4.payloadBytes==12U,
+        "tagged IPv4 offsets and padding");
+    UmicomKernelConsoleWriteLine("packet-admission.case=tagged-ipv4-tags");
+    UmicomBootMemoryCopy(&before,&view,sizeof view);
+    for(UmicomSize n=0U;n<54U;++n)
+        PacketRequire(UmicomKernelEthernetTaggedIpv4Read(frame,n,&view)==UMICOM_NETWORK_PACKET_LENGTH &&
+            PacketBytesEqual(&view,&before,sizeof view),"tagged IPv4 truncation");
+    frame[30]^=1U;
+    PacketRequire(UmicomKernelEthernetTaggedIpv4Read(frame,54U,&view)==UMICOM_NETWORK_PACKET_CHECKSUM &&
+        PacketBytesEqual(&view,&before,sizeof view),"tagged IPv4 checksum refusal");
+    frame[30]^=1U;
+    PacketRefused(frame,54U,UMICOM_NETWORK_PACKET_UNSUPPORTED,"legacy IPv4 remains untagged");
+    UmicomKernelConsoleWriteLine("packet-admission.case=tagged-ipv4-refusals");
+    UmicomBootMemoryCopy(unaligned+1U,frame,54U);
+    PacketRequire(UmicomKernelEthernetTaggedIpv4Read(unaligned+1U,54U,&view)==UMICOM_NETWORK_PACKET_OK,
+        "tagged IPv4 unaligned capture");
+    UmicomBootMemoryClear(unaligned,sizeof unaligned);UmicomBootMemoryClear(frame,sizeof frame);
+    PacketRequire(view.ipv4.sourceAddress[0]==192U && view.ipv4.identification==0x1234U &&
+        view.frame.tags[0].priority==5U && view.ipv4.payloadOffset==42U,"tagged IPv4 copied metadata");
+    UmicomKernelConsoleWriteLine("packet-admission.case=tagged-ipv4-lifetime");
+}
+
 void UmicomKernelPacketAdmissionValidateExecution(void)
 {
     UmicomU8 frame[60];
@@ -685,6 +725,11 @@ void UmicomKernelPacketAdmissionValidateExecution(void)
     UmicomKernelConsoleWriteLine("packet-admission.cases=43");
 #endif
     EthernetValidateExecution();
+/* Retain all forty-seven previous groups and extend the ordered transcript with four tagged IPv4 composition groups. The former implementation is retained for owner review. */
+#if 0
     UmicomKernelConsoleWriteLine("packet-admission.cases=47");
+#endif
+    TaggedIpv4ValidateExecution();
+    UmicomKernelConsoleWriteLine("packet-admission.cases=51");
     UmicomKernelConsoleWriteLine("UMICOM_KERNEL_PACKET_ADMISSION_READY");
 }
