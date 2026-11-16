@@ -98,6 +98,8 @@ add_executable(
     kernel/boot_handoff_write.c
     # Admission is freestanding; no device or network activity is started.
     kernel/network_packet.c
+    # Sequence decisions are pure arithmetic; packet capture and device behavior are unchanged.
+    kernel/tcp_sequence.c
     kernel/network_packet_validation.c
     kernel/main.c
     kernel/supervisor_payload.c
