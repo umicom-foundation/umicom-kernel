@@ -200,4 +200,45 @@ typedef enum UmicomKernelPhysicalFrameState {
 UmicomKernelMemoryStatus UmicomKernelPhysicalMemoryFrameQuery(
     UmicomAddress frameAddress, UmicomKernelPhysicalFrameState *outState);
 
+
+/* Allocate the lowest eligible run wholly inside [minimumAddress, maximumEnd).
+ * Both bounds must be page aligned, minimumAddress < maximumEnd, and the entire
+ * window must lie in managed RAM. A window may include reserved/allocated pages;
+ * the shared scan skips them and never acquires outside pages to fill a run.
+ * Alignment remains absolute in frames, not relative to the window or ramBase.
+ * A valid window with no complete eligible run returns OUT_OF_MEMORY. No range
+ * clipping, fallback outside the window or partial allocation occurs.
+ *
+ * Failure leaves output and allocator state unchanged. Free with FreeFrames;
+ * the same caller serialization and exclusive ownership requirements apply.
+ * An address window can express a device address limit, but does not establish
+ * DMA accessibility, cache coherence, IOMMU mapping, pinning or device ownership.
+ * The exclusive end must be representable; this allocator never manages a range
+ * whose mathematical end would exceed the address type. No RAM is accessed. */
+UmicomKernelMemoryStatus UmicomKernelPhysicalMemoryAllocateFramesInWindow(
+    UmicomSize frameCount, UmicomSize alignmentFrames,
+    UmicomAddress minimumAddress, UmicomAddress maximumEnd,
+    UmicomAddress *outFirstFrame);
+
+
+/* Apply an additional absolute boundary to the same windowed run allocation.
+ * boundaryFrames == 0 disables this constraint. Otherwise it must be a power
+ * of two. The first and last allocated frame numbers must belong to the same
+ * boundaryFrames-sized bucket, measured from physical address zero.
+ *
+ * A run may end exactly at a boundary; it may not cross one. Alignment and
+ * boundary use frame units, so even the largest power of two is admitted
+ * without multiplying it by page size. A valid but impossible combination,
+ * including frameCount > boundaryFrames, returns OUT_OF_MEMORY.
+ *
+ * The complete window is checked exactly as for AllocateFramesInWindow. No
+ * clipping, fallback, partial acquisition or new allocator ownership model is
+ * introduced. Failures preserve the output and every allocation/reservation.
+ * Caller serialization and exclusive ownership remain required. This contract
+ * describes address geometry; device/DMA accessibility is a separate concern. */
+UmicomKernelMemoryStatus UmicomKernelPhysicalMemoryAllocateFramesInWindowWithBoundary(
+    UmicomSize frameCount, UmicomSize alignmentFrames, UmicomSize boundaryFrames,
+    UmicomAddress minimumAddress, UmicomAddress maximumEnd,
+    UmicomAddress *outFirstFrame);
+
 #endif /* UMICOM_KERNEL_PHYSICAL_MEMORY_H */

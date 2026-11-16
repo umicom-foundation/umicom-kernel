@@ -48,7 +48,10 @@ typedef enum UmicomKernelVirtualMemoryStatus {
     UMICOM_KERNEL_VIRTUAL_MEMORY_OUT_OF_MEMORY = 7,
     UMICOM_KERNEL_VIRTUAL_MEMORY_CORRUPT_PAGE_TABLE = 8,
     UMICOM_KERNEL_VIRTUAL_MEMORY_UNSUPPORTED_LARGE_PAGE = 9,
-    UMICOM_KERNEL_VIRTUAL_MEMORY_PHYSICAL_MEMORY_ERROR = 10
+    UMICOM_KERNEL_VIRTUAL_MEMORY_PHYSICAL_MEMORY_ERROR = 10,
+
+    /* The requested physical address exceeds the supported 44-bit PPN field. */
+    UMICOM_KERNEL_VIRTUAL_MEMORY_INVALID_PHYSICAL_ADDRESS = 11
 } UmicomKernelVirtualMemoryStatus;
 
 /* Leaf permissions are deliberately small and architecture-neutral enough for
@@ -83,6 +86,18 @@ typedef struct UmicomKernelVirtualMemorySnapshot {
 
 /* Return true only for addresses with a legal Sv39 sign-extension pattern. */
 UmicomBoolean UmicomKernelVirtualMemoryIsCanonical(UmicomAddress virtualAddress);
+
+
+/* Sv39 combines a 44-bit physical page number with a 12-bit page offset.
+ * This query checks encoding width only. It accepts any byte offset and does
+ * not prove page alignment, RAM ownership, accessibility or device authority.
+ * MapPage separately requires alignment and refuses an unencodable leaf before
+ * allocating or modifying page tables. Page-table frames are allocated only
+ * inside this encodable portion of managed RAM. A valid portion with no free
+ * frame reports OUT_OF_MEMORY; RAM entirely above it reports
+ * INVALID_PHYSICAL_ADDRESS. Leaf mappings do not acquire physical ownership. */
+#define UMICOM_KERNEL_SV39_PHYSICAL_ADDRESS_BITS ((UmicomU32)56U)
+UmicomBoolean UmicomKernelVirtualMemoryIsPhysicalAddressRepresentable(UmicomAddress physicalAddress);
 
 /* Allocate and clear one root page-table frame. */
 UmicomKernelVirtualMemoryStatus UmicomKernelVirtualAddressSpaceCreate(

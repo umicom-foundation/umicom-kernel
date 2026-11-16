@@ -41,6 +41,8 @@
 
 /* Diagnostic-only acceptance entry; normal startup returns before this path. */
 void UmicomKernelPacketAdmissionValidateExecution(void);
+/* Diagnostic acceptance for constrained allocation; no RAM or device access. */
+void UmicomKernelPhysicalWindowsValidateExecution(void);
 
 /* Qualify and test read-only transport ownership after hardware discovery. */
 /* Separate disk-fixture entry; existing diagnostic and normal paths remain. */
@@ -845,6 +847,9 @@ static void RunPhysicalMemoryTest(UmicomAddress deviceTreeAddress)
         FailKernel((UmicomU32)63U, "final-invariant");
     }
 
+    /* Window tests restore the same protected-memory baseline before this final check. */
+    UmicomKernelPhysicalWindowsValidateExecution();
+
     /* Capture final accounting after every temporary allocation/reservation was undone. */
     UmicomKernelPhysicalMemorySnapshot finalSnapshot;
 
@@ -1073,6 +1078,23 @@ static void RunVirtualMemoryTest(void)
     WriteVirtualMemoryStatusRecord("virtual.write-only", virtualStatus);
     if (virtualStatus != UMICOM_KERNEL_VIRTUAL_MEMORY_INVALID_PERMISSIONS) {
         FailKernel((UmicomU32)82U, "virtual-write-only-not-refused");
+    }
+
+
+    /* Width admission is independent of alignment. This page-aligned number
+     * would occupy reserved PTE bits; no such mapping or table allocation may
+     * survive the refusal. The established mapping remains active below. */
+    const UmicomSize tableFramesBeforeWidthCheck = space.pageTableFrames;
+    const UmicomSize mappedBeforeWidthCheck = space.mappedPages;
+    virtualStatus = UmicomKernelVirtualMemoryMapPage(
+        &space, virtualPage + (UmicomAddress)UMICOM_KERNEL_PAGE_SIZE,
+        (UmicomAddress)0x0100000000000000ULL,
+        UMICOM_KERNEL_VIRTUAL_MEMORY_READ);
+    WriteVirtualMemoryStatusRecord("virtual.physical-width", virtualStatus);
+    if (virtualStatus != UMICOM_KERNEL_VIRTUAL_MEMORY_INVALID_PHYSICAL_ADDRESS ||
+        space.pageTableFrames != tableFramesBeforeWidthCheck ||
+        space.mappedPages != mappedBeforeWidthCheck) {
+        FailKernel((UmicomU32)176U, "virtual-physical-width-not-refused");
     }
 
     /* Independently walk the hierarchy and compare observed table/mapping

@@ -107,6 +107,8 @@ add_executable(
     kernel/user_monitor.c
     kernel/user_validation.c
     kernel/physical_memory.c
+    kernel/physical_window_validation.c
+    kernel/physical_window_report.c
     kernel/virtual_memory.c
     platform/qemu-riscv64/finish.c
     platform/qemu-riscv64/memory.c
@@ -610,3 +612,14 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/CvmPrograms.cmake")
 
 # Exercise packet admission in the existing diagnostic image with no NIC.
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/PacketAdmission.cmake")
+
+# This diagnostic executes the production allocation path in the current image.
+# The readiness marker follows alignment, refusal and restored-ownership checks.
+if(BUILD_TESTING AND UMICOM_QEMU_RISCV64)
+    add_test(NAME kernel.riscv64.physical_windows
+        COMMAND "${UMICOM_QEMU_RISCV64}" ${UMICOM_QEMU_RISCV64_ARGUMENTS})
+    set_tests_properties(kernel.riscv64.physical_windows PROPERTIES TIMEOUT 15
+        PASS_REGULAR_EXPRESSION "UMICOM_KERNEL_PHYSICAL_WINDOWS_READY"
+        FAIL_REGULAR_EXPRESSION "UMICOM_KERNEL_FAIL;panic;PANIC;failed;FAILED"
+        FIXTURES_REQUIRED kernel_current_image LABELS "kernel;physical-memory;window;guest")
+endif()

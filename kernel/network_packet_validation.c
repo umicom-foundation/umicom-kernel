@@ -14,6 +14,12 @@
  *---------------------------------------------------------------------------*/
 
 #include "umicom/kernel/network_packet.h"
+#include "umicom/kernel/network_arp.h"
+#include "umicom/kernel/network_ipv6.h"
+#include "umicom/kernel/network_udp6.h"
+#include "umicom/kernel/network_icmp6.h"
+#include "umicom/kernel/network_tcp6.h"
+#include "umicom/kernel/network_neighbor6.h"
 #include "umicom/kernel/network_udp.h"
 #include "umicom/kernel/network_icmp.h"
 #include "umicom/kernel/network_tcp.h"
@@ -237,6 +243,293 @@ static void TcpValidateExecution(void)
     UmicomKernelConsoleWriteLine("packet-admission.case=tcp-padding-lifetime");
 }
 
+
+static void ArpValidateExecution(void)
+{
+    static const UmicomU8 capture[42]={
+        0xff,0xff,0xff,0xff,0xff,0xff, 0x02,0,0,0,0,1, 0x08,0x06,
+        0,1, 0x08,0, 6,4, 0,1, 0x02,0,0,0,0,1, 192,0,2,1,
+        0,0,0,0,0,0, 192,0,2,2
+    };
+    _Alignas(16) UmicomU8 storage[61];
+    UmicomU8 *frame=storage+1U;
+    UmicomBootMemoryClear(storage,sizeof storage);
+    UmicomBootMemoryCopy(frame,capture,sizeof capture);
+    UmicomEthernetArpView result,before;
+    PacketRequire(UmicomKernelEthernetArpRead(frame,sizeof capture,&result)==UMICOM_NETWORK_PACKET_OK &&
+        result.operation==UMICOM_ARP_REQUEST && result.senderProtocolAddress[3]==1U &&
+        result.targetProtocolAddress[3]==2U,"ARP unaligned request");
+    UmicomKernelConsoleWriteLine("packet-admission.case=arp-golden");
+    frame[21]=2U;
+    PacketRequire(UmicomKernelEthernetArpRead(frame,sizeof capture,&result)==UMICOM_NETWORK_PACKET_OK &&
+        result.operation==UMICOM_ARP_REPLY,"ARP reply opcode");
+    UmicomKernelConsoleWriteLine("packet-admission.case=arp-reply");
+    UmicomBootMemoryCopy(&before,&result,sizeof before);
+    for(UmicomSize n=0U;n<sizeof capture;++n) {
+        PacketRequire(UmicomKernelEthernetArpRead(frame,n,&result)==UMICOM_NETWORK_PACKET_LENGTH,"ARP prefix refusal");
+        PacketRequire(PacketBytesEqual(&result,&before,sizeof result),"ARP prefix changed result");
+    }
+    frame[18]=8U;
+    PacketRequire(UmicomKernelEthernetArpRead(frame,sizeof capture,&result)==UMICOM_NETWORK_PACKET_UNSUPPORTED,
+        "ARP unsupported hardware length");
+    PacketRequire(PacketBytesEqual(&result,&before,sizeof result),"ARP profile changed result");
+    frame[18]=6U;frame[20]=1U;frame[21]=0U;
+    PacketRequire(UmicomKernelEthernetArpRead(frame,sizeof capture,&result)==UMICOM_NETWORK_PACKET_UNSUPPORTED,
+        "ARP opcode network byte order");
+    PacketRequire(PacketBytesEqual(&result,&before,sizeof result),"ARP opcode changed result");
+    UmicomKernelConsoleWriteLine("packet-admission.case=arp-refusals");
+    UmicomBootMemoryCopy(frame,capture,sizeof capture);
+    for(UmicomSize n=sizeof capture;n<60U;++n)frame[n]=0xffU;
+    PacketRequire(UmicomKernelEthernetArpRead(frame,60U,&result)==UMICOM_NETWORK_PACKET_OK,"ARP padding");
+    UmicomBootMemoryClear(storage,sizeof storage);
+    PacketRequire(result.senderProtocolAddress[0]==192U && result.sourceMac[0]==2U &&
+        result.operation==UMICOM_ARP_REQUEST,"ARP copied metadata lifetime");
+    UmicomKernelConsoleWriteLine("packet-admission.case=arp-padding-lifetime");
+}
+
+
+/* Guest vectors use an empty No Next Header packet, independently of the host
+ * UDP-shaped vector. Run without a NIC: this exercises RAM capture admission. */
+static void Ipv6ValidateExecution(void)
+{
+    static const UmicomU8 capture[54] = {
+        2,0,0,0,0,2, 2,0,0,0,0,1, 0x86,0xdd,
+        0x60,0,0,1,0,0,59,32,
+        0x20,1,0x0d,0xb8,0,0,0,0,0,0,0,0,0,0,0,1,
+        0x20,1,0x0d,0xb8,0,0,0,0,0,0,0,0,0,0,0,2
+    };
+    _Alignas(16) UmicomU8 storage[65];
+    UmicomU8 *frame=storage+1U;
+    UmicomBootMemoryClear(storage,sizeof storage);
+    UmicomBootMemoryCopy(frame,capture,sizeof capture);
+    UmicomEthernetIpv6View result,before;
+    PacketRequire(UmicomKernelEthernetIpv6Read(frame,sizeof capture,&result)==UMICOM_NETWORK_PACKET_OK &&
+        result.flowLabel==1U && result.trafficClass==0U && result.nextHeader==59U &&
+        result.hopLimit==32U && result.payloadBytes==0U && result.payloadOffset==54U &&
+        result.sourceAddress[15]==1U && result.destinationAddress[15]==2U,"IPv6 unaligned no-next capture");
+    UmicomKernelConsoleWriteLine("packet-admission.case=ipv6-golden");
+    UmicomBootMemoryCopy(&before,&result,sizeof before);
+    for(UmicomSize n=0U;n<sizeof capture;++n) {
+        PacketRequire(UmicomKernelEthernetIpv6Read(frame,n,&result)==UMICOM_NETWORK_PACKET_LENGTH,"IPv6 truncated base header");
+        PacketRequire(PacketBytesEqual(&before,&result,sizeof result),"IPv6 truncation changed result");
+    }
+    frame[19]=1U;
+    PacketRequire(UmicomKernelEthernetIpv6Read(frame,sizeof capture,&result)==UMICOM_NETWORK_PACKET_LENGTH,"IPv6 truncated payload");
+    PacketRequire(PacketBytesEqual(&before,&result,sizeof result),"IPv6 payload refusal changed result");
+    frame[19]=0U;
+    UmicomKernelConsoleWriteLine("packet-admission.case=ipv6-truncation");
+    frame[20]=44U;
+    PacketRequire(UmicomKernelEthernetIpv6Read(frame,sizeof capture,&result)==UMICOM_NETWORK_PACKET_FRAGMENT,"IPv6 fragment refused");
+    frame[20]=0U;
+    PacketRequire(UmicomKernelEthernetIpv6Read(frame,sizeof capture,&result)==UMICOM_NETWORK_PACKET_UNSUPPORTED,"IPv6 extension refused");
+    PacketRequire(PacketBytesEqual(&before,&result,sizeof result),"IPv6 extension refusal changed result");
+    UmicomKernelConsoleWriteLine("packet-admission.case=ipv6-extension-policy");
+    UmicomBootMemoryCopy(frame,capture,sizeof capture);
+    for(UmicomSize n=sizeof capture;n<64U;++n) frame[n]=0xffU;
+    PacketRequire(UmicomKernelEthernetIpv6Read(frame,64U,&result)==UMICOM_NETWORK_PACKET_OK &&
+        result.ipBytes==40U && result.payloadBytes==0U,"IPv6 padding is not payload");
+    UmicomBootMemoryClear(storage,sizeof storage);
+    PacketRequire(result.sourceAddress[0]==0x20U && result.sourceAddress[15]==1U &&
+        result.destinationAddress[15]==2U && result.flowLabel==1U,"IPv6 copied address lifetime");
+    UmicomKernelConsoleWriteLine("packet-admission.case=ipv6-padding-lifetime");
+}
+
+
+/* This guest uses the independent negative-zero checksum vector: its valid
+ * wire checksum is ffff, while a zero field must still be rejected. */
+static void Ipv6UdpValidateExecution(void)
+{
+    static const UmicomU8 capture[64]={
+        2,0,0,0,0,2,2,0,0,0,0,1,0x86,0xdd,
+        0x60,0,0,1,0,10,17,64,
+        0x20,1,0x0d,0xb8,0,0,0,0,0,0,0,0,0,0,0,1,
+        0x20,1,0x0d,0xb8,0,0,0,0,0,0,0,0,0,0,0,2,
+        0x30,0x39,0,0x35,0,10,0xff,0xff,0x73,0xf7
+    };
+    _Alignas(16) UmicomU8 storage[81];UmicomU8 *frame=storage+1U;
+    UmicomBootMemoryClear(storage,sizeof storage);UmicomBootMemoryCopy(frame,capture,sizeof capture);
+    UmicomEthernetIpv6UdpView result,before;
+    PacketRequire(UmicomKernelEthernetIpv6UdpRead(frame,sizeof capture,&result)==UMICOM_NETWORK_PACKET_OK &&
+        result.sourcePort==12345U && result.destinationPort==53U && result.datagramBytes==10U &&
+        result.payloadOffset==62U && result.payloadBytes==2U && result.ipv6.sourceAddress[15]==1U,
+        "IPv6 UDP unaligned negative-zero vector");
+    UmicomBootMemoryCopy(&before,&result,sizeof before);
+    UmicomKernelConsoleWriteLine("packet-admission.case=udp6-golden");
+    frame[60]=frame[61]=0U;
+    PacketRequire(UmicomKernelEthernetIpv6UdpRead(frame,sizeof capture,&result)==UMICOM_NETWORK_PACKET_CHECKSUM,"IPv6 UDP zero checksum");
+    UmicomBootMemoryCopy(frame,capture,sizeof capture);frame[63]^=1U;
+    PacketRequire(UmicomKernelEthernetIpv6UdpRead(frame,sizeof capture,&result)==UMICOM_NETWORK_PACKET_CHECKSUM,"IPv6 UDP payload corruption");
+    UmicomBootMemoryCopy(frame,capture,sizeof capture);frame[37]^=1U;
+    PacketRequire(UmicomKernelEthernetIpv6UdpRead(frame,sizeof capture,&result)==UMICOM_NETWORK_PACKET_CHECKSUM,"IPv6 UDP pseudo-header corruption");
+    PacketRequire(PacketBytesEqual(&result,&before,sizeof result),"IPv6 UDP checksum refusal changed output");
+    UmicomKernelConsoleWriteLine("packet-admission.case=udp6-checksum");
+    UmicomBootMemoryCopy(frame,capture,sizeof capture);
+    for(UmicomSize n=0U;n<sizeof capture;++n){
+        PacketRequire(UmicomKernelEthernetIpv6UdpRead(frame,n,&result)==UMICOM_NETWORK_PACKET_LENGTH,"IPv6 UDP short capture");
+        PacketRequire(PacketBytesEqual(&result,&before,sizeof result),"IPv6 UDP truncation changed output");
+    }
+    frame[59]=9U;
+    PacketRequire(UmicomKernelEthernetIpv6UdpRead(frame,sizeof capture,&result)==UMICOM_NETWORK_PACKET_LENGTH,"IPv6 UDP length mismatch");
+    frame[59]=10U;frame[20]=44U;
+    PacketRequire(UmicomKernelEthernetIpv6UdpRead(frame,sizeof capture,&result)==UMICOM_NETWORK_PACKET_FRAGMENT,"IPv6 UDP fragment");
+    frame[20]=0U;
+    PacketRequire(UmicomKernelEthernetIpv6UdpRead(frame,sizeof capture,&result)==UMICOM_NETWORK_PACKET_UNSUPPORTED,"IPv6 UDP extension");
+    PacketRequire(PacketBytesEqual(&result,&before,sizeof result),"IPv6 UDP framing refusal changed output");
+    UmicomKernelConsoleWriteLine("packet-admission.case=udp6-framing");
+    UmicomBootMemoryCopy(frame,capture,sizeof capture);
+    for(UmicomSize n=sizeof capture;n<80U;++n)frame[n]=0xffU;
+    PacketRequire(UmicomKernelEthernetIpv6UdpRead(frame,80U,&result)==UMICOM_NETWORK_PACKET_OK && result.payloadBytes==2U,"IPv6 UDP padding");
+    UmicomBootMemoryClear(storage,sizeof storage);
+    PacketRequire(result.sourcePort==12345U && result.ipv6.destinationAddress[15]==2U,"IPv6 UDP copied metadata");
+    UmicomKernelConsoleWriteLine("packet-admission.case=udp6-padding-lifetime");
+}
+
+
+/* Independent reply vector with a mathematically valid zero checksum. The
+ * guest checks that UDP's special zero prohibition did not leak into ICMPv6. */
+static void Ipv6EchoValidateExecution(void)
+{
+    static const UmicomU8 capture[]={0x02,0x00,0x00,0x00,0x00,0x02,0x02,0x00,0x00,0x00,0x00,0x01,0x86,0xdd,0x60,0x00,0x00,0x01,0x00,0x0a,0x3a,0x40,0x20,0x01,0x0d,0xb8,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x01,0x20,0x01,0x0d,0xb8,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x02,0x81,0x00,0x00,0x00,0xab,0xcd,0x10,0x00,0x67,0x78};
+    _Alignas(16) UmicomU8 storage[81];UmicomU8 *frame=storage+1U;
+    UmicomBootMemoryClear(storage,sizeof storage);UmicomBootMemoryCopy(frame,capture,sizeof capture);
+    UmicomEthernetIpv6IcmpEchoView result,before;
+    PacketRequire(UmicomKernelEthernetIpv6IcmpEchoRead(frame,sizeof capture,&result)==UMICOM_NETWORK_PACKET_OK &&
+        result.messageType==129U && result.identifier==0xabcdU && result.sequenceNumber==0x1000U &&
+        result.messageBytes==10U && result.payloadOffset==62U && result.payloadBytes==2U,
+        "ICMPv6 unaligned valid-zero reply");
+    UmicomBootMemoryCopy(&before,&result,sizeof before);
+    UmicomKernelConsoleWriteLine("packet-admission.case=icmp6-zero-reply");
+    frame[54]=128U;frame[56]=1U;
+    PacketRequire(UmicomKernelEthernetIpv6IcmpEchoRead(frame,sizeof capture,&result)==UMICOM_NETWORK_PACKET_OK &&
+        result.messageType==128U,"ICMPv6 request checksum update");
+    UmicomBootMemoryCopy(&before,&result,sizeof before);
+    frame[63]^=1U;
+    PacketRequire(UmicomKernelEthernetIpv6IcmpEchoRead(frame,sizeof capture,&result)==UMICOM_NETWORK_PACKET_CHECKSUM,"ICMPv6 payload corruption");
+    frame[63]^=1U;frame[37]^=1U;
+    PacketRequire(UmicomKernelEthernetIpv6IcmpEchoRead(frame,sizeof capture,&result)==UMICOM_NETWORK_PACKET_CHECKSUM,"ICMPv6 pseudo-header corruption");
+    PacketRequire(PacketBytesEqual(&result,&before,sizeof result),"ICMPv6 checksum changed output");
+    UmicomKernelConsoleWriteLine("packet-admission.case=icmp6-checksum");
+    UmicomBootMemoryCopy(frame,capture,sizeof capture);
+    for(UmicomSize n=0U;n<sizeof capture;++n){
+        PacketRequire(UmicomKernelEthernetIpv6IcmpEchoRead(frame,n,&result)==UMICOM_NETWORK_PACKET_LENGTH,"ICMPv6 short capture");
+        PacketRequire(PacketBytesEqual(&result,&before,sizeof result),"ICMPv6 prefix changed output");
+    }
+    frame[54]=135U;
+    PacketRequire(UmicomKernelEthernetIpv6IcmpEchoRead(frame,sizeof capture,&result)==UMICOM_NETWORK_PACKET_UNSUPPORTED,"ICMPv6 neighbor message outside echo profile");
+    frame[54]=129U;frame[55]=1U;
+    PacketRequire(UmicomKernelEthernetIpv6IcmpEchoRead(frame,sizeof capture,&result)==UMICOM_NETWORK_PACKET_HEADER,"ICMPv6 echo code");
+    frame[55]=0U;frame[20]=44U;
+    PacketRequire(UmicomKernelEthernetIpv6IcmpEchoRead(frame,sizeof capture,&result)==UMICOM_NETWORK_PACKET_FRAGMENT,"ICMPv6 fragment");
+    PacketRequire(PacketBytesEqual(&result,&before,sizeof result),"ICMPv6 profile changed output");
+    UmicomKernelConsoleWriteLine("packet-admission.case=icmp6-framing");
+    UmicomBootMemoryCopy(frame,capture,sizeof capture);
+    for(UmicomSize n=sizeof capture;n<80U;++n)frame[n]=0xffU;
+    PacketRequire(UmicomKernelEthernetIpv6IcmpEchoRead(frame,80U,&result)==UMICOM_NETWORK_PACKET_OK &&
+        result.payloadBytes==2U,"ICMPv6 Ethernet padding");
+    UmicomBootMemoryClear(storage,sizeof storage);
+    PacketRequire(result.identifier==0xabcdU && result.ipv6.destinationAddress[15]==2U,"ICMPv6 copied metadata");
+    UmicomKernelConsoleWriteLine("packet-admission.case=icmp6-padding-lifetime");
+}
+
+
+/* Independent SYN/ACK capture with a valid zero checksum. This exercises
+ * freestanding code with a different vector from the primary host fixture. */
+static void Ipv6TcpValidateExecution(void)
+{
+    static const UmicomU8 capture[]={0x02,0x00,0x00,0x00,0x00,0x02,0x02,0x00,0x00,0x00,0x00,0x01,0x86,0xdd,0x60,0x00,0x00,0x01,0x00,0x16,0x06,0x40,0x20,0x01,0x0d,0xb8,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x01,0x20,0x01,0x0d,0xb8,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x02,0x01,0xbb,0xc0,0x00,0x10,0x20,0x30,0x40,0x50,0x60,0x70,0x80,0x50,0x12,0x4f,0x46,0x00,0x00,0x00,0x00,0x42,0x19};
+    _Alignas(16) UmicomU8 storage[97];UmicomU8 *frame=storage+1U;
+    UmicomBootMemoryClear(storage,sizeof storage);UmicomBootMemoryCopy(frame,capture,sizeof capture);
+    UmicomEthernetIpv6TcpView result,before;
+    PacketRequire(UmicomKernelEthernetIpv6TcpRead(frame,sizeof capture,&result)==UMICOM_NETWORK_PACKET_OK &&
+        result.sourcePort==443U && result.destinationPort==49152U && result.sequenceNumber==0x10203040U &&
+        result.acknowledgmentNumber==0x50607080U && result.flags==0x12U && result.window==0x4f46U &&
+        result.segmentBytes==22U && result.payloadOffset==74U && result.payloadBytes==2U,
+        "TCP6 unaligned valid-zero SYN/ACK observation");
+    UmicomBootMemoryCopy(&before,&result,sizeof before);
+    UmicomKernelConsoleWriteLine("packet-admission.case=tcp6-zero-checksum");
+    frame[75]^=1U;
+    PacketRequire(UmicomKernelEthernetIpv6TcpRead(frame,sizeof capture,&result)==UMICOM_NETWORK_PACKET_CHECKSUM,"TCP6 payload corruption");
+    frame[75]^=1U;frame[37]^=1U;
+    PacketRequire(UmicomKernelEthernetIpv6TcpRead(frame,sizeof capture,&result)==UMICOM_NETWORK_PACKET_CHECKSUM,"TCP6 pseudo-header corruption");
+    PacketRequire(PacketBytesEqual(&result,&before,sizeof result),"TCP6 checksum refusal changed output");
+    UmicomKernelConsoleWriteLine("packet-admission.case=tcp6-corruption");
+    UmicomBootMemoryCopy(frame,capture,sizeof capture);
+    for(UmicomSize n=0U;n<sizeof capture;++n){
+        PacketRequire(UmicomKernelEthernetIpv6TcpRead(frame,n,&result)==UMICOM_NETWORK_PACKET_LENGTH,"TCP6 short capture");
+        PacketRequire(PacketBytesEqual(&result,&before,sizeof result),"TCP6 truncation changed output");
+    }
+    frame[66]=0x40U;
+    PacketRequire(UmicomKernelEthernetIpv6TcpRead(frame,sizeof capture,&result)==UMICOM_NETWORK_PACKET_HEADER,"TCP6 invalid offset");
+    frame[66]=0x60U;
+    PacketRequire(UmicomKernelEthernetIpv6TcpRead(frame,sizeof capture,&result)==UMICOM_NETWORK_PACKET_LENGTH,"TCP6 option extent exceeds segment");
+    frame[19]=24U;
+    PacketRequire(UmicomKernelEthernetIpv6TcpRead(frame,78U,&result)==UMICOM_NETWORK_PACKET_UNSUPPORTED,"TCP6 options outside capture profile");
+    frame[20]=44U;
+    PacketRequire(UmicomKernelEthernetIpv6TcpRead(frame,78U,&result)==UMICOM_NETWORK_PACKET_FRAGMENT,"TCP6 fragment");
+    PacketRequire(PacketBytesEqual(&result,&before,sizeof result),"TCP6 framing changed output");
+    UmicomKernelConsoleWriteLine("packet-admission.case=tcp6-framing");
+    UmicomBootMemoryCopy(frame,capture,sizeof capture);
+    for(UmicomSize n=sizeof capture;n<96U;++n)frame[n]=0xffU;
+    PacketRequire(UmicomKernelEthernetIpv6TcpRead(frame,96U,&result)==UMICOM_NETWORK_PACKET_OK &&
+        result.payloadBytes==2U,"TCP6 captured padding");
+    UmicomBootMemoryClear(storage,sizeof storage);
+    PacketRequire(result.sequenceNumber==0x10203040U && result.ipv6.destinationAddress[15]==2U,"TCP6 metadata lifetime");
+    UmicomKernelConsoleWriteLine("packet-admission.case=tcp6-padding-lifetime");
+}
+
+
+/* Independent neighbor fixtures exercise the same freestanding reader used by
+ * host checks. No address assignment or neighbor-cache mutation is performed. */
+static void Ipv6NeighborValidateExecution(void)
+{
+    static const UmicomU8 advertisement[] = {0x33,0x33,0xff,0x00,0x00,0x02,0x02,0x00,0x00,0x00,0x00,0x01,0x86,0xdd,0x60,0x00,0x00,0x00,0x00,0x20,0x3a,0xff,0xfe,0x80,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x02,0xfe,0x80,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x01,0x88,0x00,0x00,0x00,0xe0,0x00,0x98,0x19,0xfe,0x80,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x02,0x02,0x01,0x02,0x00,0x00,0x00,0x00,0x02};
+    static const UmicomU8 dad[] = {0x33,0x33,0xff,0x00,0x00,0x02,0x02,0x00,0x00,0x00,0x00,0x01,0x86,0xdd,0x60,0x00,0x00,0x00,0x00,0x18,0x3a,0xff,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xff,0x02,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x01,0xff,0x00,0x00,0x02,0x87,0x00,0x7c,0x23,0x00,0x00,0x00,0x00,0xfe,0x80,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x02};
+    static const UmicomU8 badOption[] = {0x33,0x33,0xff,0x00,0x00,0x02,0x02,0x00,0x00,0x00,0x00,0x01,0x86,0xdd,0x60,0x00,0x00,0x00,0x00,0x20,0x3a,0xff,0xfe,0x80,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x02,0xfe,0x80,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x01,0x88,0x00,0x98,0x1a,0xe0,0x00,0x00,0x00,0xfe,0x80,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x02,0x02,0x00,0x02,0x00,0x00,0x00,0x00,0x02};
+    _Alignas(16) UmicomU8 storage[97];
+    UmicomU8 *frame = storage + 1U;
+    UmicomEthernetIpv6NeighborView result, before;
+    UmicomBootMemoryClear(storage, sizeof storage);
+    UmicomBootMemoryCopy(frame, advertisement, sizeof advertisement);
+    PacketRequire(UmicomKernelEthernetIpv6NeighborRead(frame, sizeof advertisement, &result) ==
+        UMICOM_NETWORK_PACKET_OK && result.messageType == UMICOM_ICMPV6_NEIGHBOR_ADVERTISEMENT &&
+        result.messageBytes == 32U && result.router && result.solicited && result.override &&
+        result.optionCount == 1U && result.ignoredOptionCount == 0U && result.hasLinkLayerAddress &&
+        result.targetAddress[15] == 2U && result.linkLayerAddress[5] == 2U,
+        "neighbor6 unaligned valid-zero advertisement");
+    UmicomBootMemoryCopy(&before, &result, sizeof before);
+    UmicomKernelConsoleWriteLine("packet-admission.case=neighbor6-zero-advertisement");
+    frame[85] ^= 1U;
+    PacketRequire(UmicomKernelEthernetIpv6NeighborRead(frame, sizeof advertisement, &result) ==
+        UMICOM_NETWORK_PACKET_CHECKSUM, "neighbor6 address checksum corruption");
+    frame[85] ^= 1U;
+    for (UmicomSize n = 0U; n < sizeof advertisement; ++n) {
+        PacketRequire(UmicomKernelEthernetIpv6NeighborRead(frame, n, &result) ==
+            UMICOM_NETWORK_PACKET_LENGTH, "neighbor6 truncated capture");
+        PacketRequire(PacketBytesEqual(&result, &before, sizeof result), "neighbor6 truncation changed output");
+    }
+    frame[21] = 254U;
+    PacketRequire(UmicomKernelEthernetIpv6NeighborRead(frame, sizeof advertisement, &result) ==
+        UMICOM_NETWORK_PACKET_HEADER, "neighbor6 hop limit");
+    PacketRequire(UmicomKernelEthernetIpv6NeighborRead(badOption, sizeof badOption, &result) ==
+        UMICOM_NETWORK_PACKET_HEADER, "neighbor6 zero option units");
+    PacketRequire(PacketBytesEqual(&result, &before, sizeof result), "neighbor6 refusal changed output");
+    UmicomKernelConsoleWriteLine("packet-admission.case=neighbor6-checksum-framing");
+    PacketRequire(UmicomKernelEthernetIpv6NeighborRead(dad, sizeof dad, &result) ==
+        UMICOM_NETWORK_PACKET_OK && result.messageType == UMICOM_ICMPV6_NEIGHBOR_SOLICITATION &&
+        !result.hasLinkLayerAddress && result.optionCount == 0U && result.ipv6.sourceAddress[0] == 0U &&
+        result.ipv6.destinationAddress[0] == 0xffU && result.targetAddress[15] == 2U,
+        "neighbor6 unspecified-source solicitation capture");
+    UmicomKernelConsoleWriteLine("packet-admission.case=neighbor6-dad-capture");
+    UmicomBootMemoryCopy(frame, advertisement, sizeof advertisement);
+    for (UmicomSize n = sizeof advertisement; n < 96U; ++n) frame[n] = 0xffU;
+    PacketRequire(UmicomKernelEthernetIpv6NeighborRead(frame, 96U, &result) ==
+        UMICOM_NETWORK_PACKET_OK && result.messageBytes == 32U, "neighbor6 padding excluded");
+    UmicomBootMemoryClear(storage, sizeof storage);
+    PacketRequire(result.targetAddress[15] == 2U && result.linkLayerAddress[5] == 2U &&
+        result.ipv6.sourceAddress[15] == 2U, "neighbor6 copied metadata lifetime");
+    UmicomKernelConsoleWriteLine("packet-admission.case=neighbor6-padding-lifetime");
+}
+
 void UmicomKernelPacketAdmissionValidateExecution(void)
 {
     UmicomU8 frame[60];
@@ -305,6 +598,36 @@ void UmicomKernelPacketAdmissionValidateExecution(void)
     UmicomKernelConsoleWriteLine("packet-admission.cases=15");
 #endif
     TcpValidateExecution();
+/* All nineteen IPv4/transport groups still execute. Four ARP groups extend the current capture contract; keep the earlier count for review. The former implementation is retained for owner review. */
+#if 0
     UmicomKernelConsoleWriteLine("packet-admission.cases=19");
+#endif
+    ArpValidateExecution();
+/* All twenty-three existing groups remain; four IPv6 capture groups extend the diagnostic transcript. The former implementation is retained for owner review. */
+#if 0
+    UmicomKernelConsoleWriteLine("packet-admission.cases=23");
+#endif
+    Ipv6ValidateExecution();
+    Ipv6UdpValidateExecution();
+/* The four IPv6 UDP groups extend the preceding twenty-seven groups, which still execute in order. The former implementation is retained for owner review. */
+#if 0
+    UmicomKernelConsoleWriteLine("packet-admission.cases=27");
+#endif
+/* Four ICMPv6 echo groups extend the prior thirty-one groups, which remain in order. Retain the earlier transcript count for review. The former implementation is retained for owner review. */
+#if 0
+    UmicomKernelConsoleWriteLine("packet-admission.cases=31");
+#endif
+    Ipv6EchoValidateExecution();
+/* Four TCP6 groups extend the same thirty-five existing guest groups. Retain the previous transcript total for review. The former implementation is retained for owner review. */
+#if 0
+    UmicomKernelConsoleWriteLine("packet-admission.cases=35");
+#endif
+    Ipv6TcpValidateExecution();
+/* Keep all thirty-nine prior groups; neighbor captures add four ordered guest groups. The former implementation is retained for owner review. */
+#if 0
+    UmicomKernelConsoleWriteLine("packet-admission.cases=39");
+#endif
+    Ipv6NeighborValidateExecution();
+    UmicomKernelConsoleWriteLine("packet-admission.cases=43");
     UmicomKernelConsoleWriteLine("UMICOM_KERNEL_PACKET_ADMISSION_READY");
 }

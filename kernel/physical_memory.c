@@ -605,6 +605,8 @@ UmicomKernelMemoryStatus UmicomKernelPhysicalMemoryReleaseReservedRange(
  * counters can be admitted together. Repeating AllocateFrame cannot promise
  * adjacency and would require rollback after partial success. This bounded
  * scan examines each represented frame at most once before committing a run. */
+/* The complete-run allocator now shares its ownership scan with explicit address windows. The previous whole-RAM algorithm is retained for review; its public entry remains a whole-range wrapper with the same admission order. The former implementation is retained for owner review. */
+#if 0
 UmicomKernelMemoryStatus UmicomKernelPhysicalMemoryAllocateFrames(
     UmicomSize frameCount, UmicomSize alignmentFrames, UmicomAddress *outFirstFrame)
 {
@@ -650,6 +652,166 @@ UmicomKernelMemoryStatus UmicomKernelPhysicalMemoryAllocateFrames(
     }
     /* Enough free pages may exist in total while no eligible run exists. */
     return UMICOM_KERNEL_MEMORY_OUT_OF_MEMORY;
+}
+
+#endif
+static UmicomKernelMemoryStatus PhysicalRunRequestCheck(
+    UmicomSize frameCount, UmicomSize alignmentFrames, const UmicomAddress *outFirstFrame)
+{
+    if (outFirstFrame == (const UmicomAddress *)0 || frameCount == 0U)
+        return UMICOM_KERNEL_MEMORY_INVALID_ARGUMENT;
+    if (UmicomKernelIsPowerOfTwo(alignmentFrames) == UMICOM_FALSE)
+        return UMICOM_KERNEL_MEMORY_INVALID_ALIGNMENT;
+    if (gInitialised == UMICOM_FALSE)
+        return UMICOM_KERNEL_MEMORY_NOT_INITIALISED;
+    if (gReservedCount > gFrameCount || gAllocatedCount > gFrameCount - gReservedCount)
+        return UMICOM_KERNEL_MEMORY_INVARIANT_FAILURE;
+    return UMICOM_KERNEL_MEMORY_OK;
+}
+/* The shared run scan now checks absolute frame boundaries before acquiring ownership. Existing allocation APIs select a zero boundary and retain their behavior. The previous scan and wrappers remain for review. The former implementation is retained for owner review. */
+#if 0
+/* Both public allocation routes use this one ownership scan. Bounds are frame
+ * indices already admitted against managed RAM; no address multiplication or
+ * caller callback can fail between proving the complete run and publishing it. */
+static UmicomKernelMemoryStatus PhysicalRunAllocateWithin(
+    UmicomSize frameCount, UmicomSize alignmentFrames,
+    UmicomSize begin, UmicomSize end, UmicomAddress *outFirstFrame)
+{
+    if (frameCount > end - begin || frameCount > gFrameCount - gReservedCount - gAllocatedCount)
+        return UMICOM_KERNEL_MEMORY_OUT_OF_MEMORY;
+    UmicomSize first = 0U, length = 0U;
+    for (UmicomSize index = begin; index < end; ++index) {
+        if (BitmapRead(gReservedBitmap, index) != UMICOM_FALSE ||
+            BitmapRead(gAllocatedBitmap, index) != UMICOM_FALSE) {
+            length = 0U;
+            continue;
+        }
+        if (length == 0U) {
+            /* Absolute frame-number alignment remains valid even for alignment
+             * values too large to multiply by page size in the address type. */
+            const UmicomU64 number =
+                (UmicomU64)FrameAddress(index) / (UmicomU64)UMICOM_KERNEL_PAGE_SIZE;
+            if ((number & (alignmentFrames - 1U)) != 0U) continue;
+            first = index;
+        }
+        ++length;
+        if (length != frameCount) continue;
+        for (UmicomSize offset = 0U; offset < frameCount; ++offset)
+            BitmapSet(gAllocatedBitmap, first + offset);
+        gAllocatedCount += frameCount;
+        *outFirstFrame = FrameAddress(first);
+        return UMICOM_KERNEL_MEMORY_OK;
+    }
+    return UMICOM_KERNEL_MEMORY_OUT_OF_MEMORY;
+}
+UmicomKernelMemoryStatus UmicomKernelPhysicalMemoryAllocateFrames(
+    UmicomSize frameCount, UmicomSize alignmentFrames, UmicomAddress *outFirstFrame)
+{
+    const UmicomKernelMemoryStatus status = PhysicalRunRequestCheck(frameCount, alignmentFrames, outFirstFrame);
+    if (status != UMICOM_KERNEL_MEMORY_OK) return status;
+    return PhysicalRunAllocateWithin(frameCount, alignmentFrames, 0U, gFrameCount, outFirstFrame);
+}
+UmicomKernelMemoryStatus UmicomKernelPhysicalMemoryAllocateFramesInWindow(
+    UmicomSize frameCount, UmicomSize alignmentFrames,
+    UmicomAddress minimumAddress, UmicomAddress maximumEnd, UmicomAddress *outFirstFrame)
+{
+    const UmicomKernelMemoryStatus status = PhysicalRunRequestCheck(frameCount, alignmentFrames, outFirstFrame);
+    if (status != UMICOM_KERNEL_MEMORY_OK) return status;
+    if (minimumAddress >= maximumEnd) return UMICOM_KERNEL_MEMORY_INVALID_ARGUMENT;
+    if (minimumAddress % UMICOM_KERNEL_PAGE_SIZE != 0U || maximumEnd % UMICOM_KERNEL_PAGE_SIZE != 0U)
+        return UMICOM_KERNEL_MEMORY_INVALID_ALIGNMENT;
+    UmicomAddress ramEnd = 0U;
+    const UmicomKernelMemoryStatus geometry = RamEnd(&ramEnd);
+    if (geometry != UMICOM_KERNEL_MEMORY_OK) return geometry;
+    if (minimumAddress < gRamBase || maximumEnd > ramEnd) return UMICOM_KERNEL_MEMORY_OUTSIDE_RAM;
+    /* Validate ordering and containment before subtracting. Both quotients fit
+     * the existing bounded bitmap, including an end at exactly gFrameCount. */
+    const UmicomSize begin = (UmicomSize)((minimumAddress - gRamBase) / UMICOM_KERNEL_PAGE_SIZE);
+    const UmicomSize end = (UmicomSize)((maximumEnd - gRamBase) / UMICOM_KERNEL_PAGE_SIZE);
+    return PhysicalRunAllocateWithin(frameCount, alignmentFrames, begin, end, outFirstFrame);
+}
+
+
+#endif
+
+/* All run requests share the allocator's existing bitmaps. Admission is complete
+ * before mutation: the boundary only removes candidate starts from the scan.
+ * Zero boundary retains the earlier unrestricted and windowed behavior. */
+static UmicomKernelMemoryStatus PhysicalRunAllocateWithin(
+    UmicomSize frameCount, UmicomSize alignmentFrames, UmicomSize boundaryFrames,
+    UmicomSize begin, UmicomSize end, UmicomAddress *outFirstFrame)
+{
+    if (frameCount > end - begin || frameCount > gFrameCount - gReservedCount - gAllocatedCount ||
+        (boundaryFrames != 0U && frameCount > boundaryFrames))
+        return UMICOM_KERNEL_MEMORY_OUT_OF_MEMORY;
+    UmicomSize first = 0U, length = 0U;
+    for (UmicomSize index = begin; index < end; ++index) {
+        if (BitmapRead(gReservedBitmap, index) != UMICOM_FALSE ||
+            BitmapRead(gAllocatedBitmap, index) != UMICOM_FALSE) {
+            length = 0U;
+            continue;
+        }
+        if (length == 0U) {
+            const UmicomU64 number =
+                (UmicomU64)FrameAddress(index) / (UmicomU64)UMICOM_KERNEL_PAGE_SIZE;
+            if ((number & (alignmentFrames - 1U)) != 0U) continue;
+            /* Subtract the offset from the bucket width. Unlike calculating
+             * the next boundary address, this cannot overflow at high RAM
+             * addresses or when the width cannot be expressed in bytes. */
+            if (boundaryFrames != 0U &&
+                frameCount > boundaryFrames - (number & (boundaryFrames - 1U)))
+                continue;
+            first = index;
+        }
+        ++length;
+        if (length != frameCount) continue;
+        for (UmicomSize offset = 0U; offset < frameCount; ++offset)
+            BitmapSet(gAllocatedBitmap, first + offset);
+        gAllocatedCount += frameCount;
+        *outFirstFrame = FrameAddress(first);
+        return UMICOM_KERNEL_MEMORY_OK;
+    }
+    return UMICOM_KERNEL_MEMORY_OUT_OF_MEMORY;
+}
+static UmicomKernelMemoryStatus PhysicalWindowAllocate(
+    UmicomSize frameCount, UmicomSize alignmentFrames, UmicomSize boundaryFrames,
+    UmicomAddress minimumAddress, UmicomAddress maximumEnd, UmicomAddress *outFirstFrame)
+{
+    const UmicomKernelMemoryStatus status = PhysicalRunRequestCheck(frameCount, alignmentFrames, outFirstFrame);
+    if (status != UMICOM_KERNEL_MEMORY_OK) return status;
+    if (boundaryFrames != 0U && UmicomKernelIsPowerOfTwo(boundaryFrames) == UMICOM_FALSE)
+        return UMICOM_KERNEL_MEMORY_INVALID_ALIGNMENT;
+    if (minimumAddress >= maximumEnd) return UMICOM_KERNEL_MEMORY_INVALID_ARGUMENT;
+    if (minimumAddress % UMICOM_KERNEL_PAGE_SIZE != 0U || maximumEnd % UMICOM_KERNEL_PAGE_SIZE != 0U)
+        return UMICOM_KERNEL_MEMORY_INVALID_ALIGNMENT;
+    UmicomAddress ramEnd = 0U;
+    const UmicomKernelMemoryStatus geometry = RamEnd(&ramEnd);
+    if (geometry != UMICOM_KERNEL_MEMORY_OK) return geometry;
+    if (minimumAddress < gRamBase || maximumEnd > ramEnd) return UMICOM_KERNEL_MEMORY_OUTSIDE_RAM;
+    const UmicomSize begin = (UmicomSize)((minimumAddress - gRamBase) / UMICOM_KERNEL_PAGE_SIZE);
+    const UmicomSize end = (UmicomSize)((maximumEnd - gRamBase) / UMICOM_KERNEL_PAGE_SIZE);
+    return PhysicalRunAllocateWithin(frameCount, alignmentFrames, boundaryFrames, begin, end, outFirstFrame);
+}
+UmicomKernelMemoryStatus UmicomKernelPhysicalMemoryAllocateFrames(
+    UmicomSize frameCount, UmicomSize alignmentFrames, UmicomAddress *outFirstFrame)
+{
+    const UmicomKernelMemoryStatus status = PhysicalRunRequestCheck(frameCount, alignmentFrames, outFirstFrame);
+    if (status != UMICOM_KERNEL_MEMORY_OK) return status;
+    return PhysicalRunAllocateWithin(frameCount, alignmentFrames, 0U, 0U, gFrameCount, outFirstFrame);
+}
+UmicomKernelMemoryStatus UmicomKernelPhysicalMemoryAllocateFramesInWindow(
+    UmicomSize frameCount, UmicomSize alignmentFrames,
+    UmicomAddress minimumAddress, UmicomAddress maximumEnd, UmicomAddress *outFirstFrame)
+{
+    return PhysicalWindowAllocate(frameCount, alignmentFrames, 0U,
+        minimumAddress, maximumEnd, outFirstFrame);
+}
+UmicomKernelMemoryStatus UmicomKernelPhysicalMemoryAllocateFramesInWindowWithBoundary(
+    UmicomSize frameCount, UmicomSize alignmentFrames, UmicomSize boundaryFrames,
+    UmicomAddress minimumAddress, UmicomAddress maximumEnd, UmicomAddress *outFirstFrame)
+{
+    return PhysicalWindowAllocate(frameCount, alignmentFrames, boundaryFrames,
+        minimumAddress, maximumEnd, outFirstFrame);
 }
 
 UmicomKernelMemoryStatus UmicomKernelPhysicalMemoryFreeFrames(

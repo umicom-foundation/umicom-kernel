@@ -93,6 +93,39 @@ static UmicomBoolean EntryIsLeaf(UmicomRiscvPageTableEntry entry)
     return leafBits != 0U ? UMICOM_TRUE : UMICOM_FALSE;
 }
 
+
+/* Admit the supported base-Sv39 encoding before extracting a PPN. Otherwise a
+ * high reserved/extension bit becomes an address bit, and a corrupted next-level
+ * entry can redirect a software walk before full hierarchy validation runs.
+ * The owner must still provide live Kernel-owned table memory: encoding checks
+ * do not prove physical ownership or make arbitrary root pointers safe. */
+static UmicomBoolean EntryEncodingIsSupported(UmicomRiscvPageTableEntry entry)
+{
+    /* V=0 makes the remaining payload architecturally irrelevant. Callers keep
+     * their existing not-mapped/skip/allocation behavior for invalid entries. */
+    if (EntryIsValid(entry) == UMICOM_FALSE)
+        return UMICOM_TRUE;
+    /* This mapper does not implement Svnapot, Svpbmt or future high-bit uses. */
+    if ((entry >> 54U) != 0U)
+        return UMICOM_FALSE;
+    if ((entry & UMICOM_RISCV_PTE_WRITE) != 0U &&
+        (entry & UMICOM_RISCV_PTE_READ) == 0U)
+        return UMICOM_FALSE;
+    if (EntryIsLeaf(entry) == UMICOM_FALSE)
+    {
+        /* U/A/D are reserved in non-leaves. Retain the mapper's existing
+         * restriction on global non-leaf pointers: inherited G semantics are
+         * not implemented by its permission reports. Software bits 9:8 remain
+         * available and do not participate in address extraction. */
+        const UmicomRiscvPageTableEntry unsupported =
+            UMICOM_RISCV_PTE_USER | UMICOM_RISCV_PTE_ACCESSED |
+            UMICOM_RISCV_PTE_DIRTY | UMICOM_RISCV_PTE_GLOBAL;
+        if ((entry & unsupported) != 0U)
+            return UMICOM_FALSE;
+    }
+    return UMICOM_TRUE;
+}
+
 /* Convert a page-aligned physical address into the PPN field stored in a PTE. */
 static UmicomRiscvPageTableEntry PhysicalAddressToEntryPpn(
     UmicomAddress physicalAddress
@@ -263,6 +296,8 @@ static UmicomKernelVirtualMemoryPermissions EntryBitsToPermissions(
 }
 
 /* Allocate one page-table frame through the physical-memory authority. */
+/* Constrain page-table backing to encodable Sv39 addresses through the existing physical window allocator before clearing RAM. The former implementation is retained for owner review. */
+#if 0
 static UmicomKernelVirtualMemoryStatus AllocatePageTable(
     UmicomAddress *outPhysicalAddress
 )
@@ -292,6 +327,43 @@ static UmicomKernelVirtualMemoryStatus AllocatePageTable(
     ClearPageTable(*outPhysicalAddress);
 
     /* The caller now owns one clean page-table frame. */
+    return UMICOM_KERNEL_VIRTUAL_MEMORY_OK;
+}
+#endif
+UmicomBoolean UmicomKernelVirtualMemoryIsPhysicalAddressRepresentable(
+    UmicomAddress physicalAddress)
+{
+    /* Do not mask an overflowing address into another mapping. Width admission
+     * precedes encoding, while alignment remains the mapper's separate check. */
+    return ((UmicomU64)physicalAddress >> UMICOM_KERNEL_SV39_PHYSICAL_ADDRESS_BITS)==0U
+        ? UMICOM_TRUE : UMICOM_FALSE;
+}
+static UmicomKernelVirtualMemoryStatus AllocatePageTable(UmicomAddress *outPhysicalAddress)
+{
+    if(outPhysicalAddress==(UmicomAddress *)0)
+        return UMICOM_KERNEL_VIRTUAL_MEMORY_INVALID_ARGUMENT;
+    UmicomKernelPhysicalMemorySnapshot snapshot;
+    if(UmicomKernelPhysicalMemorySnapshotRead(&snapshot)!=UMICOM_KERNEL_MEMORY_OK)
+        return UMICOM_KERNEL_VIRTUAL_MEMORY_PHYSICAL_MEMORY_ERROR;
+    const UmicomAddress encodingEnd=(UmicomAddress)((UmicomU64)1U <<
+        UMICOM_KERNEL_SV39_PHYSICAL_ADDRESS_BITS);
+    if(UmicomKernelVirtualMemoryIsPhysicalAddressRepresentable(snapshot.ramBase)==UMICOM_FALSE)
+        return UMICOM_KERNEL_VIRTUAL_MEMORY_INVALID_PHYSICAL_ADDRESS;
+    /* Page-table pointers must fit the architectural PPN before ClearPageTable
+     * dereferences them. Intersect the allocator's range with that encoding
+     * window using subtraction, so a high managed end cannot wrap arithmetic.
+     * The physical allocator still owns all admission, first-fit and counters. */
+    const UmicomAddress end=snapshot.ramBytes>encodingEnd-snapshot.ramBase
+        ? encodingEnd : snapshot.ramBase+snapshot.ramBytes;
+    UmicomAddress frame=0U;
+    const UmicomKernelMemoryStatus memoryStatus=UmicomKernelPhysicalMemoryAllocateFramesInWindow(
+        1U,1U,snapshot.ramBase,end,&frame);
+    if(memoryStatus==UMICOM_KERNEL_MEMORY_OUT_OF_MEMORY)
+        return UMICOM_KERNEL_VIRTUAL_MEMORY_OUT_OF_MEMORY;
+    if(memoryStatus!=UMICOM_KERNEL_MEMORY_OK)
+        return UMICOM_KERNEL_VIRTUAL_MEMORY_PHYSICAL_MEMORY_ERROR;
+    ClearPageTable(frame);
+    *outPhysicalAddress=frame;
     return UMICOM_KERNEL_VIRTUAL_MEMORY_OK;
 }
 
@@ -431,6 +503,9 @@ static UmicomKernelVirtualMemoryStatus EnsureChildTable(
 
     /* A leaf at an intermediate level would be a large page.  This first page
      * table implementation deliberately supports only 4 KiB leaves. */
+    if (EntryEncodingIsSupported(*entry) == UMICOM_FALSE) {
+        return UMICOM_KERNEL_VIRTUAL_MEMORY_CORRUPT_PAGE_TABLE;
+    }
     if (EntryIsLeaf(*entry) != UMICOM_FALSE) {
         return UMICOM_KERNEL_VIRTUAL_MEMORY_UNSUPPORTED_LARGE_PAGE;
     }
@@ -495,6 +570,13 @@ UmicomKernelVirtualMemoryStatus UmicomKernelVirtualMemoryMapPage(
     if (PermissionsAreValid(permissions) == UMICOM_FALSE) {
         return UMICOM_KERNEL_VIRTUAL_MEMORY_INVALID_PERMISSIONS;
     }
+
+
+    /* A 64-bit integer can describe addresses that this PTE cannot encode.
+     * Refuse before obtaining or allocating table storage; shifting those high
+     * bits into a PTE would set reserved architectural fields. */
+    if(UmicomKernelVirtualMemoryIsPhysicalAddressRepresentable(physicalAddress)==UMICOM_FALSE)
+        return UMICOM_KERNEL_VIRTUAL_MEMORY_INVALID_PHYSICAL_ADDRESS;
 
     /* Obtain the level-2 root page that belongs to this address space. */
     UmicomRiscvPageTableEntry *const rootTable =
@@ -576,6 +658,11 @@ UmicomKernelVirtualMemoryStatus UmicomKernelVirtualMemoryMapPage(
     /* Overwriting a live leaf/table silently would destroy an existing mapping
      * or corrupt the hierarchy, so duplicate mapping is refused. */
     if (EntryIsValid(level0Table[level0Index]) != UMICOM_FALSE) {
+        const UmicomKernelVirtualMemoryStatus duplicateStatus =
+            EntryEncodingIsSupported(level0Table[level0Index]) != UMICOM_FALSE &&
+            EntryIsLeaf(level0Table[level0Index]) != UMICOM_FALSE
+                ? UMICOM_KERNEL_VIRTUAL_MEMORY_ALREADY_MAPPED
+                : UMICOM_KERNEL_VIRTUAL_MEMORY_CORRUPT_PAGE_TABLE;
         /* Reclaim only intermediate tables that this failed operation created. */
         if (createdLevel0 != UMICOM_FALSE) {
             level1Table[level1Index] = (UmicomRiscvPageTableEntry)0U;
@@ -590,7 +677,11 @@ UmicomKernelVirtualMemoryStatus UmicomKernelVirtualMemoryMapPage(
             (void)UmicomKernelPhysicalMemoryFreeFrame(level1PhysicalAddress);
             --space->pageTableFrames;
         }
+/* Duplicate mappings remain refused after the same rollback. A malformed stored entry now reports corruption instead of an ordinary duplicate; retain the prior status return for review. The former implementation is retained for owner review. */
+#if 0
         return UMICOM_KERNEL_VIRTUAL_MEMORY_ALREADY_MAPPED;
+#endif
+        return duplicateStatus;
     }
 
     /* Construct the supported 4 KiB leaf from physical page number + rights. */
@@ -653,6 +744,9 @@ static UmicomKernelVirtualMemoryStatus LocateLeaf(
     }
 
     /* A root leaf would be a 1 GiB mapping, outside this supported subset. */
+    if (EntryEncodingIsSupported(level2Entry) == UMICOM_FALSE) {
+        return UMICOM_KERNEL_VIRTUAL_MEMORY_CORRUPT_PAGE_TABLE;
+    }
     if (EntryIsLeaf(level2Entry) != UMICOM_FALSE) {
         return UMICOM_KERNEL_VIRTUAL_MEMORY_UNSUPPORTED_LARGE_PAGE;
     }
@@ -670,6 +764,9 @@ static UmicomKernelVirtualMemoryStatus LocateLeaf(
     }
 
     /* A level-1 leaf would be a 2 MiB mapping, intentionally unsupported here. */
+    if (EntryEncodingIsSupported(level1Entry) == UMICOM_FALSE) {
+        return UMICOM_KERNEL_VIRTUAL_MEMORY_CORRUPT_PAGE_TABLE;
+    }
     if (EntryIsLeaf(level1Entry) != UMICOM_FALSE) {
         return UMICOM_KERNEL_VIRTUAL_MEMORY_UNSUPPORTED_LARGE_PAGE;
     }
@@ -748,6 +845,9 @@ UmicomKernelVirtualMemoryStatus UmicomKernelVirtualMemoryTranslate(
     if (EntryIsValid(leafEntry) == UMICOM_FALSE) {
         return UMICOM_KERNEL_VIRTUAL_MEMORY_NOT_MAPPED;
     }
+    if (EntryEncodingIsSupported(leafEntry) == UMICOM_FALSE) {
+        return UMICOM_KERNEL_VIRTUAL_MEMORY_CORRUPT_PAGE_TABLE;
+    }
     if (EntryIsLeaf(leafEntry) == UMICOM_FALSE) {
         return UMICOM_KERNEL_VIRTUAL_MEMORY_CORRUPT_PAGE_TABLE;
     }
@@ -825,6 +925,9 @@ UmicomKernelVirtualMemoryStatus UmicomKernelVirtualMemoryUnmapPage(
     /* The level-0 slot must contain one supported 4 KiB leaf. */
     if (EntryIsValid(level0Table[level0Index]) == UMICOM_FALSE) {
         return UMICOM_KERNEL_VIRTUAL_MEMORY_NOT_MAPPED;
+    }
+    if (EntryEncodingIsSupported(level0Table[level0Index]) == UMICOM_FALSE) {
+        return UMICOM_KERNEL_VIRTUAL_MEMORY_CORRUPT_PAGE_TABLE;
     }
     if (EntryIsLeaf(level0Table[level0Index]) == UMICOM_FALSE) {
         return UMICOM_KERNEL_VIRTUAL_MEMORY_CORRUPT_PAGE_TABLE;
@@ -910,6 +1013,9 @@ static UmicomKernelVirtualMemoryStatus ValidateHierarchy(
         if (EntryIsValid(level2Entry) == UMICOM_FALSE) {
             continue;
         }
+        if (EntryEncodingIsSupported(level2Entry) == UMICOM_FALSE) {
+            return UMICOM_KERNEL_VIRTUAL_MEMORY_CORRUPT_PAGE_TABLE;
+        }
         if (EntryIsLeaf(level2Entry) != UMICOM_FALSE) {
             return UMICOM_KERNEL_VIRTUAL_MEMORY_UNSUPPORTED_LARGE_PAGE;
         }
@@ -930,6 +1036,9 @@ static UmicomKernelVirtualMemoryStatus ValidateHierarchy(
             if (EntryIsValid(level1Entry) == UMICOM_FALSE) {
                 continue;
             }
+            if (EntryEncodingIsSupported(level1Entry) == UMICOM_FALSE) {
+                return UMICOM_KERNEL_VIRTUAL_MEMORY_CORRUPT_PAGE_TABLE;
+            }
             if (EntryIsLeaf(level1Entry) != UMICOM_FALSE) {
                 return UMICOM_KERNEL_VIRTUAL_MEMORY_UNSUPPORTED_LARGE_PAGE;
             }
@@ -949,6 +1058,9 @@ static UmicomKernelVirtualMemoryStatus ValidateHierarchy(
 
                 if (EntryIsValid(leafEntry) == UMICOM_FALSE) {
                     continue;
+                }
+                if (EntryEncodingIsSupported(leafEntry) == UMICOM_FALSE) {
+                    return UMICOM_KERNEL_VIRTUAL_MEMORY_CORRUPT_PAGE_TABLE;
                 }
                 if (EntryIsLeaf(leafEntry) == UMICOM_FALSE) {
                     return UMICOM_KERNEL_VIRTUAL_MEMORY_CORRUPT_PAGE_TABLE;
@@ -1177,6 +1289,8 @@ const char *UmicomKernelVirtualMemoryStatusName(
             return "unsupported-large-page";
         case UMICOM_KERNEL_VIRTUAL_MEMORY_PHYSICAL_MEMORY_ERROR:
             return "physical-memory-error";
+        case UMICOM_KERNEL_VIRTUAL_MEMORY_INVALID_PHYSICAL_ADDRESS:
+            return "invalid-physical-address";
         default:
             return "unknown-status";
     }

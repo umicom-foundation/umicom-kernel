@@ -44,7 +44,31 @@ foreach(_marker IN ITEMS "UMICOM_KERNEL_BOOT_READY" "packet-admission-test=begin
         # "packet-admission.cases=15"
         "packet-admission.case=tcp-golden" "packet-admission.case=tcp-refusals"
         "packet-admission.case=tcp-zero-checksum" "packet-admission.case=tcp-padding-lifetime"
-        "packet-admission.cases=19"
+        # Earlier total retained; the same nineteen groups precede ARP.
+        # "packet-admission.cases=19"
+        "packet-admission.case=arp-golden" "packet-admission.case=arp-reply"
+        "packet-admission.case=arp-refusals" "packet-admission.case=arp-padding-lifetime"
+        # Earlier total retained; all twenty-three groups still precede IPv6.
+        # "packet-admission.cases=23"
+        "packet-admission.case=ipv6-golden" "packet-admission.case=ipv6-truncation"
+        "packet-admission.case=ipv6-extension-policy" "packet-admission.case=ipv6-padding-lifetime"
+        # Earlier total retained; the same twenty-seven groups precede IPv6 UDP.
+        # "packet-admission.cases=27"
+        "packet-admission.case=udp6-golden" "packet-admission.case=udp6-checksum"
+        "packet-admission.case=udp6-framing" "packet-admission.case=udp6-padding-lifetime"
+        # Earlier count retained; all thirty-one groups still precede ICMPv6 echo.
+        # "packet-admission.cases=31"
+        "packet-admission.case=icmp6-zero-reply" "packet-admission.case=icmp6-checksum"
+        "packet-admission.case=icmp6-framing" "packet-admission.case=icmp6-padding-lifetime"
+        # Previous count retained; all thirty-five groups precede TCP6.
+        # "packet-admission.cases=35"
+        "packet-admission.case=tcp6-zero-checksum" "packet-admission.case=tcp6-corruption"
+        "packet-admission.case=tcp6-framing" "packet-admission.case=tcp6-padding-lifetime"
+        # Earlier total retained; all thirty-nine groups precede neighbor captures.
+        # "packet-admission.cases=39"
+        "packet-admission.case=neighbor6-zero-advertisement" "packet-admission.case=neighbor6-checksum-framing"
+        "packet-admission.case=neighbor6-dad-capture" "packet-admission.case=neighbor6-padding-lifetime"
+        "packet-admission.cases=43"
         "UMICOM_KERNEL_PACKET_ADMISSION_READY" "UMICOM_KERNEL_END")
     string(FIND "${_stdout}" "${_marker}" _position)
     if(_position LESS_EQUAL _previous)
@@ -55,4 +79,10 @@ endforeach()
 # Previous status retained: Seven packet groups completed in the current diagnostic guest without a NIC.
 # Previous report retained: Eleven packet groups completed in the current diagnostic guest without a NIC.
 # Previous report retained: Fifteen packet groups completed in the current diagnostic guest without a NIC.
-message(STATUS "Nineteen packet groups completed in the current diagnostic guest without a NIC")
+# Previous status retained: Nineteen packet groups completed in the current diagnostic guest without a NIC.
+# Previous status retained: Twenty-three packet groups completed in the current diagnostic guest without a NIC.
+# Previous status retained: Twenty-seven packet groups completed in the current diagnostic guest without a NIC.
+# Previous status retained: Thirty-one packet groups completed in the current diagnostic guest without a NIC.
+# Previous status retained: Thirty-five packet groups completed in the current diagnostic guest without a NIC.
+# Earlier status retained: Thirty-nine packet groups completed in the current diagnostic guest without a NIC.
+message(STATUS "Forty-three packet groups completed in the current diagnostic guest without a NIC")
