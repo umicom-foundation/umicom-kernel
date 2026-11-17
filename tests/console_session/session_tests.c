@@ -112,7 +112,15 @@ static const ConsoleStep steps[] = {
     {"run /bin/umicom-cvm.elf 49", "state=exited exit=49201 "},
     {"run /bin/umicom-cvm.elf 50", "state=exited exit=49202 "},
     {"run /bin/umicom-cvm.elf 51", "state=exited exit=49203 "},
+/* Move the out-of-range console regression above the newly admitted selectors and check each new exit. The former implementation is retained for owner review. */
+#if 0
     {"run /bin/umicom-cvm.elf 52", "state=exited exit=49156 "},
+#endif
+    {"run /bin/umicom-cvm.elf 52", "state=exited exit=49204 "},
+    {"run /bin/umicom-cvm.elf 53", "state=exited exit=49205 "},
+    {"run /bin/umicom-cvm.elf 54", "state=exited exit=49206 "},
+    {"run /bin/umicom-cvm.elf 55", "state=exited exit=49207 "},
+    {"run /bin/umicom-cvm.elf 56", "state=exited exit=49156 "},
     {"run /bin/umicom-cvm.elf 18446744073709551615", "state=exited exit=49156 "},
     {"run /bin/umicom-cvm.elf 0", "state=exited exit=42 "},
 #endif

@@ -21,6 +21,7 @@ endif()
 # foreach(case IN ITEMS unchanged source-edit image-edit recipe-edit receipt-missing source-missing unknown-mode)
 foreach(case IN ITEMS unchanged source-edit image-edit recipe-edit receipt-missing source-missing unknown-mode
     trace-header-edit trace-header-missing
+    machine-header-edit machine-header-missing managed-source-edit managed-source-missing
     profile-header-edit profile-header-missing
     remainder-header-edit remainder-header-missing complement-header-edit complement-header-missing
     bitwise-header-edit bitwise-header-missing)

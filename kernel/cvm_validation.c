@@ -87,7 +87,9 @@ static void CheckImage(const UmicomU8 *begin, const UmicomU8 *end, const char *m
         0xc026U, 0xc027U, 0xc028U, 0xc029U, 0xc02aU,
         /* Bitwise values, canonical versions and fuel use the same U-mode monitor. */
         0xc02bU, 0xc02cU, 0xc02dU, 0xc02eU, 0xc02fU,
-        0xc030U, 0xc031U, 0xc032U, 0xc033U
+        0xc030U, 0xc031U, 0xc032U, 0xc033U,
+        /* Paused execution, fault state, fuel and managed cycles retain frame checks. */
+        0xc034U, 0xc035U, 0xc036U, 0xc037U
     };
     UmicomKernelConsoleWrite("cvm.optimization=");
     UmicomKernelConsoleWriteLine(mode);

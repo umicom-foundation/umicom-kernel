@@ -23,12 +23,13 @@ file(MAKE_DIRECTORY "${WORK}/runtime" "${WORK}/kernel")
 set(runtime_files src/status.c src/vm.c src/bytecode.c src/comparison.c
     src/internal.h include/umicom_c/umicom_c.h include/umicom_c/comparison.h
     include/umicom_c/trace.h
+    include/umicom_c/machine.h include/umicom_c/managed_heap.h src/managed_heap.c
     # Capability queries are compiled into the external runtime object.
     include/umicom_c/profile.h
     cmake/UmicomCRuntime.cmake)
 # Preserve the previous inventory line; the bitwise fixture is now a required compiled input.
 # set(kernel_files programs/cvm/main.c programs/cvm/remainder_checks.h programs/cvm/complement_checks.h programs/cvm/entry.S
-set(kernel_files programs/cvm/main.c programs/cvm/remainder_checks.h programs/cvm/complement_checks.h programs/cvm/bitwise_checks.h programs/cvm/entry.S
+set(kernel_files programs/cvm/main.c programs/cvm/remainder_checks.h programs/cvm/complement_checks.h programs/cvm/bitwise_checks.h programs/cvm/machine_checks.h programs/cvm/entry.S
     programs/cvm/CMakeLists.txt programs/diagnostic/linker.ld cmake/CvmPrograms.cmake)
 foreach(relative IN LISTS runtime_files)
     get_filename_component(parent "${WORK}/runtime/${relative}" DIRECTORY)
@@ -61,6 +62,14 @@ elseif(CASE STREQUAL "trace-header-edit")
     file(APPEND "${WORK}/runtime/include/umicom_c/trace.h" "changed trace layout")
 elseif(CASE STREQUAL "trace-header-missing")
     file(REMOVE "${WORK}/runtime/include/umicom_c/trace.h")
+elseif(CASE STREQUAL "machine-header-edit")
+    file(APPEND "${WORK}/runtime/include/umicom_c/machine.h" "changed stepping contract")
+elseif(CASE STREQUAL "machine-header-missing")
+    file(REMOVE "${WORK}/runtime/include/umicom_c/machine.h")
+elseif(CASE STREQUAL "managed-source-edit")
+    file(APPEND "${WORK}/runtime/src/managed_heap.c" "changed collector")
+elseif(CASE STREQUAL "managed-source-missing")
+    file(REMOVE "${WORK}/runtime/src/managed_heap.c")
 elseif(CASE STREQUAL "profile-header-edit")
     file(APPEND "${WORK}/runtime/include/umicom_c/profile.h" "changed profile definitions")
 elseif(CASE STREQUAL "profile-header-missing")
@@ -113,7 +122,9 @@ if(NOT expect_success)
     # if(CASE STREQUAL "source-missing" OR CASE STREQUAL "trace-header-missing" OR CASE STREQUAL "profile-header-missing" OR CASE STREQUAL "remainder-header-missing")
     # Retain the prior refusal condition; the new required header shares this diagnostic.
     # if(CASE STREQUAL "source-missing" OR CASE STREQUAL "trace-header-missing" OR CASE STREQUAL "profile-header-missing" OR CASE STREQUAL "remainder-header-missing" OR CASE STREQUAL "complement-header-missing")
-    if(CASE STREQUAL "source-missing" OR CASE STREQUAL "trace-header-missing" OR CASE STREQUAL "profile-header-missing" OR CASE STREQUAL "remainder-header-missing" OR CASE STREQUAL "complement-header-missing" OR CASE STREQUAL "bitwise-header-missing")
+    # Preserve the former missing-input condition while adding the new required runtime files.
+    # if(CASE STREQUAL "source-missing" OR CASE STREQUAL "trace-header-missing" OR CASE STREQUAL "profile-header-missing" OR CASE STREQUAL "remainder-header-missing" OR CASE STREQUAL "complement-header-missing" OR CASE STREQUAL "bitwise-header-missing")
+    if(CASE STREQUAL "source-missing" OR CASE STREQUAL "trace-header-missing" OR CASE STREQUAL "profile-header-missing" OR CASE STREQUAL "remainder-header-missing" OR CASE STREQUAL "complement-header-missing" OR CASE STREQUAL "bitwise-header-missing" OR CASE STREQUAL "machine-header-missing" OR CASE STREQUAL "managed-source-missing")
         set(reason "Missing CVM source")
     elseif(CASE STREQUAL "receipt-missing")
         set(reason "build the CVM image before guest qualification")

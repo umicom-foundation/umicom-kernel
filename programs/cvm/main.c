@@ -39,6 +39,8 @@ static const UmcInstruction zero_divisor[] = {
 };
 /* Comparisons use the same canonical runtime and portable encoder as arithmetic.
  * Separate selectors keep the earlier envelope result contract unchanged. */
+#include "machine_checks.h"
+
 static UmicomU64 CheckComparison(UmicomU64 argument)
 {
     /* Static immutable fixtures avoid an aggregate copy that a freestanding
@@ -310,7 +312,12 @@ UmicomU64 UmicomProgramMain(UmicomU64 argument)
 #if 0
     if (argument == 4U || argument > 42U) return 0xc004U;
 #endif
+/* Extend admission with the four shared stepping and managed-heap diagnostic selectors. The former implementation is retained for owner review. */
+#if 0
     if (argument == 4U || argument > 51U) return 0xc004U;
+#endif
+    if (argument == 4U || argument > 55U) return 0xc004U;
+    if (argument >= 52U && argument <= 55U) return CheckMachine(argument);
     if (argument >= 43U) return CheckBitwise(argument);
     if (argument >= 38U) return CheckComplement(argument);
     if (argument >= 31U) return CheckRemainder(argument);
