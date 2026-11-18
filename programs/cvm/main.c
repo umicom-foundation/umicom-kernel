@@ -40,6 +40,7 @@ static const UmcInstruction zero_divisor[] = {
 /* Comparisons use the same canonical runtime and portable encoder as arithmetic.
  * Separate selectors keep the earlier envelope result contract unchanged. */
 #include "machine_checks.h"
+#include "slice_checks.h"
 
 static UmicomU64 CheckComparison(UmicomU64 argument)
 {
@@ -231,6 +232,8 @@ static UmicomU64 CheckConditionalUpdate(UmicomU64 argument)
 #include "remainder_checks.h"
 #include "complement_checks.h"
 #include "bitwise_checks.h"
+#include "shift_checks.h"
+#include "bounds_checks.h"
 
 UmicomU64 UmicomProgramMain(UmicomU64 argument)
 {
@@ -252,7 +255,12 @@ UmicomU64 UmicomProgramMain(UmicomU64 argument)
         const uint32_t features = umc_runtime_profile(UMC_PROFILE_FEATURES);
         const uint32_t required = UMC_FEATURE_ARITHMETIC | UMC_FEATURE_COMPARISON |
             UMC_FEATURE_EXECUTION_TRACE | UMC_FEATURE_PROGRAM_INSPECTION | UMC_FEATURE_LOCAL_INTEGERS |
+/* Require the linked shift execution capability in the freestanding consumer. The former implementation is retained for owner review. */
+#if 0
             UMC_FEATURE_FORWARD_BRANCHES | UMC_FEATURE_REMAINDER | UMC_FEATURE_BINARY_BITWISE;
+#endif
+            UMC_FEATURE_FORWARD_BRANCHES | UMC_FEATURE_REMAINDER | UMC_FEATURE_BINARY_BITWISE |
+            UMC_FEATURE_CHECKED_SHIFTS;
         return umc_runtime_profile(UMC_PROFILE_API) == UMC_API_VERSION &&
             (features & required) == required && !(features & (UMC_FEATURE_LOGICAL_NOT | UMC_FEATURE_LOGICAL_CONNECTIVES |
                 UMC_FEATURE_CONDITIONAL_EXPRESSIONS)) &&
@@ -280,7 +288,11 @@ UmicomU64 UmicomProgramMain(UmicomU64 argument)
 #if 0
             umc_runtime_profile(UMC_PROFILE_WIRE_VERSIONS) == 62U &&
 #endif
+/* Include additive format 7 while retaining earlier wire identities. The former implementation is retained for owner review. */
+#if 0
             umc_runtime_profile(UMC_PROFILE_WIRE_VERSIONS) == 126U &&
+#endif
+            umc_runtime_profile(UMC_PROFILE_WIRE_VERSIONS) == 254U &&
             umc_runtime_profile(UMC_PROFILE_LOCAL_VALUES) == 32U &&
             umc_runtime_profile(UMC_PROFILE_IDENTIFIER_BYTES) == 0U &&
             umc_runtime_profile(UMC_PROFILE_PROGRAM_INSTRUCTIONS) == UMC_PROGRAM_LIMIT &&
@@ -316,7 +328,22 @@ UmicomU64 UmicomProgramMain(UmicomU64 argument)
 #if 0
     if (argument == 4U || argument > 51U) return 0xc004U;
 #endif
+/* Extend the diagnostic selector range for shared slices while retaining earlier result codes. The former implementation is retained for owner review. */
+#if 0
     if (argument == 4U || argument > 55U) return 0xc004U;
+#endif
+/* Append checked shift selectors without changing any existing guest result code. The former implementation is retained for owner review. */
+#if 0
+    if (argument == 4U || argument > 59U) return 0xc004U;
+#endif
+/* Append four structural-budget selectors while preserving every existing guest result code. The former implementation is retained for owner review. */
+#if 0
+    if (argument == 4U || argument > 68U) return 0xc004U;
+#endif
+    if (argument == 4U || argument > 72U) return 0xc004U;
+    if (argument >= 69U) return CheckExecutionBounds(argument);
+    if (argument >= 60U) return CheckShifts(argument);
+    if (argument >= 56U) return CheckSlices(argument);
     if (argument >= 52U && argument <= 55U) return CheckMachine(argument);
     if (argument >= 43U) return CheckBitwise(argument);
     if (argument >= 38U) return CheckComplement(argument);

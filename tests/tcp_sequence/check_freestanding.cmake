@@ -9,7 +9,18 @@ foreach(required CLANG LEVEL SOURCE WORK)
     endif()
 endforeach()
 file(MAKE_DIRECTORY "${WORK}")
+# Clang can otherwise choose the host-only GNU linker. Keep that earlier
+# probe command for review; the active command requests LLVM target support.
+if(FALSE)
 execute_process(COMMAND "${CLANG}" --target=riscv64-unknown-elf -march=rv64imac -mabi=lp64
+    -std=c23 -ffreestanding -fno-builtin -fno-stack-protector -nostdlib "-O${LEVEL}"
+    -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror
+    "-I${SOURCE}/include" "${SOURCE}/kernel/tcp_sequence.c"
+    "${SOURCE}/tests/tcp_sequence/freestanding_entry.c"
+    -Wl,-e,_start -o "${WORK}/sequence.elf"
+    RESULT_VARIABLE result OUTPUT_VARIABLE out ERROR_VARIABLE err TIMEOUT 25)
+endif()
+execute_process(COMMAND "${CLANG}" -fuse-ld=lld --target=riscv64-unknown-elf -march=rv64imac -mabi=lp64
     -std=c23 -ffreestanding -fno-builtin -fno-stack-protector -nostdlib "-O${LEVEL}"
     -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror
     "-I${SOURCE}/include" "${SOURCE}/kernel/tcp_sequence.c"

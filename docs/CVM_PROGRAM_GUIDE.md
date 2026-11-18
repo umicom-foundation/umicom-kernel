@@ -4,11 +4,20 @@
 
 ## Current envelope and qualification scope
 
+<!-- Earlier current-envelope summary retained for comparison; selectors, masks and test registration have since advanced.
 The diagnostic currently runs selectors **0–51** at **O0 and O2**, producing **104 case markers** before UMICOM_KERNEL_CVM_READY. The host entry suite contains **54 tests**: the 52 selectors plus two unknown-selector boundaries. The source-identity suite contains **17 checks**. Earlier sections below describe how individual profiles were introduced; their smaller historical counts do not describe the current suite. A successful configured test registration is not an executed result.
 
 The optional Windows serial-console fixture now requests selectors **0–51**, the unknown-selector boundaries **52** and **UINT64_MAX**, then repeats selector **0**. That is **55 CVM launches** through the normal console. These are separate from the 104 diagnostic-image markers and require their own execution evidence.
 
 The current runtime feature mask is **82331** and supported wire-version mask is **126**. Query the linked runtime and retain its source receipt. The guest does not link the compiler, so source-only complement bit 32768 must remain absent even though arithmetic bytecode can represent complement.
+
+-->
+
+The diagnostic currently runs selectors **0–72** at **O0 and O2**, producing **146 case markers** before UMICOM_KERNEL_CVM_READY. The host entry suite contains **75 tests**: the 73 selectors plus two unknown-selector boundaries. The source-identity suite contains **31 checks**, including changes and missing files for the bounds API, implementation and guest fixture. Earlier sections describe the introduction of smaller profiles and do not state current coverage. Registration alone is not an executed pass.
+
+The optional Windows serial-console fixture requests selectors **0–72**, unknown selectors **73** and **UINT64_MAX**, then repeats selector **0**. These **76 launches** use the normal console and require their own execution evidence, separate from the diagnostic image.
+
+The current runtime feature mask is **8470939** and supported wire-version mask is **254**. Query the linked runtime and retain its source receipt. The guest does not link the compiler. Source-only grammar features remain absent from the runtime mask; structural path analysis changes neither mask nor the wire format.
 
 Umicom C's interpreter can be linked into a RISC-V ELF user program. ELF is the file format that describes machine code, read-only data and writable storage. The Kernel loads that native program into its own user address space. The program then interprets arithmetic bytecode as data.
 
@@ -202,3 +211,18 @@ commands. Test registration alone cannot show that this longer journey completed
 Read [the console evidence lesson](CVM_CONSOLE_EVIDENCE.md) to compare host runtime,
 diagnostic guest and normal-console evidence without treating one as a substitute
 for another.
+
+## Structural instruction bounds in user mode
+
+Selectors 69 through 72 exercise the shared Umicom C path analyzer. The guest links the same runtime source used by native hosts; the Kernel does not implement another analyzer.
+
+| Selector | Expected exit | Check |
+| --- | --- | --- |
+| 69 | 0xc045 (49221) | Eight-record diamond reports structural paths of four and seven instructions |
+| 70 | 0xc046 (49222) | Seven steps permit the true route to return 42 |
+| 71 | 0xc047 (49223) | A four-step graph can still fail arithmetic at division |
+| 72 | 0xc048 (49224) | Backward/self branch refusal leaves the previous bounds unchanged |
+
+The analysis counts both conditional alternatives without evaluating values. A successful fresh execution falls within the bounds, but a fault may occur before the minimum. Fuel is an interpreter operation count, not time, energy, native instruction count or a memory estimate. Both O0 and O2 guest links exercise the allocation-free runtime without libc. The analyzer uses two fixed 256-entry size_t arrays, so its stack cost must be included in the user-process call-chain budget.
+
+The normal console uses decimal selector arguments, for example `run /bin/umicom-cvm.elf 69`. Exit 49221 means that the example verified the expected bounds; it is not the calculated budget. The ordinary process supervisor still owns address spaces, exit observation and teardown. No arbitrary bytecode loader or privileged execution interface is introduced.

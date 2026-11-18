@@ -94,7 +94,40 @@ int main(int argc, char **argv) {
                                {"bitwise-profile",49U,0xc031U},
                                {"bitwise-minimum",50U,0xc032U},
                                {"bitwise-canonical",51U,0xc033U},
+/* The guest now defines selectors 52 through 59; cover each and move unknown-selector refusal beyond the admitted range. The former implementation is retained for owner review. */
+#if 0
                                {"unknown-selector",52U,0xc004U},
+#endif
+                               {"machine-step",52U,0xc034U},
+                               {"machine-fault",53U,0xc035U},
+                               {"machine-fuel",54U,0xc036U},
+                               {"managed-cycle",55U,0xc037U},
+                               {"slice-complete",56U,0xc038U},
+                               {"slice-fault",57U,0xc039U},
+                               {"slice-fuel",58U,0xc03aU},
+                               {"slice-refusal",59U,0xc03bU},
+/* Qualify each appended shift selector and keep unknown-selector admission beyond the active range. The former implementation is retained for owner review. */
+#if 0
+                               {"unknown-selector",60U,0xc004U},
+#endif
+                               {"shift-left",60U,0xc03cU},
+                               {"shift-right",61U,0xc03dU},
+                               {"shift-negative-count",62U,0xc03eU},
+                               {"shift-overflow",63U,0xc03fU},
+                               {"shift-negative-value",64U,0xc040U},
+                               {"shift-old-version",65U,0xc041U},
+                               {"shift-fuel",66U,0xc042U},
+                               {"shift-operand",67U,0xc043U},
+                               {"shift-large-count",68U,0xc044U},
+/* Exercise the new structural-bound service through the real guest entry and retain refusal immediately beyond its admitted selector range. The former implementation is retained for owner review. */
+#if 0
+                               {"unknown-selector",69U,0xc004U},
+#endif
+                               {"bounds-diamond",69U,0xc045U},
+                               {"bounds-fuel",70U,0xc046U},
+                               {"bounds-arithmetic",71U,0xc047U},
+                               {"bounds-refusal",72U,0xc048U},
+                               {"unknown-selector",73U,0xc004U},
 
                                {"maximum-selector", (UmicomU64)-1, 0xc004U}};
   if (argc != 2)

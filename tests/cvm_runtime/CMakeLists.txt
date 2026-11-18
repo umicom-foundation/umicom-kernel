@@ -22,6 +22,8 @@ if(NOT EXISTS "${UMICOM_C_SOURCE_DIR}/cmake/UmicomCRuntime.cmake")
 endif()
 include("${UMICOM_C_SOURCE_DIR}/cmake/UmicomCRuntime.cmake")
 umicom_c_add_runtime(umicom_cvm_host_runtime)
+# The envelope exercises managed objects explicitly, matching its guest dependency.
+target_sources(umicom_cvm_host_runtime PRIVATE "${UMICOM_C_SOURCE_DIR}/src/managed_heap.c")
 add_executable(umicom-cvm-envelope test_envelope.c ../../programs/cvm/main.c)
 target_include_directories(umicom-cvm-envelope PRIVATE ../../include)
 target_compile_features(umicom-cvm-envelope PRIVATE c_std_23)
@@ -37,6 +39,11 @@ if(BUILD_TESTING)
         remainder-positive remainder-negative remainder-zero remainder-overflow remainder-version remainder-fuel remainder-operand
         complement-minimum complement-maximum complement-zero complement-fuel complement-wire
         bitwise-and bitwise-xor bitwise-or bitwise-fuel bitwise-old-version bitwise-operand bitwise-profile bitwise-minimum bitwise-canonical
+        machine-step machine-fault machine-fuel managed-cycle
+        slice-complete slice-fault slice-fuel slice-refusal
+        shift-left shift-right shift-negative-count shift-overflow shift-negative-value
+        shift-old-version shift-fuel shift-operand shift-large-count
+        bounds-diamond bounds-fuel bounds-arithmetic bounds-refusal
         unknown-selector maximum-selector)
         add_test(NAME "kernel.cvm.envelope.${case}" COMMAND umicom-cvm-envelope "${case}")
         set_tests_properties("kernel.cvm.envelope.${case}" PROPERTIES TIMEOUT 10 LABELS "kernel;cvm;host;consumer")

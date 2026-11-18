@@ -100,6 +100,11 @@ add_executable(
     kernel/network_packet.c
     # Sequence decisions are pure arithmetic; packet capture and device behavior are unchanged.
     kernel/tcp_sequence.c
+    kernel/tcp_transmit.c
+    # Owned receive bytes are bounded independently of packet capture storage.
+    kernel/tcp_receive.c
+    # Retain outbound payload until admitted acknowledgments release it.
+    kernel/tcp_send_buffer.c
     kernel/network_packet_validation.c
     kernel/main.c
     kernel/supervisor_payload.c

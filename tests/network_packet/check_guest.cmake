@@ -76,7 +76,30 @@ foreach(_marker IN ITEMS "UMICOM_KERNEL_BOOT_READY" "packet-admission-test=begin
         # "packet-admission.cases=47"
         "packet-admission.case=tagged-ipv4-plain" "packet-admission.case=tagged-ipv4-tags"
         "packet-admission.case=tagged-ipv4-refusals" "packet-admission.case=tagged-ipv4-lifetime"
-        "packet-admission.cases=51"
+        # The fifty-one earlier admission groups still execute before encoding.
+        # "packet-admission.cases=51"
+        "packet-admission.case=udp-write-golden" "packet-admission.case=udp-write-refusals"
+        "packet-admission.case=udp-write-empty" "packet-admission.case=udp-write-zero-checksum"
+        # Earlier total retained: "packet-admission.cases=55"
+        "packet-admission.case=icmp-write-golden" "packet-admission.case=icmp-write-refusals"
+        "packet-admission.case=icmp-write-reply" "packet-admission.case=icmp-write-zero-checksum"
+        # Earlier total retained: "packet-admission.cases=59"
+        "packet-admission.case=tcp-receive-ownership" "packet-admission.case=tcp-receive-refusals"
+        "packet-admission.case=tcp-receive-backpressure" "packet-admission.case=tcp-receive-ring-wrap"
+        # Earlier total retained: "packet-admission.cases=63"
+        "packet-admission.case=tcp-send-ownership" "packet-admission.case=tcp-send-refusals"
+        "packet-admission.case=tcp-send-partial-ack" "packet-admission.case=tcp-send-ring-wrap"
+        # Previous total retained: "packet-admission.cases=67"
+        "packet-admission.case=tcp-write-golden" "packet-admission.case=tcp-write-refusals"
+        "packet-admission.case=tcp-write-empty" "packet-admission.case=tcp-write-zero-checksum"
+        # Prior total retained; all seventy-one groups remain in order.
+        # "packet-admission.cases=71"
+        "packet-admission.case=tcp-options-golden" "packet-admission.case=tcp-options-boundary"
+        "packet-admission.case=tcp-options-refusals" "packet-admission.case=tcp-options-lifetime"
+        # Prior total retained: "packet-admission.cases=75"
+        "packet-admission.case=tcp-option-values-golden" "packet-admission.case=tcp-option-values-refusal"
+        "packet-admission.case=tcp-option-values-boundary" "packet-admission.case=tcp-option-values-lifetime"
+        "packet-admission.cases=79"
         "UMICOM_KERNEL_PACKET_ADMISSION_READY" "UMICOM_KERNEL_END")
     string(FIND "${_stdout}" "${_marker}" _position)
     if(_position LESS_EQUAL _previous)
@@ -95,4 +118,11 @@ endforeach()
 # Earlier status retained: Thirty-nine packet groups completed in the current diagnostic guest without a NIC.
 # Previous status retained: Forty-three packet groups completed in the current diagnostic guest without a NIC.
 # Previous report retained: Forty-seven packet groups completed in the current diagnostic guest without a NIC.
-message(STATUS "Fifty-one packet groups completed in the current diagnostic guest without a NIC")
+# Previous report retained: Fifty-one admission groups preceded UDP encoding.
+# Earlier result retained: fifty-five groups before ICMP encoding.
+# Earlier result retained: fifty-nine admission and encoding groups before receive storage.
+# Previous report retained: Sixty-three packet and receive-storage groups completed without a NIC.
+# Previous status retained: Sixty-seven packet and stream-storage groups completed without a NIC.
+# Previous report retained: Seventy-one packet and stream-storage groups completed without a NIC.
+# Prior report retained: Seventy-five packet, stream-storage and option groups completed without a NIC.
+message(STATUS "Seventy-nine packet, stream-storage and option groups completed in the current diagnostic guest without a NIC")

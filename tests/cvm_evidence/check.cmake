@@ -21,6 +21,7 @@ endforeach()
 # input is used: these files are plain identity fixtures, never guest programs.
 file(MAKE_DIRECTORY "${WORK}/runtime" "${WORK}/kernel")
 set(runtime_files src/status.c src/vm.c src/bytecode.c src/comparison.c
+    src/execution_bounds.c include/umicom_c/execution_bounds.h
     src/internal.h include/umicom_c/umicom_c.h include/umicom_c/comparison.h
     include/umicom_c/trace.h
     include/umicom_c/machine.h include/umicom_c/managed_heap.h src/managed_heap.c
@@ -29,7 +30,9 @@ set(runtime_files src/status.c src/vm.c src/bytecode.c src/comparison.c
     cmake/UmicomCRuntime.cmake)
 # Preserve the previous inventory line; the bitwise fixture is now a required compiled input.
 # set(kernel_files programs/cvm/main.c programs/cvm/remainder_checks.h programs/cvm/complement_checks.h programs/cvm/entry.S
-set(kernel_files programs/cvm/main.c programs/cvm/remainder_checks.h programs/cvm/complement_checks.h programs/cvm/bitwise_checks.h programs/cvm/machine_checks.h programs/cvm/entry.S
+# Preserve the prior source inventory; shifts are now a compiled guest input.
+# set(kernel_files programs/cvm/main.c programs/cvm/remainder_checks.h programs/cvm/complement_checks.h programs/cvm/bitwise_checks.h programs/cvm/machine_checks.h programs/cvm/slice_checks.h programs/cvm/entry.S
+set(kernel_files programs/cvm/main.c programs/cvm/remainder_checks.h programs/cvm/complement_checks.h programs/cvm/bitwise_checks.h programs/cvm/machine_checks.h programs/cvm/slice_checks.h programs/cvm/shift_checks.h programs/cvm/bounds_checks.h programs/cvm/entry.S
     programs/cvm/CMakeLists.txt programs/diagnostic/linker.ld cmake/CvmPrograms.cmake)
 foreach(relative IN LISTS runtime_files)
     get_filename_component(parent "${WORK}/runtime/${relative}" DIRECTORY)
@@ -58,6 +61,18 @@ if(CASE STREQUAL "unchanged")
     set(expect_success TRUE)
 elseif(CASE STREQUAL "source-edit")
     file(APPEND "${WORK}/runtime/src/vm.c" "changed source")
+elseif(CASE STREQUAL "bounds-source-edit")
+    file(APPEND "${WORK}/runtime/src/execution_bounds.c" "changed path costs")
+elseif(CASE STREQUAL "bounds-source-missing")
+    file(REMOVE "${WORK}/runtime/src/execution_bounds.c")
+elseif(CASE STREQUAL "bounds-header-edit")
+    file(APPEND "${WORK}/runtime/include/umicom_c/execution_bounds.h" "changed bounds contract")
+elseif(CASE STREQUAL "bounds-header-missing")
+    file(REMOVE "${WORK}/runtime/include/umicom_c/execution_bounds.h")
+elseif(CASE STREQUAL "bounds-guest-edit")
+    file(APPEND "${WORK}/kernel/programs/cvm/bounds_checks.h" "changed guest checks")
+elseif(CASE STREQUAL "bounds-guest-missing")
+    file(REMOVE "${WORK}/kernel/programs/cvm/bounds_checks.h")
 elseif(CASE STREQUAL "trace-header-edit")
     file(APPEND "${WORK}/runtime/include/umicom_c/trace.h" "changed trace layout")
 elseif(CASE STREQUAL "trace-header-missing")
@@ -86,6 +101,14 @@ elseif(CASE STREQUAL "bitwise-header-edit")
     file(APPEND "${WORK}/kernel/programs/cvm/bitwise_checks.h" "changed bitwise fixture")
 elseif(CASE STREQUAL "bitwise-header-missing")
     file(REMOVE "${WORK}/kernel/programs/cvm/bitwise_checks.h")
+elseif(CASE STREQUAL "slice-header-edit")
+    file(APPEND "${WORK}/kernel/programs/cvm/slice_checks.h" "changed slice fixture")
+elseif(CASE STREQUAL "slice-header-missing")
+    file(REMOVE "${WORK}/kernel/programs/cvm/slice_checks.h")
+elseif(CASE STREQUAL "shift-header-edit")
+    file(APPEND "${WORK}/kernel/programs/cvm/shift_checks.h" "changed shift fixture")
+elseif(CASE STREQUAL "shift-header-missing")
+    file(REMOVE "${WORK}/kernel/programs/cvm/shift_checks.h")
 elseif(CASE STREQUAL "image-edit")
     file(APPEND "${WORK}/o2.fixture" "changed image")
 elseif(CASE STREQUAL "recipe-edit")
@@ -124,7 +147,14 @@ if(NOT expect_success)
     # if(CASE STREQUAL "source-missing" OR CASE STREQUAL "trace-header-missing" OR CASE STREQUAL "profile-header-missing" OR CASE STREQUAL "remainder-header-missing" OR CASE STREQUAL "complement-header-missing")
     # Preserve the former missing-input condition while adding the new required runtime files.
     # if(CASE STREQUAL "source-missing" OR CASE STREQUAL "trace-header-missing" OR CASE STREQUAL "profile-header-missing" OR CASE STREQUAL "remainder-header-missing" OR CASE STREQUAL "complement-header-missing" OR CASE STREQUAL "bitwise-header-missing")
-    if(CASE STREQUAL "source-missing" OR CASE STREQUAL "trace-header-missing" OR CASE STREQUAL "profile-header-missing" OR CASE STREQUAL "remainder-header-missing" OR CASE STREQUAL "complement-header-missing" OR CASE STREQUAL "bitwise-header-missing" OR CASE STREQUAL "machine-header-missing" OR CASE STREQUAL "managed-source-missing")
+    # Retain the former source set; slice fixture removal must use the same
+    # missing-source diagnostic instead of the changed-receipt diagnostic.
+    # if(CASE STREQUAL "source-missing" OR CASE STREQUAL "trace-header-missing" OR CASE STREQUAL "profile-header-missing" OR CASE STREQUAL "remainder-header-missing" OR CASE STREQUAL "complement-header-missing" OR CASE STREQUAL "bitwise-header-missing" OR CASE STREQUAL "machine-header-missing" OR CASE STREQUAL "managed-source-missing")
+    # Prior source-refusal set retained; shift removal has the same source diagnostic.
+    # if(CASE STREQUAL "source-missing" OR CASE STREQUAL "trace-header-missing" OR CASE STREQUAL "profile-header-missing" OR CASE STREQUAL "remainder-header-missing" OR CASE STREQUAL "complement-header-missing" OR CASE STREQUAL "bitwise-header-missing" OR CASE STREQUAL "machine-header-missing" OR CASE STREQUAL "managed-source-missing" OR CASE STREQUAL "slice-header-missing")
+    # Retain the previous missing-input set; path-budget inputs share its source diagnostic.
+    # if(CASE STREQUAL "source-missing" OR CASE STREQUAL "trace-header-missing" OR CASE STREQUAL "profile-header-missing" OR CASE STREQUAL "remainder-header-missing" OR CASE STREQUAL "complement-header-missing" OR CASE STREQUAL "bitwise-header-missing" OR CASE STREQUAL "machine-header-missing" OR CASE STREQUAL "managed-source-missing" OR CASE STREQUAL "slice-header-missing" OR CASE STREQUAL "shift-header-missing")
+    if(CASE STREQUAL "source-missing" OR CASE STREQUAL "trace-header-missing" OR CASE STREQUAL "profile-header-missing" OR CASE STREQUAL "remainder-header-missing" OR CASE STREQUAL "complement-header-missing" OR CASE STREQUAL "bitwise-header-missing" OR CASE STREQUAL "machine-header-missing" OR CASE STREQUAL "managed-source-missing" OR CASE STREQUAL "slice-header-missing" OR CASE STREQUAL "shift-header-missing" OR CASE STREQUAL "bounds-source-missing" OR CASE STREQUAL "bounds-header-missing" OR CASE STREQUAL "bounds-guest-missing")
         set(reason "Missing CVM source")
     elseif(CASE STREQUAL "receipt-missing")
         set(reason "build the CVM image before guest qualification")

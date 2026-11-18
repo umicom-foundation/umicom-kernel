@@ -207,3 +207,85 @@ if(BUILD_TESTING)
         set_tests_properties("kernel.network_tagged_ipv4.${_case}" PROPERTIES TIMEOUT 10)
     endforeach()
 endif()
+
+# RAM serialization is exercised without a NIC or a live UDP socket.
+add_executable(umicom-network-udp-write-tests udp_write_tests.c
+    ../../kernel/network_packet.c ../../kernel/address.c)
+target_include_directories(umicom-network-udp-write-tests PRIVATE ../../include)
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(umicom-network-udp-write-tests PRIVATE
+        -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)
+endif()
+if(BUILD_TESTING)
+    foreach(_case IN ITEMS golden all-lengths capacity limits ttl fields checksum-zero
+        unaligned arguments overlap alignment address-wrap lifetime)
+        add_test(NAME "kernel.network_udp_write.${_case}" COMMAND umicom-network-udp-write-tests "${_case}")
+        set_tests_properties("kernel.network_udp_write.${_case}" PROPERTIES TIMEOUT 20)
+    endforeach()
+endif()
+
+# ICMP preserves zero checksums and reuses span/framing ownership, not UDP policy.
+add_executable(umicom-network-icmp-write-tests icmp_write_tests.c
+    ../../kernel/network_packet.c ../../kernel/address.c)
+target_include_directories(umicom-network-icmp-write-tests PRIVATE ../../include)
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(umicom-network-icmp-write-tests PRIVATE
+        -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)
+endif()
+if(BUILD_TESTING)
+    foreach(_case IN ITEMS golden all-lengths capacity limits ttl fields checksum-zero
+        reply types corruption unaligned arguments overlap alignment address-wrap lifetime)
+        add_test(NAME "kernel.network_icmp_write.${_case}" COMMAND umicom-network-icmp-write-tests "${_case}")
+        set_tests_properties("kernel.network_icmp_write.${_case}" PROPERTIES TIMEOUT 20)
+    endforeach()
+endif()
+
+# TCP serialization reuses the same production framing and memory owners.
+add_executable(umicom-network-tcp-write-tests tcp_write_tests.c
+    ../../kernel/network_packet.c ../../kernel/address.c)
+target_include_directories(umicom-network-tcp-write-tests PRIVATE ../../include)
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(umicom-network-tcp-write-tests PRIVATE
+        -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)
+endif()
+if(BUILD_TESTING)
+    foreach(_case IN ITEMS golden all-lengths flags fields checksum-zero capacity
+        limits ttl arguments overlap alignment address-wrap unaligned lifetime corruption)
+        add_test(NAME "kernel.network_tcp_write.${_case}" COMMAND umicom-network-tcp-write-tests "${_case}")
+        set_tests_properties("kernel.network_tcp_write.${_case}" PROPERTIES TIMEOUT 20)
+    endforeach()
+endif()
+
+# TCP option structure is independent of the retained fixed-header profiles.
+add_executable(umicom-tcp-options-tests tcp_options_tests.c
+    ../../kernel/network_packet.c ../../kernel/address.c)
+target_include_directories(umicom-tcp-options-tests PRIVATE ../../include)
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(umicom-tcp-options-tests PRIVATE
+        -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)
+endif()
+if(BUILD_TESTING)
+    foreach(_case golden empty eol maximum-nops maximum-option opaque-kinds duplicates all-offsets
+        missing-length illegal-length overrun nonzero-padding area-size unaligned overlap
+        output-alignment address-wrap lifetime arguments)
+        add_test(NAME "kernel.tcp_options.${_case}" COMMAND umicom-tcp-options-tests "${_case}")
+        set_tests_properties("kernel.tcp_options.${_case}" PROPERTIES TIMEOUT 20)
+    endforeach()
+endif()
+
+# Known option payloads use the same bounded structural reader.
+add_executable(umicom-tcp-option-values-tests tcp_option_values_tests.c
+    ../../kernel/network_packet.c ../../kernel/address.c)
+target_include_directories(umicom-tcp-option-values-tests PRIVATE ../../include)
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(umicom-tcp-option-values-tests PRIVATE
+        -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)
+endif()
+if(BUILD_TESTING)
+    foreach(_case golden empty mss-values scale-values timestamp-bits sack-permitted
+        permutations opaque maximum-opaque known-lengths duplicates late-refusal
+        structural-refusal unaligned overlap output-alignment address-wrap ownership arguments)
+        add_test(NAME "kernel.tcp_option_values.${_case}" COMMAND umicom-tcp-option-values-tests "${_case}")
+        set_tests_properties("kernel.tcp_option_values.${_case}" PROPERTIES TIMEOUT 20)
+    endforeach()
+endif()

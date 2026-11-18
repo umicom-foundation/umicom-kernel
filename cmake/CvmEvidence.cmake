@@ -19,6 +19,7 @@ foreach(_required IN ITEMS MODE SOURCE KERNEL O0 O2 RECEIPT RECIPE)
 endforeach()
 set(_identity "")
 foreach(_relative IN ITEMS src/status.c src/vm.c src/bytecode.c src/comparison.c
+    src/execution_bounds.c include/umicom_c/execution_bounds.h
     src/internal.h include/umicom_c/umicom_c.h include/umicom_c/comparison.h
     # Trace layout is a runtime input and must be bound to the linked images.
     include/umicom_c/trace.h
@@ -34,7 +35,9 @@ foreach(_relative IN ITEMS src/status.c src/vm.c src/bytecode.c src/comparison.c
 endforeach()
 # Preserve the previous inventory line; the bitwise fixture is now a required compiled input.
 # foreach(_relative IN ITEMS programs/cvm/main.c programs/cvm/remainder_checks.h programs/cvm/complement_checks.h programs/cvm/entry.S
-foreach(_relative IN ITEMS programs/cvm/main.c programs/cvm/remainder_checks.h programs/cvm/complement_checks.h programs/cvm/bitwise_checks.h programs/cvm/machine_checks.h programs/cvm/entry.S
+# Preserve the prior source inventory; shifts are now a compiled guest input.
+# foreach(_relative IN ITEMS programs/cvm/main.c programs/cvm/remainder_checks.h programs/cvm/complement_checks.h programs/cvm/bitwise_checks.h programs/cvm/machine_checks.h programs/cvm/slice_checks.h programs/cvm/entry.S
+foreach(_relative IN ITEMS programs/cvm/main.c programs/cvm/remainder_checks.h programs/cvm/complement_checks.h programs/cvm/bitwise_checks.h programs/cvm/machine_checks.h programs/cvm/slice_checks.h programs/cvm/shift_checks.h programs/cvm/bounds_checks.h programs/cvm/entry.S
     programs/cvm/CMakeLists.txt programs/diagnostic/linker.ld cmake/CvmPrograms.cmake)
     # Guest helper headers are compiled input, not optional commentary. Refuse
     # a missing one explicitly before attempting to fingerprint the image set.

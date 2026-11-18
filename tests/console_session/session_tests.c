@@ -120,7 +120,28 @@ static const ConsoleStep steps[] = {
     {"run /bin/umicom-cvm.elf 53", "state=exited exit=49205 "},
     {"run /bin/umicom-cvm.elf 54", "state=exited exit=49206 "},
     {"run /bin/umicom-cvm.elf 55", "state=exited exit=49207 "},
+/* Keep the normal-console journey aligned with the guest entry: selectors 56 through 72 are supported, and 73 is the first refused value. The former implementation is retained for owner review. */
+#if 0
     {"run /bin/umicom-cvm.elf 56", "state=exited exit=49156 "},
+#endif
+    {"run /bin/umicom-cvm.elf 56", "state=exited exit=49208 "},
+    {"run /bin/umicom-cvm.elf 57", "state=exited exit=49209 "},
+    {"run /bin/umicom-cvm.elf 58", "state=exited exit=49210 "},
+    {"run /bin/umicom-cvm.elf 59", "state=exited exit=49211 "},
+    {"run /bin/umicom-cvm.elf 60", "state=exited exit=49212 "},
+    {"run /bin/umicom-cvm.elf 61", "state=exited exit=49213 "},
+    {"run /bin/umicom-cvm.elf 62", "state=exited exit=49214 "},
+    {"run /bin/umicom-cvm.elf 63", "state=exited exit=49215 "},
+    {"run /bin/umicom-cvm.elf 64", "state=exited exit=49216 "},
+    {"run /bin/umicom-cvm.elf 65", "state=exited exit=49217 "},
+    {"run /bin/umicom-cvm.elf 66", "state=exited exit=49218 "},
+    {"run /bin/umicom-cvm.elf 67", "state=exited exit=49219 "},
+    {"run /bin/umicom-cvm.elf 68", "state=exited exit=49220 "},
+    {"run /bin/umicom-cvm.elf 69", "state=exited exit=49221 "},
+    {"run /bin/umicom-cvm.elf 70", "state=exited exit=49222 "},
+    {"run /bin/umicom-cvm.elf 71", "state=exited exit=49223 "},
+    {"run /bin/umicom-cvm.elf 72", "state=exited exit=49224 "},
+    {"run /bin/umicom-cvm.elf 73", "state=exited exit=49156 "},
     {"run /bin/umicom-cvm.elf 18446744073709551615", "state=exited exit=49156 "},
     {"run /bin/umicom-cvm.elf 0", "state=exited exit=42 "},
 #endif

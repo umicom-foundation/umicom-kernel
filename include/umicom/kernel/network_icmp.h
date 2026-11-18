@@ -48,4 +48,32 @@ typedef struct UmicomEthernetIpv4IcmpEchoView {
 UmicomNetworkPacketStatus UmicomKernelEthernetIpv4IcmpEchoRead(
     const void *bytes, UmicomSize accessibleBytes, UmicomEthernetIpv4IcmpEchoView *out);
 
+/* Explicit addresses and identifiers describe an outgoing RAM message. They
+ * are not inferred from an untrusted capture and do not authorize a reply. */
+typedef struct UmicomEthernetIpv4IcmpEchoSpec {
+    UmicomU8 destinationMac[6], sourceMac[6];
+    UmicomU8 sourceAddress[4], destinationAddress[4];
+    UmicomU16 identification, echoIdentifier, sequenceNumber;
+    UmicomU8 differentiatedServices, timeToLive, messageType;
+} UmicomEthernetIpv4IcmpEchoSpec;
+
+/* Encode type 8 (echo request) or type 0 (echo reply), code zero, inside an
+ * untagged fixed IPv4 header. Payload is 0..1472 bytes; TTL must be nonzero.
+ * DF is set and both IPv4 and ICMP checksums are generated. An ICMP checksum
+ * of zero is kept as zero: unlike UDP it does not mean checksum absent.
+ * Result length is 42 + payloadBytes without preamble, padding or Ethernet FCS.
+ *
+ * spec and written require declared alignment. All complete spans (including
+ * destination's unused capacity) must be accessible, stable and pairwise
+ * disjoint. NULL payload is allowed only with zero length. Checked address
+ * arithmetic does not establish mapping, permissions or device coherence.
+ * Refusal preserves the destination and written. Success preserves spare
+ * capacity and retains no input pointers. No allocation, NIC, routing, request
+ * matching, automatic address swapping or I/O occurs. This is not live ping.
+ */
+UmicomNetworkPacketStatus UmicomKernelEthernetIpv4IcmpEchoWrite(
+    const UmicomEthernetIpv4IcmpEchoSpec *spec, const void *payload,
+    UmicomSize payloadBytes, void *destination, UmicomSize capacity,
+    UmicomSize *written);
+
 #endif

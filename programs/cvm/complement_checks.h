@@ -40,7 +40,11 @@ static UmicomU64 CheckComplement(UmicomU64 argument)
 #if 0
             umc_runtime_profile(UMC_PROFILE_WIRE_VERSIONS)==62U ? 0xc02aU : 0xe039U;
 #else
+/* The runtime now also admits format 7; this fixture retains its original encoding. The former implementation is retained for owner review. */
+#if 0
             umc_runtime_profile(UMC_PROFILE_WIRE_VERSIONS)==126U ? 0xc02aU : 0xe039U;
+#endif
+            umc_runtime_profile(UMC_PROFILE_WIRE_VERSIONS)==254U ? 0xc02aU : 0xe039U;
 #endif
     }
     UmcStatus status=umc_execute_trace(code,count,argument==41U?2U:4U,&result,steps,4U,&used,&d);

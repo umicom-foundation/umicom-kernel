@@ -24,7 +24,11 @@ foreach(case IN ITEMS unchanged source-edit image-edit recipe-edit receipt-missi
     machine-header-edit machine-header-missing managed-source-edit managed-source-missing
     profile-header-edit profile-header-missing
     remainder-header-edit remainder-header-missing complement-header-edit complement-header-missing
-    bitwise-header-edit bitwise-header-missing)
+    bitwise-header-edit bitwise-header-missing
+    slice-header-edit slice-header-missing
+    shift-header-edit shift-header-missing
+    bounds-source-edit bounds-source-missing bounds-header-edit bounds-header-missing
+    bounds-guest-edit bounds-guest-missing)
     add_test(NAME "kernel.cvm.evidence.${case}"
         COMMAND "${CMAKE_COMMAND}" "-DCASE=${case}" "-DWORK=${CMAKE_CURRENT_BINARY_DIR}/${case}"
             "-DEVIDENCE=${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/CvmEvidence.cmake"

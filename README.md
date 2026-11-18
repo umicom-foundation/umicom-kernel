@@ -260,3 +260,12 @@ The same boundary now admits fixed-profile UDP datagrams with explicit checksum 
 ## Bounded TCP sequence arithmetic
 
 The freestanding sequence helpers compare circular positions, bound advances and control-byte lengths, and evaluate new ACK and receive-window predicates. They allocate no memory and perform no network I/O. [The sequence arithmetic lesson](docs/tcp-sequence-arithmetic.html) explains wraparound, half-space ambiguity, zero windows and host/RV64 link qualification. Live TCP connections remain a separate implementation task.
+
+## Owned contiguous TCP payload storage
+
+The [bounded receive-storage guide](docs/tcp-receive-storage.html) documents the
+1024-byte ring, copied payload ownership, unchanged outputs on refusal and
+read-side capacity recovery. The diagnostic packet check now includes 63
+ordered groups, including four receive-storage groups without a network
+device. This extends the earlier admission-only qualification described above;
+it does not enable a TCP connection, socket API or live networking.

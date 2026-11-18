@@ -25,6 +25,9 @@
 #include "umicom/kernel/network_udp.h"
 #include "umicom/kernel/network_icmp.h"
 #include "umicom/kernel/network_tcp.h"
+#include "umicom/kernel/tcp_options.h"
+#include "umicom/kernel/tcp_receive.h"
+#include "umicom/kernel/tcp_send_buffer.h"
 #include "umicom/kernel/console.h"
 #include "umicom/kernel/platform.h"
 #include "boot_memory.h"
@@ -71,6 +74,57 @@ static const UmicomU8 udpCapture[] = {
     192,0,2,1,198,51,100,2,0x30,0x39,0,0x35,0,13,0x9f,0x5c,
     'h','e','l','l','o'
 };
+
+/* Exercise the encoder in the no-NIC guest using the independently fixed
+ * capture already used by admission. No driver or network stack is invoked. */
+static void UdpWriteValidateExecution(void)
+{
+    UmicomEthernetIpv4UdpSpec spec;
+    UmicomBootMemoryClear(&spec, sizeof spec);
+    UmicomBootMemoryCopy(spec.destinationMac, udpCapture, 6U);
+    UmicomBootMemoryCopy(spec.sourceMac, udpCapture + 6U, 6U);
+    UmicomBootMemoryCopy(spec.sourceAddress, udpCapture + 26U, 4U);
+    UmicomBootMemoryCopy(spec.destinationAddress, udpCapture + 30U, 4U);
+    spec.sourcePort = 12345U; spec.destinationPort = 53U;
+    spec.identification = 0x1234U; spec.timeToLive = 64U;
+    UmicomU8 frame[60], before[60];
+    for (UmicomSize i = 0U; i < sizeof frame; ++i) frame[i] = 0xa5U;
+    UmicomSize written = 0U;
+    PacketRequire(UmicomKernelEthernetIpv4UdpWrite(&spec, udpCapture + 42U, 5U,
+        frame, sizeof frame, &written) == UMICOM_NETWORK_PACKET_OK, "UDP encode golden");
+    PacketRequire(written == sizeof udpCapture && PacketBytesEqual(frame, udpCapture, sizeof udpCapture),
+        "UDP encode independent bytes");
+    for (UmicomSize i = written; i < sizeof frame; ++i)
+        PacketRequire(frame[i] == 0xa5U, "UDP encode spare capacity");
+    UmicomKernelConsoleWriteLine("packet-admission.case=udp-write-golden");
+
+    UmicomBootMemoryCopy(before, frame, sizeof frame);
+    written = 777U;
+    PacketRequire(UmicomKernelEthernetIpv4UdpWrite(&spec, udpCapture + 42U, 5U,
+        frame, 46U, &written) == UMICOM_NETWORK_PACKET_LENGTH, "UDP encode short capacity");
+    PacketRequire(written == 777U && PacketBytesEqual(before, frame, sizeof frame), "UDP encode refusal mutated output");
+    PacketRequire(UmicomKernelEthernetIpv4UdpWrite(&spec, frame + 1U, 5U,
+        frame, sizeof frame, &written) == UMICOM_NETWORK_PACKET_ARGUMENT, "UDP encode overlap");
+    PacketRequire(written == 777U && PacketBytesEqual(before, frame, sizeof frame), "UDP encode alias mutated output");
+    UmicomKernelConsoleWriteLine("packet-admission.case=udp-write-refusals");
+
+    UmicomEthernetIpv4UdpView view;
+    PacketRequire(UmicomKernelEthernetIpv4UdpWrite(&spec, (const void *)0, 0U,
+        frame, sizeof frame, &written) == UMICOM_NETWORK_PACKET_OK, "UDP encode empty");
+    PacketRequire(written == 42U && UmicomKernelEthernetIpv4UdpRead(frame, written,
+        UMICOM_UDP_CHECKSUM_REQUIRE, &view) == UMICOM_NETWORK_PACKET_OK &&
+        view.payloadBytes == 0U && view.checksumPresent == UMICOM_TRUE, "UDP encoded empty admission");
+    UmicomKernelConsoleWriteLine("packet-admission.case=udp-write-empty");
+
+    const UmicomU8 zeroPayload[2] = {0xe3U, 0x34U};
+    PacketRequire(UmicomKernelEthernetIpv4UdpWrite(&spec, zeroPayload, 2U,
+        frame, sizeof frame, &written) == UMICOM_NETWORK_PACKET_OK, "UDP encode zero checksum");
+    PacketRequire(frame[40] == 0xffU && frame[41] == 0xffU &&
+        UmicomKernelEthernetIpv4UdpRead(frame, written, UMICOM_UDP_CHECKSUM_REQUIRE, &view) ==
+            UMICOM_NETWORK_PACKET_OK, "UDP encoded negative zero");
+    UmicomKernelConsoleWriteLine("packet-admission.case=udp-write-zero-checksum");
+}
+
 static void UdpRefused(const void *bytes, UmicomSize length,
     UmicomNetworkPacketStatus expected, const char *reason)
 {
@@ -622,6 +676,300 @@ static void TaggedIpv4ValidateExecution(void)
     UmicomKernelConsoleWriteLine("packet-admission.case=tagged-ipv4-lifetime");
 }
 
+/* Exercise the echo writer against the earlier independent capture. The
+ * no-NIC guest observes only owned RAM bytes, never host network traffic. */
+static void IcmpWriteValidateExecution(void)
+{
+    UmicomEthernetIpv4IcmpEchoSpec spec;
+    UmicomBootMemoryClear(&spec, sizeof spec);
+    UmicomBootMemoryCopy(spec.destinationMac, echoCapture, 6U);
+    UmicomBootMemoryCopy(spec.sourceMac, echoCapture + 6U, 6U);
+    UmicomBootMemoryCopy(spec.sourceAddress, echoCapture + 26U, 4U);
+    UmicomBootMemoryCopy(spec.destinationAddress, echoCapture + 30U, 4U);
+    spec.identification = 0x1234U; spec.echoIdentifier = 0x1234U;
+    spec.sequenceNumber = 0xabcdU; spec.timeToLive = 64U;
+    spec.messageType = UMICOM_ICMP_ECHO_REQUEST;
+    UmicomU8 frame[60], before[60];
+    for (UmicomSize i = 0U; i < sizeof frame; ++i) frame[i] = 0xa5U;
+    UmicomSize written = 0U;
+    PacketRequire(UmicomKernelEthernetIpv4IcmpEchoWrite(&spec, echoCapture + 42U, 5U,
+        frame, sizeof frame, &written) == UMICOM_NETWORK_PACKET_OK, "ICMP write request");
+    PacketRequire(written == sizeof echoCapture && PacketBytesEqual(frame, echoCapture, sizeof echoCapture),
+        "ICMP write independent bytes");
+    for (UmicomSize i = written; i < sizeof frame; ++i)
+        PacketRequire(frame[i] == 0xa5U, "ICMP write spare capacity");
+    UmicomKernelConsoleWriteLine("packet-admission.case=icmp-write-golden");
+
+    UmicomBootMemoryCopy(before, frame, sizeof frame); written = 777U;
+    PacketRequire(UmicomKernelEthernetIpv4IcmpEchoWrite(&spec, echoCapture + 42U, 5U,
+        frame, 46U, &written) == UMICOM_NETWORK_PACKET_LENGTH, "ICMP write short capacity");
+    PacketRequire(written == 777U && PacketBytesEqual(before, frame, sizeof frame), "ICMP write refusal publication");
+    PacketRequire(UmicomKernelEthernetIpv4IcmpEchoWrite(&spec, frame + 1U, 5U,
+        frame, sizeof frame, &written) == UMICOM_NETWORK_PACKET_ARGUMENT, "ICMP write overlap");
+    PacketRequire(written == 777U && PacketBytesEqual(before, frame, sizeof frame), "ICMP write overlap publication");
+    UmicomKernelConsoleWriteLine("packet-admission.case=icmp-write-refusals");
+
+    UmicomEthernetIpv4IcmpEchoView view;
+    spec.messageType = UMICOM_ICMP_ECHO_REPLY;
+    PacketRequire(UmicomKernelEthernetIpv4IcmpEchoWrite(&spec, echoCapture + 42U, 5U,
+        frame, sizeof frame, &written) == UMICOM_NETWORK_PACKET_OK, "ICMP write reply");
+    PacketRequire(frame[34] == 0U && frame[36] == 0xfeU && frame[37] == 0x2bU &&
+        UmicomKernelEthernetIpv4IcmpEchoRead(frame, written, &view) == UMICOM_NETWORK_PACKET_OK &&
+        view.messageType == UMICOM_ICMP_ECHO_REPLY && view.identifier == 0x1234U &&
+        view.sequenceNumber == 0xabcdU, "ICMP write reply identity");
+    UmicomKernelConsoleWriteLine("packet-admission.case=icmp-write-reply");
+
+    const UmicomU8 zeroPayload[2] = {0x39U, 0xfeU};
+    spec.messageType = UMICOM_ICMP_ECHO_REQUEST;
+    PacketRequire(UmicomKernelEthernetIpv4IcmpEchoWrite(&spec, zeroPayload, 2U,
+        frame, sizeof frame, &written) == UMICOM_NETWORK_PACKET_OK, "ICMP write zero checksum");
+    PacketRequire(frame[36] == 0U && frame[37] == 0U &&
+        UmicomKernelEthernetIpv4IcmpEchoRead(frame, written, &view) == UMICOM_NETWORK_PACKET_OK,
+        "ICMP zero checksum remains verified");
+    UmicomKernelConsoleWriteLine("packet-admission.case=icmp-write-zero-checksum");
+}
+
+/* This fixture owns RAM only. It does not bypass packet admission to inject
+ * traffic: no device, socket, TCP connection or transmitted ACK exists here. */
+static void TcpReceiveValidateExecution(void)
+{
+    static UmicomTcpReceive receiver;
+    static UmicomU8 before[sizeof receiver], data[UMICOM_TCP_RECEIVE_CAPACITY];
+    static UmicomU8 output[UMICOM_TCP_RECEIVE_CAPACITY];
+    UmicomTcpReceiveSnapshot snapshot;
+    UmicomU32 cursor=77U, count=77U;
+    for(UmicomU32 i=0U;i<UMICOM_TCP_RECEIVE_CAPACITY;++i) data[i]=(UmicomU8)(i%251U);
+    PacketRequire(UmicomKernelTcpReceiveInit(&receiver,0xfffffffeU)==UMICOM_TCP_SEQUENCE_ACCEPT,
+        "receive initialization");
+    PacketRequire(UmicomKernelTcpReceiveAppend(&receiver,0xfffffffeU,data,4U,&cursor)==UMICOM_TCP_SEQUENCE_ACCEPT && cursor==2U,
+        "receive cursor wraps only after copy");
+    data[0]=255U;
+    PacketRequire(UmicomKernelTcpReceiveRead(&receiver,output,2U,&count)==UMICOM_TCP_SEQUENCE_ACCEPT && count==2U &&
+        output[0]==0U && output[1]==1U && receiver.next==2U, "receive owns payload and read preserves cursor");
+    PacketRequire(receiver.bytes[0]==0U && receiver.bytes[1]==0U && receiver.bytes[2]==2U,
+        "receive clears consumed slots only");
+    UmicomKernelConsoleWriteLine("packet-admission.case=tcp-receive-ownership");
+
+    UmicomBootMemoryCopy(before,&receiver,sizeof receiver);
+    cursor=77U;
+    PacketRequire(UmicomKernelTcpReceiveAppend(&receiver,3U,data,1U,&cursor)==UMICOM_TCP_SEQUENCE_REJECT &&
+        cursor==77U && PacketBytesEqual(before,&receiver,sizeof receiver), "receive gap atomic refusal");
+    PacketRequire(UmicomKernelTcpReceiveAppend(&receiver,2U,data,0xffffffffU,&cursor)==UMICOM_TCP_SEQUENCE_REJECT &&
+        cursor==77U && PacketBytesEqual(before,&receiver,sizeof receiver), "receive huge count atomic refusal");
+    PacketRequire(UmicomKernelTcpReceiveAppend(&receiver,2U,0,1U,&cursor)==UMICOM_TCP_SEQUENCE_INVALID &&
+        cursor==77U && PacketBytesEqual(before,&receiver,sizeof receiver), "receive null atomic refusal");
+    UmicomKernelConsoleWriteLine("packet-admission.case=tcp-receive-refusals");
+
+    data[0]=0U;
+    PacketRequire(UmicomKernelTcpReceiveInit(&receiver,100U)==UMICOM_TCP_SEQUENCE_ACCEPT &&
+        UmicomKernelTcpReceiveAppend(&receiver,100U,data,UMICOM_TCP_RECEIVE_CAPACITY,&cursor)==UMICOM_TCP_SEQUENCE_ACCEPT &&
+        cursor==1124U, "receive fills bounded capacity");
+    PacketRequire(UmicomKernelTcpReceiveInspect(&receiver,&snapshot)==UMICOM_TCP_SEQUENCE_ACCEPT &&
+        snapshot.buffered==UMICOM_TCP_RECEIVE_CAPACITY && snapshot.available==0U, "receive reports full storage");
+    UmicomBootMemoryCopy(before,&receiver,sizeof receiver);
+    cursor=77U;
+    PacketRequire(UmicomKernelTcpReceiveAppend(&receiver,1124U,data,1U,&cursor)==UMICOM_TCP_SEQUENCE_REJECT &&
+        cursor==77U && PacketBytesEqual(before,&receiver,sizeof receiver), "receive full storage refuses acknowledgment advance");
+    UmicomKernelConsoleWriteLine("packet-admission.case=tcp-receive-backpressure");
+
+    PacketRequire(UmicomKernelTcpReceiveRead(&receiver,output,1000U,&count)==UMICOM_TCP_SEQUENCE_ACCEPT && count==1000U &&
+        PacketBytesEqual(output,data,1000U), "receive ordered first drain");
+    PacketRequire(UmicomKernelTcpReceiveAppend(&receiver,1124U,data,100U,&cursor)==UMICOM_TCP_SEQUENCE_ACCEPT && cursor==1224U,
+        "receive reuses freed ring slots");
+    PacketRequire(UmicomKernelTcpReceiveRead(&receiver,output,UMICOM_TCP_RECEIVE_CAPACITY,&count)==UMICOM_TCP_SEQUENCE_ACCEPT &&
+        count==124U && PacketBytesEqual(output,data+1000U,24U) && PacketBytesEqual(output+24U,data,100U),
+        "receive preserves stream order across ring wrap");
+    PacketRequire(UmicomKernelTcpReceiveInspect(&receiver,&snapshot)==UMICOM_TCP_SEQUENCE_ACCEPT &&
+        snapshot.next==1224U && snapshot.buffered==0U && snapshot.available==UMICOM_TCP_RECEIVE_CAPACITY,
+        "receive drained counters");
+    for(UmicomU32 i=0U;i<UMICOM_TCP_RECEIVE_CAPACITY;++i)
+        PacketRequire(receiver.bytes[i]==0U,"receive consumed slots cleared");
+    UmicomKernelConsoleWriteLine("packet-admission.case=tcp-receive-ring-wrap");
+}
+
+/* Synthetic RAM exercise: no socket, peer, transmission or authenticated
+ * acknowledgment packet is involved. The actual buffer owner is called. */
+static void TcpSendValidateExecution(void)
+{
+    static UmicomTcpSendBuffer sender;
+    static UmicomU8 before[sizeof sender], data[UMICOM_TCP_SEND_CAPACITY], output[UMICOM_TCP_SEND_CAPACITY];
+    UmicomTcpTransmitSnapshot snapshot;
+    UmicomU32 start=77U,count=77U;
+    for(UmicomU32 i=0U;i<UMICOM_TCP_SEND_CAPACITY;++i)data[i]=(UmicomU8)(i%251U);
+    PacketRequire(UmicomKernelTcpSendInit(&sender,0xfffffffeU)==UMICOM_TCP_SEQUENCE_ACCEPT,
+        "send initialization");
+    PacketRequire(UmicomKernelTcpSendAppend(&sender,data,4U,&start)==UMICOM_TCP_SEQUENCE_ACCEPT && start==0xfffffffeU,
+        "send owns four wrapping sequence bytes");
+    data[0]=99U;
+    for(UmicomU32 i=0U;i<2U;++i)
+        PacketRequire(UmicomKernelTcpSendCopy(&sender,start,output,4U,&count)==UMICOM_TCP_SEQUENCE_ACCEPT && count==4U &&
+            output[0]==0U && output[1]==1U && output[2]==2U && output[3]==3U,
+            "send repeated copies retain original bytes");
+    UmicomKernelConsoleWriteLine("packet-admission.case=tcp-send-ownership");
+
+    UmicomBootMemoryCopy(before,&sender,sizeof sender);count=77U;
+    PacketRequire(UmicomKernelTcpSendAcknowledge(&sender,3U,&count)==UMICOM_TCP_SEQUENCE_REJECT && count==77U &&
+        PacketBytesEqual(before,&sender,sizeof sender),"send future ACK preserves bytes");
+    PacketRequire(UmicomKernelTcpSendAppend(&sender,data,0xffffffffU,&count)==UMICOM_TCP_SEQUENCE_INVALID && count==77U &&
+        PacketBytesEqual(before,&sender,sizeof sender),"send huge payload refused before copy");
+    PacketRequire(UmicomKernelTcpSendCopy(&sender,2U,output,4U,&count)==UMICOM_TCP_SEQUENCE_REJECT && count==77U &&
+        PacketBytesEqual(before,&sender,sizeof sender),"send endpoint is outside retained interval");
+    UmicomKernelConsoleWriteLine("packet-admission.case=tcp-send-refusals");
+
+    PacketRequire(UmicomKernelTcpSendAcknowledge(&sender,0U,&count)==UMICOM_TCP_SEQUENCE_ACCEPT && count==2U,
+        "send partial ACK across zero");
+    PacketRequire(sender.bytes[0]==0U && sender.bytes[1]==0U && sender.bytes[2]==2U && sender.bytes[3]==3U,
+        "send clears only acknowledged slots");
+    PacketRequire(UmicomKernelTcpSendCopy(&sender,0U,output,4U,&count)==UMICOM_TCP_SEQUENCE_ACCEPT && count==2U &&
+        output[0]==2U && output[1]==3U,"send unacknowledged tail retained");
+    UmicomKernelConsoleWriteLine("packet-admission.case=tcp-send-partial-ack");
+
+    for(UmicomU32 i=0U;i<UMICOM_TCP_SEND_CAPACITY;++i)data[i]=(UmicomU8)(i%251U);
+    PacketRequire(UmicomKernelTcpSendInit(&sender,100U)==UMICOM_TCP_SEQUENCE_ACCEPT &&
+        UmicomKernelTcpSendAppend(&sender,data,UMICOM_TCP_SEND_CAPACITY,&start)==UMICOM_TCP_SEQUENCE_ACCEPT,
+        "send fills bounded capacity");
+    PacketRequire(UmicomKernelTcpSendInspect(&sender,&snapshot)==UMICOM_TCP_SEQUENCE_ACCEPT && snapshot.available==0U,
+        "send full snapshot");
+    UmicomBootMemoryCopy(before,&sender,sizeof sender);count=77U;
+    PacketRequire(UmicomKernelTcpSendAppend(&sender,data,1U,&count)==UMICOM_TCP_SEQUENCE_REJECT && count==77U &&
+        PacketBytesEqual(before,&sender,sizeof sender),"send full backpressure");
+    PacketRequire(UmicomKernelTcpSendAcknowledge(&sender,1100U,&count)==UMICOM_TCP_SEQUENCE_ACCEPT && count==1000U,
+        "send releases first thousand");
+    PacketRequire(UmicomKernelTcpSendAppend(&sender,data,1000U,&start)==UMICOM_TCP_SEQUENCE_ACCEPT && start==1124U,
+        "send reuses released ring slots");
+    PacketRequire(UmicomKernelTcpSendCopy(&sender,1100U,output,UMICOM_TCP_SEND_CAPACITY,&count)==UMICOM_TCP_SEQUENCE_ACCEPT && count==1024U &&
+        PacketBytesEqual(output,data+1000U,24U) && PacketBytesEqual(output+24U,data,1000U),"send ring keeps stream order");
+    PacketRequire(UmicomKernelTcpSendAcknowledge(&sender,2124U,&count)==UMICOM_TCP_SEQUENCE_ACCEPT && count==1024U,
+        "send final release");
+    for(UmicomU32 i=0U;i<UMICOM_TCP_SEND_CAPACITY;++i)PacketRequire(sender.bytes[i]==0U,"send released storage cleared");
+    UmicomKernelConsoleWriteLine("packet-admission.case=tcp-send-ring-wrap");
+}
+
+/* Serialize literal TCP captures in guest RAM. These calls do not bind a NIC,
+ * allocate packet queues, advance a send cursor or acknowledge a connection. */
+static void TcpWriteValidateExecution(void)
+{
+    UmicomEthernetIpv4TcpSpec spec;
+    UmicomBootMemoryClear(&spec,sizeof spec);
+    UmicomBootMemoryCopy(spec.destinationMac,tcpCapture,6U);
+    UmicomBootMemoryCopy(spec.sourceMac,tcpCapture+6U,6U);
+    UmicomBootMemoryCopy(spec.sourceAddress,tcpCapture+26U,4U);
+    UmicomBootMemoryCopy(spec.destinationAddress,tcpCapture+30U,4U);
+    spec.identification=0x1234U;spec.timeToLive=64U;
+    spec.sourcePort=12345U;spec.destinationPort=80U;
+    spec.sequenceNumber=0x12345678U;spec.acknowledgmentNumber=0x90abcdefU;
+    spec.flags=UMICOM_TCP_ACK|UMICOM_TCP_PSH;spec.window=4096U;
+    UmicomU8 output[64],before[64];UmicomSize written=999U;
+    for(UmicomSize i=0U;i<sizeof output;++i)output[i]=0xa5U;
+    PacketRequire(UmicomKernelEthernetIpv4TcpWrite(&spec,tcpCapture+54U,5U,
+        output,sizeof output,&written)==UMICOM_NETWORK_PACKET_OK && written==sizeof tcpCapture &&
+        PacketBytesEqual(output,tcpCapture,sizeof tcpCapture) && output[written]==0xa5U,
+        "TCP write literal capture");
+    UmicomKernelConsoleWriteLine("packet-admission.case=tcp-write-golden");
+    UmicomBootMemoryCopy(before,output,sizeof output);written=999U;
+    PacketRequire(UmicomKernelEthernetIpv4TcpWrite(&spec,tcpCapture+54U,5U,
+        output,58U,&written)==UMICOM_NETWORK_PACKET_LENGTH && written==999U &&
+        PacketBytesEqual(before,output,sizeof output),"TCP write capacity refusal");
+    PacketRequire(UmicomKernelEthernetIpv4TcpWrite(&spec,output+60U,1U,
+        output,sizeof output,&written)==UMICOM_NETWORK_PACKET_ARGUMENT && written==999U &&
+        PacketBytesEqual(before,output,sizeof output),"TCP write tail alias refusal");
+    UmicomKernelConsoleWriteLine("packet-admission.case=tcp-write-refusals");
+    UmicomEthernetIpv4TcpView observed;
+    PacketRequire(UmicomKernelEthernetIpv4TcpWrite(&spec,0,0U,
+        output,sizeof output,&written)==UMICOM_NETWORK_PACKET_OK && written==54U,
+        "TCP write empty capture");
+    PacketRequire(UmicomKernelEthernetIpv4TcpRead(output,written,&observed)==UMICOM_NETWORK_PACKET_OK &&
+        observed.payloadBytes==0U && observed.sequenceNumber==spec.sequenceNumber,
+        "TCP empty checksum and header");
+    UmicomKernelConsoleWriteLine("packet-admission.case=tcp-write-empty");
+    spec.window=0x87edU;
+    PacketRequire(UmicomKernelEthernetIpv4TcpWrite(&spec,tcpCapture+54U,5U,
+        output,sizeof output,&written)==UMICOM_NETWORK_PACKET_OK && output[50]==0U && output[51]==0U,
+        "TCP write keeps valid zero checksum");
+    PacketRequire(UmicomKernelEthernetIpv4TcpRead(output,written,&observed)==UMICOM_NETWORK_PACKET_OK,
+        "TCP zero checksum remains mandatory");
+    UmicomKernelConsoleWriteLine("packet-admission.case=tcp-write-zero-checksum");
+}
+
+
+/* Run structural option checks against the freestanding implementation, while
+ * preserving the earlier fixed-header and stream-storage acceptance groups. */
+static void TcpOptionsValidateExecution(void)
+{
+    UmicomU8 area[40] = {1U,2U,4U,0x05U,0xB4U,1U,0U,0U};
+    UmicomTcpOptionsView out;
+    PacketRequire(UmicomKernelTcpOptionsRead(area,8U,&out)==UMICOM_NETWORK_PACKET_OK &&
+        out.count==3U && out.entries[1].kind==2U && out.entries[1].offset==1U &&
+        out.entries[1].length==4U && out.consumedBytes==7U && out.paddingBytes==1U,
+        "option coordinates");
+    UmicomKernelConsoleWriteLine("packet-admission.case=tcp-options-golden");
+/* Use the freestanding C null-pointer constant because Kernel types do not define UMICOM_NULL; retain the authored fixture for review. The former implementation is retained for owner review. */
+#if 0
+    PacketRequire(UmicomKernelTcpOptionsRead(UMICOM_NULL,0U,&out)==UMICOM_NETWORK_PACKET_OK &&
+        out.count==0U && out.consumedBytes==0U && !out.endSeen,"empty option area");
+#endif
+    PacketRequire(UmicomKernelTcpOptionsRead((const void *)0,0U,&out)==UMICOM_NETWORK_PACKET_OK &&
+        out.count==0U && out.consumedBytes==0U && !out.endSeen,"empty option area");
+    for(UmicomSize i=0U;i<sizeof area;++i)area[i]=1U;
+    PacketRequire(UmicomKernelTcpOptionsRead(area,sizeof area,&out)==UMICOM_NETWORK_PACKET_OK &&
+        out.count==40U && out.entries[39].offset==39U && !out.endSeen,"maximum NOP area");
+    UmicomKernelConsoleWriteLine("packet-admission.case=tcp-options-boundary");
+    UmicomTcpOptionsView before;
+    UmicomBootMemoryCopy(&before,&out,sizeof before);
+    area[39]=253U;
+    PacketRequire(UmicomKernelTcpOptionsRead(area,sizeof area,&out)==UMICOM_NETWORK_PACKET_LENGTH &&
+        PacketBytesEqual(&before,&out,sizeof out),"missing final option length preserves output");
+    UmicomBootMemoryClear(area,sizeof area);area[39]=1U;
+    PacketRequire(UmicomKernelTcpOptionsRead(area,sizeof area,&out)==UMICOM_NETWORK_PACKET_HEADER &&
+        PacketBytesEqual(&before,&out,sizeof out),"nonzero EOL padding preserves output");
+    UmicomKernelConsoleWriteLine("packet-admission.case=tcp-options-refusals");
+    _Alignas(16) UmicomU8 unaligned[5]={0U,253U,2U,0U,0U};
+    PacketRequire(UmicomKernelTcpOptionsRead(unaligned+1U,4U,&out)==UMICOM_NETWORK_PACKET_OK &&
+        out.count==1U && out.entries[0].kind==253U && out.entries[0].length==2U,
+        "unaligned opaque option");
+    unaligned[1]=17U;
+    PacketRequire(out.entries[0].kind==253U,"copied option metadata lifetime");
+    UmicomKernelConsoleWriteLine("packet-admission.case=tcp-options-lifetime");
+}
+
+
+/* Known-value decoding remains a RAM-only inspection step. These guest checks
+ * do not enable negotiated TCP features or alter send/receive connection state. */
+static void TcpOptionValuesValidateExecution(void)
+{
+    UmicomU8 bytes[24] = {2U,4U,0x05U,0xB4U,3U,3U,15U,4U,2U,
+        8U,10U,0x11U,0x22U,0x33U,0x44U,0x88U,0x99U,0xAAU,0xBBU,0U};
+    UmicomTcpOptionValues out;
+    PacketRequire(UmicomKernelTcpOptionValuesRead(bytes,20U,&out)==UMICOM_NETWORK_PACKET_OK &&
+        out.hasMss && out.mss==1460U && out.hasWindowScale && out.windowScaleRaw==15U &&
+        out.windowScaleBounded==14U && out.sackPermitted && out.hasTimestamp &&
+        out.timestampValue==0x11223344U && out.timestampEcho==0x8899AABBU &&
+        out.unknownCount==0U,"known option copied fields");
+    UmicomKernelConsoleWriteLine("packet-admission.case=tcp-option-values-golden");
+    UmicomTcpOptionValues before;
+    UmicomBootMemoryCopy(&before,&out,sizeof before);
+    bytes[19]=2U;bytes[20]=2U;
+    PacketRequire(UmicomKernelTcpOptionValuesRead(bytes,sizeof bytes,&out)==UMICOM_NETWORK_PACKET_HEADER &&
+        PacketBytesEqual(&before,&out,sizeof out),"late option refusal keeps prior values");
+    UmicomKernelConsoleWriteLine("packet-admission.case=tcp-option-values-refusal");
+    const UmicomU8 highScale[4]={3U,3U,255U,0U};
+    PacketRequire(UmicomKernelTcpOptionValuesRead(highScale,sizeof highScale,&out)==UMICOM_NETWORK_PACKET_OK &&
+        out.windowScaleRaw==255U && out.windowScaleBounded==14U && !out.hasMss,
+        "window shift preserves raw offer and bounds interpreted shift");
+    const UmicomU8 opaque[4]={5U,2U,253U,2U};
+    PacketRequire(UmicomKernelTcpOptionValuesRead(opaque,sizeof opaque,&out)==UMICOM_NETWORK_PACKET_OK &&
+        out.unknownCount==2U && !out.sackPermitted,"opaque kinds do not enable SACK");
+    UmicomKernelConsoleWriteLine("packet-admission.case=tcp-option-values-boundary");
+    UmicomBootMemoryCopy(&out,&before,sizeof out);
+    UmicomBootMemoryClear(bytes,sizeof bytes);
+    PacketRequire(PacketBytesEqual(&before,&out,sizeof out),"copied values outlive option bytes");
+    PacketRequire(UmicomKernelTcpOptionValuesRead((const void *)0,0U,&out)==UMICOM_NETWORK_PACKET_OK &&
+        !out.hasMss && !out.hasWindowScale && !out.sackPermitted && !out.hasTimestamp &&
+        out.mss==0U && out.timestampValue==0U && out.unknownCount==0U,
+        "empty values replace all presence state");
+    UmicomKernelConsoleWriteLine("packet-admission.case=tcp-option-values-lifetime");
+}
+
 void UmicomKernelPacketAdmissionValidateExecution(void)
 {
     UmicomU8 frame[60];
@@ -730,6 +1078,41 @@ void UmicomKernelPacketAdmissionValidateExecution(void)
     UmicomKernelConsoleWriteLine("packet-admission.cases=47");
 #endif
     TaggedIpv4ValidateExecution();
+/* Keep all fifty-one admission groups and extend their ordered transcript with four RAM-only encoding groups. The former implementation is retained for owner review. */
+#if 0
     UmicomKernelConsoleWriteLine("packet-admission.cases=51");
+#endif
+    UdpWriteValidateExecution();
+/* Retain the fifty-five earlier packet groups and append four ICMP encoding groups to the ordered diagnostic evidence. The former implementation is retained for owner review. */
+#if 0
+    UmicomKernelConsoleWriteLine("packet-admission.cases=55");
+#endif
+    IcmpWriteValidateExecution();
+/* The fifty-nine earlier packet groups still run; four owned receive-storage groups extend the current no-NIC diagnostic. The former implementation is retained for owner review. */
+#if 0
+    UmicomKernelConsoleWriteLine("packet-admission.cases=59");
+#endif
+    TcpReceiveValidateExecution();
+/* The existing sixty-three groups still execute; four owned send-storage groups extend this RAM-only diagnostic. The former implementation is retained for owner review. */
+#if 0
+    UmicomKernelConsoleWriteLine("packet-admission.cases=63");
+#endif
+    TcpSendValidateExecution();
+    /* Retain the earlier total; all sixty-seven groups still execute before TCP serialization. */
+#if 0
+    UmicomKernelConsoleWriteLine("packet-admission.cases=67");
+#endif
+    TcpWriteValidateExecution();
+/* Keep the seventy-one prior guest groups and append four option-structure groups without a NIC. The former implementation is retained for owner review. */
+#if 0
+    UmicomKernelConsoleWriteLine("packet-admission.cases=71");
+#endif
+    TcpOptionsValidateExecution();
+/* Retain the seventy-five prior groups and append four known-option value groups in the no-NIC guest. The former implementation is retained for owner review. */
+#if 0
+    UmicomKernelConsoleWriteLine("packet-admission.cases=75");
+#endif
+    TcpOptionValuesValidateExecution();
+    UmicomKernelConsoleWriteLine("packet-admission.cases=79");
     UmicomKernelConsoleWriteLine("UMICOM_KERNEL_PACKET_ADMISSION_READY");
 }

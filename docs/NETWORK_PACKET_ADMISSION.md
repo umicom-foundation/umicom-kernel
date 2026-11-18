@@ -957,3 +957,93 @@ IPv4 total length. On CHECKSUM, inspect the 20 IP-header bytes, not tag bytes.
 On FRAGMENT, use a separately designed reassembly service rather than passing a
 partial datagram onward. These tests operate on synthetic RAM with no NIC and
 cannot qualify physical VLAN reception or end-to-end networking.
+
+## Encode a UDP frame in ordinary memory
+
+The complementary `UmicomKernelEthernetIpv4UdpWrite` operation in
+`umicom/kernel/network_udp.h` creates an untagged Ethernet-II / IPv4 / UDP
+byte sequence. It does not send it. Supply explicit MAC addresses, IPv4
+addresses, ports, identification, differentiated-services byte and nonzero TTL
+in `UmicomEthernetIpv4UdpSpec`. The writer sets the fixed IPv4 header and DF
+flag, then computes both IPv4 and UDP checksums. It always emits a UDP checksum;
+a calculated zero is represented as 0xffff rather than "checksum absent".
+
+1. Keep the specification and payload in stable accessible RAM.
+2. Provide a separate destination with capacity for 42 plus the payload length.
+   At most 1472 payload bytes fit this ordinary 1500-byte IPv4 profile.
+3. Provide a separate aligned UmicomSize output counter. All complete spans
+   must be pairwise disjoint, including unused destination capacity.
+4. Check the returned status before reading a newly written count or frame.
+5. If successful, use only the returned byte count. Bytes beyond it remain
+   unchanged; they are not guaranteed zero-filled Ethernet padding.
+
+~~~c
+UmicomU8 frame[1514];
+UmicomSize written = 0U;
+UmicomNetworkPacketStatus status = UmicomKernelEthernetIpv4UdpWrite(
+    &spec, payload, payload_bytes, frame, sizeof frame, &written);
+if (status == UMICOM_NETWORK_PACKET_OK) {
+    /* frame[0..written) is an encoded RAM object, not a transmitted packet. */
+}
+~~~
+
+This fragment assumes initialized `spec` and valid `payload` objects. A NULL
+payload is allowed only for zero bytes. Destination/spec/counter overlap,
+misaligned typed objects, arithmetic wraparound, excessive payload, short
+capacity and zero TTL are refused before output publication. Destination and
+written remain unchanged on refusal. No allocator or hosted C library is used.
+The API cannot prove that a supplied address is mapped, accessible or coherent
+with a device. Its buffer contract remains the caller's responsibility.
+
+The returned size is 42 plus payload bytes, without preamble, FCS or padding.
+A device adapter must handle the Ethernet minimum-frame requirement and FCS;
+passing spare uninitialized memory as padding would disclose memory contents.
+The encoder does not validate routing, ownership of an address, socket binding,
+firewall policy, ARP discovery, MTU variation or hardware offload settings.
+Options, fragments, VLAN tags, IPv6 and jumbo packets require other contracts.
+See [UDP, RFC 768](https://www.rfc-editor.org/rfc/rfc768) for the pseudo-header
+and zero-checksum representation.
+
+The host sequence above now contains 376 cases, retaining all 363 admission
+cases and adding 13 encoding groups. The all-lengths group covers payload
+lengths 0 through 1472. Other groups check fixed independent bytes, short
+capacities, checksum-zero encoding, unaligned byte buffers, lifetime, invalid
+arguments, overlap and address wrap. To isolate encoding:
+
+~~~powershell
+ctest --test-dir build/host-network-packet -R "^kernel[.]network_udp_write[.]" --output-on-failure --no-tests=error
+~~~
+
+The diagnostic guest keeps the 51 prior admission groups and appends four
+encoding groups, for 55 ordered markers. Run the current-image and identity
+fixtures with the packet guest. The debug and optimized no-libc link targets
+also include the writer. Passing these checks establishes the declared RAM
+encoding behavior on those builds, not a physical network driver or live UDP.
+
+## Encode ICMP echo messages in owned RAM
+
+`UmicomKernelEthernetIpv4IcmpEchoWrite` constructs an explicit type-8 request or type-0 reply. It shares complete-span admission and fixed Ethernet/IPv4 header composition with the UDP writer. The ICMP checksum remains protocol-specific: it covers the eight-byte ICMP header and payload, without a UDP pseudo-header. A computed zero stays zero and must still validate when read.
+
+1. Include `umicom/kernel/network_icmp.h` and initialize an `UmicomEthernetIpv4IcmpEchoSpec`. Supply destination/source MAC and IPv4 addresses explicitly. The writer does not derive a reply policy or swap addresses from a received capture.
+2. Set a nonzero TTL, an IPv4 identification value, echo identifier, sequence number and supported message type. IPv4 identification and echo identifier are separate fields even when an example gives them the same value. The code byte is always zero.
+3. Supply zero through 1472 payload bytes and an independent writable destination with at least 42 plus payload length bytes. A null payload is valid only at zero length.
+4. Keep the complete spec, destination capacity, payload and aligned output counter stable, accessible and pairwise disjoint. Byte buffers can be unaligned; typed spec and counter objects cannot.
+5. Check status before consuming the new count. Rejected calls preserve destination and count. Successful calls preserve spare destination capacity. The writer retains no pointers.
+
+```c
+UmicomU8 frame[1514];
+UmicomSize written = 0U;
+UmicomNetworkPacketStatus status = UmicomKernelEthernetIpv4IcmpEchoWrite(
+    &spec, payload, payload_bytes, frame, sizeof frame, &written);
+/* Use frame[0..written) only after status == UMICOM_NETWORK_PACKET_OK. */
+```
+
+The fragment assumes initialized spec and valid payload storage. The result excludes Ethernet padding, preamble and FCS. A later device adapter must supply valid padding and the required checksum/offload contract. There is no routing, neighbor discovery, request correlation, timeout handling, rate limiting or network I/O here. An encoded reply is not permission to answer every incoming request, and an echoed identifier is not authentication. This is not a complete ping implementation.
+
+The host suite adds sixteen ICMP encoding groups to the earlier 376 groups, for 392 registrations. It includes independent request/reply bytes, every payload length, valid zero checksums, corruption detection, complete-span overlap and address-wrap rejection. The guest retains its earlier 55 groups and appends four more ordered groups, for 59. Registration counts describe coverage to execute; actual results belong to the selected build evidence.
+
+```powershell
+ctest --test-dir build/host-network-packet -R "^kernel[.]network_icmp_write[.]" --output-on-failure --no-tests=error
+```
+
+See [ICMP, RFC 792](https://www.rfc-editor.org/rfc/rfc792) for echo message fields and checksums. Live networking and physical hardware remain separate qualification work.

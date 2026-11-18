@@ -33,8 +33,21 @@ static UmicomU64 CheckMachine(UmicomU64 argument)
             umc_heap_allocate(&managed_workspace,1U,&b)!=UMC_HEAP_OK ||
             umc_heap_set_edge(&managed_workspace,a,0U,b)!=UMC_HEAP_OK ||
             umc_heap_set_edge(&managed_workspace,b,0U,a)!=UMC_HEAP_OK)return 0xe034U;
+        /* Inspect the same exact roots before mutation, using the shared C
+         * runtime rather than a Kernel-specific reachability implementation. */
+        UmcHeapReport report;
+        if(umc_heap_inspect(&managed_workspace,&a,1U,&report)!=UMC_HEAP_OK ||
+            report.live_objects!=2U || report.reachable_objects!=2U ||
+            report.collectable_objects!=0U || report.live_edges!=2U ||
+            report.live_payload_bytes!=2U || report.arena_bytes!=sizeof managed_workspace)return 0xe040U;
+        if(umc_heap_inspect(&managed_workspace,NULL,0U,&report)!=UMC_HEAP_OK ||
+            report.collectable_objects!=2U || report.collectable_payload_bytes!=2U ||
+            report.reusable_slots!=UMC_HEAP_SLOTS-2U)return 0xe041U;
         if(umc_heap_collect(&managed_workspace,&a,1U,&freed)!=UMC_HEAP_OK || freed!=0U)return 0xe035U;
         if(umc_heap_collect(&managed_workspace,NULL,0U,&freed)!=UMC_HEAP_OK || freed!=2U)return 0xe036U;
+        if(umc_heap_inspect(&managed_workspace,NULL,0U,&report)!=UMC_HEAP_OK ||
+            report.live_objects!=0U || report.reusable_slots!=UMC_HEAP_SLOTS ||
+            report.arena_bytes!=sizeof managed_workspace)return 0xe042U;
         return 0xc037U;
     }
     const UmcInstruction *program=argument==53U?zero_divisor:arithmetic;

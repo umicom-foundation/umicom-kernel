@@ -89,7 +89,14 @@ static void CheckImage(const UmicomU8 *begin, const UmicomU8 *end, const char *m
         0xc02bU, 0xc02cU, 0xc02dU, 0xc02eU, 0xc02fU,
         0xc030U, 0xc031U, 0xc032U, 0xc033U,
         /* Paused execution, fault state, fuel and managed cycles retain frame checks. */
-        0xc034U, 0xc035U, 0xc036U, 0xc037U
+        0xc034U, 0xc035U, 0xc036U, 0xc037U,
+        /* Shared slices retain the existing process/frame restoration checks. */
+        0xc038U, 0xc039U, 0xc03aU, 0xc03bU,
+        /* Checked shifts retain U-mode exit, reentry and frame restoration. */
+        0xc03cU, 0xc03dU, 0xc03eU, 0xc03fU, 0xc040U,
+        0xc041U, 0xc042U, 0xc043U, 0xc044U,
+        /* Path bounds, sufficient fuel, arithmetic limits and refusal atomicity. */
+        0xc045U, 0xc046U, 0xc047U, 0xc048U
     };
     UmicomKernelConsoleWrite("cvm.optimization=");
     UmicomKernelConsoleWriteLine(mode);

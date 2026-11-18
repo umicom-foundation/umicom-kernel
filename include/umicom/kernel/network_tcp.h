@@ -60,4 +60,38 @@ typedef struct UmicomEthernetIpv4TcpView {
  * retained. Bounds checks cannot establish that arbitrary RAM is mapped. */
 UmicomNetworkPacketStatus UmicomKernelEthernetIpv4TcpRead(
     const void *bytes, UmicomSize accessibleBytes, UmicomEthernetIpv4TcpView *out);
+/* Fixed-header serialization shares the IPv4 and span owners with UDP/ICMP.
+ * All fields are explicit network observations; choosing ports, flags, ACKs,
+ * sequence numbers and windows remains a separate connection/policy decision. */
+typedef struct UmicomEthernetIpv4TcpSpec {
+    UmicomU8 destinationMac[6], sourceMac[6];
+    UmicomU8 sourceAddress[4], destinationAddress[4];
+    UmicomU16 identification;
+    UmicomU8 differentiatedServices, timeToLive;
+    UmicomU16 sourcePort, destinationPort;
+    UmicomU32 sequenceNumber, acknowledgmentNumber;
+    UmicomU16 window, urgentPointer;
+    UmicomU8 flags;
+} UmicomEthernetIpv4TcpSpec;
+
+/* Write an unpadded RAM capture: Ethernet-II + fixed IPv4 + fixed TCP + payload.
+ * Payload is 0..1460 bytes; null is allowed only for zero length. TTL must be
+ * positive. IPv4 DF is set, TCP reserved bits are zero, and both checksums are
+ * generated. A computed TCP checksum of zero remains zero; it is not absent.
+ * Flags are serialized literally, not admitted as a valid TCP state transition.
+ * No options, VLAN, FCS/preamble, minimum Ethernet padding, route, socket, NIC,
+ * segmentation, retransmission or ACK/sequence accounting is performed.
+ *
+ * Supply stable accessible disjoint spans for spec, payload, the ENTIRE
+ * destination capacity and written. Spec/written must be naturally aligned;
+ * byte input/output may be unaligned. Address arithmetic and overlap checks
+ * cannot establish RAM mapping or synchronize concurrent users. No pointers
+ * are retained and no allocation occurs. On success written is 54+payloadBytes
+ * and only that prefix is modified. Every refusal preserves destination and
+ * written. Serialization success never means delivery to a peer. */
+UmicomNetworkPacketStatus UmicomKernelEthernetIpv4TcpWrite(
+    const UmicomEthernetIpv4TcpSpec *spec, const void *payload,
+    UmicomSize payloadBytes, void *destination, UmicomSize capacity,
+    UmicomSize *written);
+
 #endif

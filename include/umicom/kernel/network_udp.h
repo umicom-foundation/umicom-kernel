@@ -52,4 +52,32 @@ UmicomNetworkPacketStatus UmicomKernelEthernetIpv4UdpRead(
     const void *bytes, UmicomSize accessibleBytes,
     UmicomUdpChecksumPolicy policy, UmicomEthernetIpv4UdpView *out);
 
+/* Explicit fields avoid treating host struct layout as a wire protocol. */
+typedef struct UmicomEthernetIpv4UdpSpec {
+    UmicomU8 destinationMac[6], sourceMac[6];
+    UmicomU8 sourceAddress[4], destinationAddress[4];
+    UmicomU16 sourcePort, destinationPort, identification;
+    UmicomU8 differentiatedServices, timeToLive;
+} UmicomEthernetIpv4UdpSpec;
+
+/* Encode an untagged fixed-header IPv4 UDP datagram into caller-owned RAM.
+ * Payload is at most 1472 bytes. TTL must be nonzero. DF is always set, and
+ * both IPv4 and UDP checksums are generated; UDP checksum zero is encoded as
+ * 0xffff as required. No absent-checksum mode, options or fragmentation exists.
+ * The result is 42 + payloadBytes bytes without preamble, Ethernet padding or FCS.
+ * A device adapter must supply any required padding/FCS before transmission.
+ *
+ * spec and written require their declared alignment. The entire destination
+ * capacity, spec, written and nonempty payload must be stable accessible and
+ * pairwise disjoint. A NULL payload is permitted only when payloadBytes is 0.
+ * Integer span checks cannot establish mapping, permissions or DMA coherence.
+ * No allocation, device access, address/port policy, routing or I/O occurs.
+ * Destination and written remain unchanged on every refused request. Success
+ * writes exactly the result and preserves unused destination capacity.
+ */
+UmicomNetworkPacketStatus UmicomKernelEthernetIpv4UdpWrite(
+    const UmicomEthernetIpv4UdpSpec *spec, const void *payload,
+    UmicomSize payloadBytes, void *destination, UmicomSize capacity,
+    UmicomSize *written);
+
 #endif

@@ -42,7 +42,11 @@ static UmicomU64 CheckBitwise(UmicomU64 argument)
     if(argument==49U)return
         (umc_runtime_profile(UMC_PROFILE_FEATURES)&UMC_FEATURE_BINARY_BITWISE) &&
         !(umc_runtime_profile(UMC_PROFILE_FEATURES)&UMC_FEATURE_BITWISE_COMPLEMENT) &&
+/* The runtime now also admits format 7; this fixture retains its original encoding. The former implementation is retained for owner review. */
+#if 0
         umc_runtime_profile(UMC_PROFILE_WIRE_VERSIONS)==126U ? 0xc031U : 0xe042U;
+#endif
+        umc_runtime_profile(UMC_PROFILE_WIRE_VERSIONS)==254U ? 0xc031U : 0xe042U;
     uint8_t encoded[sizeof bytes]; size_t size=0U;
     if(umc_encode(code,count,encoded,sizeof encoded,&size,&d)!=UMC_OK ||
         size!=sizeof bytes)return 0xe043U;
