@@ -303,7 +303,16 @@ int main(int argc,char **argv)
         for(size_t i=0U;i<sizeof(paths)/sizeof(paths[0]);++i)CHECK(Command(paths[i])!=UMICOM_SHELL_OK);
         CHECK(Command("rmdir /bin")==UMICOM_SHELL_IO_ERROR);CHECK(shell.descriptor==0U);
     }else if(!strcmp(name,"unknown-and-arguments")){
+        /* Retain the pre-topic dispatch expectation for review. The help
+         * command now recognizes one topic argument and reports an invalid
+         * topic there. Extra operands still follow ordinary command refusal. */
+#if 0
         CHECK(Command("help extra")==UMICOM_SHELL_UNKNOWN_COMMAND);
+#endif
+        ResetOutput();
+        CHECK(Command("help extra") == UMICOM_SHELL_INVALID_ARGUMENT);
+        CHECK(strstr(transcript, "Unknown help topic") != NULL);
+        CHECK(Command("help extra surplus") == UMICOM_SHELL_UNKNOWN_COMMAND);
         CHECK(Command("write /notes/x")==UMICOM_SHELL_UNKNOWN_COMMAND);
         CHECK(Command("whatever")==UMICOM_SHELL_UNKNOWN_COMMAND);
         CHECK(Command("create /notes/a extra extra extra")==UMICOM_SHELL_SYNTAX);Missing("/notes/a");
