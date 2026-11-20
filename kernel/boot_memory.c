@@ -22,6 +22,8 @@
 
 #include "umicom/kernel/boot_reservations.h"
 #include "umicom/kernel/device_tree_firmware.h"
+#include "umicom/kernel/riscv64/boot_handoff.h"
+#include "boot_memory.h"
 
 /* Bounded early-boot workspace is part of the linked Kernel image, so its
  * pages are included in the Kernel reservation. It avoids a 128 KiB copy on
@@ -75,8 +77,8 @@ UmicomKernelBootMemoryStatus UmicomKernelBootMemoryInitialize(UmicomU64 hart,
 
 /* Validate all reservations before initializing the global frame owner.
  * Recovery can reject malformed metadata while the allocator is untouched. */
-UmicomKernelBootMemoryStatus UmicomKernelBootMemoryInitialize(UmicomU64 hart,
-    UmicomAddress dtb, UmicomAddress start, UmicomAddress end)
+static UmicomKernelBootMemoryStatus InitializeBootMemory(UmicomU64 hart,
+    UmicomAddress dtb, UmicomAddress start, UmicomAddress end, UmicomKernelBootMemoryObservation *out)
 {
     if (hart != 0U) return UMICOM_BOOT_MEMORY_BAD_INPUT;
     UmicomPlatformPhysicalMemoryInfo ram;
@@ -124,5 +126,28 @@ UmicomKernelBootMemoryStatus UmicomKernelBootMemoryInitialize(UmicomU64 hart,
             return UMICOM_BOOT_MEMORY_ALLOCATION_ERROR;
     if (UmicomKernelPhysicalMemoryValidate() != UMICOM_KERNEL_MEMORY_OK)
         return UMICOM_BOOT_MEMORY_ALLOCATION_ERROR;
+    if (out) {
+        /* The live allocator is authoritative. Describe its already validated
+         * plan after success, including any version-1 representation limit. */
+        const UmicomRiscvBootHandoffInput input = {hart,
+            {ram.base, ram.bytes}, {start, end - start}, {tree.address, tree.totalBytes}};
+        UmicomKernelBootMemoryObservation observation;
+        UmicomBootMemoryClear(&observation, sizeof observation);
+        observation.handoffStatus = UmicomRiscvBootHandoffProject(&input, &plan, &observation.handoff);
+        UmicomBootMemoryCopy(out, &observation, sizeof observation);
+    }
     return UMICOM_BOOT_MEMORY_OK;
+}
+
+UmicomKernelBootMemoryStatus UmicomKernelBootMemoryInitialize(UmicomU64 hart,
+    UmicomAddress dtb, UmicomAddress start, UmicomAddress end)
+{
+    return InitializeBootMemory(hart, dtb, start, end, (UmicomKernelBootMemoryObservation *)0);
+}
+
+UmicomKernelBootMemoryStatus UmicomKernelBootMemoryInitializeObserved(UmicomU64 hart,
+    UmicomAddress dtb, UmicomAddress start, UmicomAddress end, UmicomKernelBootMemoryObservation *out)
+{
+    if (!out) return UMICOM_BOOT_MEMORY_BAD_INPUT;
+    return InitializeBootMemory(hart, dtb, start, end, out);
 }

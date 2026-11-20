@@ -234,6 +234,9 @@ static UmicomU64 CheckConditionalUpdate(UmicomU64 argument)
 #include "bitwise_checks.h"
 #include "shift_checks.h"
 #include "bounds_checks.h"
+#ifdef UMICOM_KERNEL_CVM_HOST_ARTIFACT
+#include "host_artifact_checks.h"
+#endif
 
 UmicomU64 UmicomProgramMain(UmicomU64 argument)
 {
@@ -339,6 +342,11 @@ UmicomU64 UmicomProgramMain(UmicomU64 argument)
 /* Append four structural-budget selectors while preserving every existing guest result code. The former implementation is retained for owner review. */
 #if 0
     if (argument == 4U || argument > 68U) return 0xc004U;
+#endif
+    /* Route optional compiler artifacts through the same U-mode diagnostic.
+     * All existing selectors and their return codes remain available. */
+#ifdef UMICOM_KERNEL_CVM_HOST_ARTIFACT
+    if (argument == 73U || argument == 74U) return CheckHostArtifact(argument);
 #endif
     if (argument == 4U || argument > 72U) return 0xc004U;
     if (argument >= 69U) return CheckExecutionBounds(argument);

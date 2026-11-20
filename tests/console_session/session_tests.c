@@ -21,6 +21,8 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
+#include <fcntl.h>
+#include <io.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -36,9 +38,21 @@ typedef struct ConsoleStep {
 
 /* The original RAM-only journey remains the default. A separately compiled
  * profile adds a read-only synthetic disk without changing the RAM contract. */
-#ifndef UMICOM_CONSOLE_SESSION_STORAGE
+#if defined(UMICOM_CONSOLE_SESSION_MANAGED_BOOT)
+/* The boot profile must be ready before any human command. Exercise the
+ * existing status and orderly collection commands over the real UART. */
+static const ConsoleStep steps[] = {
+    {"daemons status", "1 consumer-sample: healthy attempts=1"},
+    {"daemons stop", "Managed tasks collected. Result snapshots retained.\r\n"},
+    {"poweroff", "RAM filesystem closed. Powering off.\r\nUMICOM_KERNEL_END\r\n"}
+};
+#elif !defined(UMICOM_CONSOLE_SESSION_STORAGE)
 static const ConsoleStep steps[] = {
     {"abi", "Compiled services describe this image, not granted permissions.\r\n"},
+    /* Capture the complete record and then exercise refusal before any file or
+     * application command uses the same serial session. */
+    {"abi --record", "UMICOM_NATIVE_ABI_END\r\n"},
+    {"abi --record extra", "unknown command or incorrect arguments; use help\r\n"},
     {"abi extra", "unknown command or incorrect arguments; use help\r\n"},
     {"pwd", "\r\n/\r\n"},
     {"create /notes/lesson.txt", ""},
@@ -217,6 +231,20 @@ static int SendCommand(SOCKET socket, const char *command, ULONGLONG deadline)
 static int ResponseAccepted(size_t step, const char *text)
 {
     if (strstr(text, steps[step].reply) == NULL) return 0;
+#ifdef UMICOM_CONSOLE_SESSION_MANAGED_BOOT
+    if (strcmp(steps[step].command, "daemons status") == 0) {
+        const char *clock = strstr(text, "0 clock-sample: healthy attempts=1");
+        const char *consumer = strstr(text, steps[step].reply);
+        unsigned long long clockId = 0U, consumerId = 0U, clockReports = 0U, consumerReports = 0U;
+        /* The service is healthy only after a real report. Verify that the
+         * prerequisite was admitted before its dependent obtained an identity. */
+        if (clock == NULL || consumer == NULL ||
+            sscanf(clock, "0 clock-sample: healthy attempts=1 identity=%llu sequence=%llu", &clockId, &clockReports) != 2 ||
+            sscanf(consumer, "1 consumer-sample: healthy attempts=1 identity=%llu sequence=%llu", &consumerId, &consumerReports) != 2 ||
+            clockId == 0U || consumerId <= clockId || clockReports == 0U || consumerReports == 0U)
+            return 0;
+    }
+#endif
     /* Match the command, not its array position, as new inspection steps are
      * added. Preserve the original positional check for review. */
 #if 0
@@ -238,6 +266,22 @@ static int ResponseAccepted(size_t step, const char *text)
             "abi.copy-limit=64\r\n", "abi.call-limit=32\r\n", "abi.compiled-features="};
         for (size_t i = 0U; i < sizeof required / sizeof required[0]; ++i)
             if (strstr(text, required[i]) == NULL) return 0;
+    }
+    if (strcmp(steps[step].command, "abi --record") == 0) {
+        /* The serial frame carries actual monitor metadata in a fixed order.
+         * Require the closing marker immediately after the complete mask. */
+        const char *frame = strstr(text, "UMICOM_NATIVE_ABI_REPORT 1\r\n");
+        if (frame == NULL) return 0;
+        const char *const prefix = "UMICOM_NATIVE_ABI_REPORT 1\r\n"
+            "abi.version=1.0\r\nabi.word-bits=64\r\nabi.byte-order=1\r\n"
+            "abi.page-bytes=4096\r\nabi.copy-limit=64\r\nabi.call-limit=32\r\nabi.compiled-features=";
+        size_t length = strlen(prefix);
+        if (strncmp(frame, prefix, length) != 0) return 0;
+        const char *digit = frame + length;
+        const char *after = digit;
+        while (*after >= '0' && *after <= '9') ++after;
+        if (after == digit || strncmp(after, "\r\nUMICOM_NATIVE_ABI_END\r\n",
+                sizeof("\r\nUMICOM_NATIVE_ABI_END\r\n") - 1U) != 0) return 0;
     }
     if (strcmp(steps[step].command, "run /bin/umicom-diagnostic.elf 4") == 0) {
         const char *report = strstr(text, "process id=");
@@ -325,6 +369,12 @@ finish:
 
 int main(int argc, char **argv)
 {
+    /* Preserve the serial bytes when this fixture's stdout is captured. The
+     * Windows CRT text mode would add a second CR to every guest CRLF. */
+    if (_setmode(_fileno(stdout), _O_BINARY) == -1) {
+        fputs("Cannot capture serial stdout as bytes.\n", stderr);
+        return 1;
+    }
     int result = 1;
     WSADATA sockets;
     SOCKET listener = INVALID_SOCKET, connection = INVALID_SOCKET;
@@ -471,6 +521,14 @@ int main(int argc, char **argv)
             const int accepted = sent == 0U
                 ? strstr(transcript, "UMICOM_KERNEL_CONSOLE_READY") != NULL
                 : ResponseAccepted(sent - 1U, transcript + responseStart);
+#ifdef UMICOM_CONSOLE_SESSION_MANAGED_BOOT
+            /* The normal boot must have admitted the plan before polling for
+             * serial input. A manually launched session cannot pass this case. */
+            if (sent == 0U && strstr(transcript, "UMICOM_KERNEL_NORMAL_MANAGED_SERVICES_READY") == NULL) {
+                fprintf(stderr, "The selected image did not start managed services before the prompt.\n");
+                goto cleanup;
+            }
+#endif
             *prompt = saved;
             if (!accepted) {
                 fprintf(stderr, "Unexpected response before step %zu.\n", sent);

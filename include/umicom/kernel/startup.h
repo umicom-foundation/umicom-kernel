@@ -1,16 +1,22 @@
 /*-----------------------------------------------------------------------------
- * Umicom Kernel normal-startup contracts
+ * Umicom Kernel
  * File: include/umicom/kernel/startup.h
  *
- * Normal boot reserves memory without exercising destructive diagnostic cases.
- * Recovery accepts only fixed-storage inspection and poweroff; it never needs
- * an allocator, filesystem, Framework service or a runnable user process.
+ * PURPOSE:
+ *   Reserve normal boot memory without exercising destructive diagnostic cases.
+ *   Recovery accepts only fixed-storage inspection and poweroff. It never needs
+ *   an allocator, filesystem, Framework service or a runnable user process.
  *
- * Sammy Hegab, Umicom Foundation. MIT licence.
+ * AUTHOR AND ORGANISATION:
+ * Sammy Hegab
+ * Umicom Foundation
+ *
+ * LICENCE:
+ * MIT
  *---------------------------------------------------------------------------*/
 #ifndef UMICOM_KERNEL_STARTUP_H
 #define UMICOM_KERNEL_STARTUP_H
-#include "umicom/kernel/types.h"
+#include "umicom/kernel/boot_handoff.h"
 
 typedef enum UmicomKernelBootMemoryStatus {
     UMICOM_BOOT_MEMORY_OK,
@@ -24,6 +30,20 @@ typedef enum UmicomKernelBootMemoryStatus {
  * never authorise resetting an already initialised physical allocator. */
 UmicomKernelBootMemoryStatus UmicomKernelBootMemoryInitialize(UmicomU64 hart,
     UmicomAddress deviceTree, UmicomAddress kernelStart, UmicomAddress kernelEnd);
+
+typedef struct UmicomKernelBootMemoryObservation {
+    UmicomBootHandoffStatus handoffStatus;
+    UmicomKernelBootHandoff handoff;
+} UmicomKernelBootMemoryObservation;
+
+/* Apply the same physical plan and publish its handoff observation only after
+ * successful allocator validation. The observation must be accessible to the
+ * Kernel and disjoint from input firmware memory. An unavailable handoff has
+ * its exact status and an empty record. It does not change the accepted plan.
+ * Physical initialization failures leave the observation unchanged. */
+UmicomKernelBootMemoryStatus UmicomKernelBootMemoryInitializeObserved(UmicomU64 hart,
+    UmicomAddress deviceTree, UmicomAddress kernelStart, UmicomAddress kernelEnd,
+    UmicomKernelBootMemoryObservation *out);
 
 typedef void (*UmicomKernelStartupOutput)(void *context, const char *text, UmicomSize bytes);
 typedef void (*UmicomKernelRecoveryReport)(void *context);

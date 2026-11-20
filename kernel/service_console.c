@@ -1,8 +1,11 @@
 /*-----------------------------------------------------------------------------
- * Umicom Kernel interactive service-controller demonstration
+ * Umicom Kernel
  * File: kernel/service_console.c
  *
- * This optional plan runs alongside the existing foreground controller. Each
+ * PURPOSE:
+ *   Compose the optional system services alongside the foreground controller.
+ *
+ * Each
  * polling pass runs at most one bounded service quantum; machine state must be
  * restored before the shell or its foreground process is allowed to continue.
  * No service owns the UART. Status is printed only on request, so background
@@ -11,10 +14,18 @@
  * The sample is intentionally bounded by attempts and existing process budgets.
  * Stopping does not reset the owner or revive old tokens. A new boot provides
  * another fresh demonstration domain; this is not persistent configuration.
- * Author: Sammy Hegab, Umicom Foundation. Licence: MIT.
+ *
+ * AUTHOR AND ORGANISATION:
+ * Sammy Hegab
+ * Umicom Foundation
+ *
+ * LICENCE:
+ * MIT
  *---------------------------------------------------------------------------*/
 #include "umicom/kernel/service_console.h"
 #include "umicom/kernel/service_manager.h"
+#include "umicom/kernel/linker.h"
+#include "umicom/kernel/platform.h"
 #include "console_internal.h"
 extern const UmicomU8 UmicomHealthExecutableStart[];
 extern const UmicomU8 UmicomHealthExecutableEnd[];
@@ -49,6 +60,75 @@ static UmicomKernelShellStatus UmicomManagedShellResult(UmicomKernelServiceManag
         return UMICOM_SHELL_UNSAFE;
     return UMICOM_SHELL_BAD_STATE;
 }
+
+/* The shell and boot use the same immutable program and dependency plan.
+ * Admission copies the temporary launch strings before either caller returns. */
+static UmicomKernelShellStatus UmicomManagedStart(UmicomKernelConsoleShell *shell, const char *mode)
+{
+    if (umicomConsoleManager.initialised) {
+        UmicomManagedText(shell, "Managed plan already used. Stop retains its report; reboot for a new plan.\r\n");
+        return UMICOM_SHELL_BAD_STATE;
+    }
+    if (!UmicomManagedWord(mode, "healthy") && !UmicomManagedWord(mode, "silent") &&
+        !UmicomManagedWord(mode, "fault") && !UmicomManagedWord(mode, "unready")) {
+        UmicomManagedText(shell, "Use: daemons start [healthy|silent|fault|unready]\r\n");
+        return UMICOM_SHELL_BAD_STATE;
+    }
+    UmicomSize modeBytes = 0U;
+    while (mode[modeBytes]) ++modeBytes;
+    static const char firstName[] = "/services/clock-sample";
+    static const char secondName[] = "/services/consumer-sample";
+    UmicomKernelLaunchString first[] = {{firstName, sizeof firstName - 1U}, {mode, modeBytes}};
+    UmicomKernelLaunchString second[] = {{secondName, sizeof secondName - 1U}, {"healthy", 7U}};
+    /* Linker boundaries are physical addresses, not pointers into one C array. */
+    const UmicomAddress imageStart = UMICOM_KERNEL_LINKER_ADDRESS(UmicomHealthExecutableStart);
+    const UmicomAddress imageEnd = UMICOM_KERNEL_LINKER_ADDRESS(UmicomHealthExecutableEnd);
+    if (imageEnd <= imageStart) return UMICOM_SHELL_BAD_STATE;
+
+    UmicomKernelManagedServiceSpec specs[2];
+    UmicomConsoleClear(specs, sizeof(specs));
+    for (UmicomSize i = 0U; i < 2U; ++i) {
+        specs[i].name = i ? "consumer-sample" : "clock-sample";
+        specs[i].image = UmicomHealthExecutableStart;
+        specs[i].imageBytes = (UmicomSize)(imageEnd - imageStart);
+        specs[i].launch.arguments = i ? second : first;
+        specs[i].launch.argumentCount = 2U;
+        specs[i].dependencies = i ? 1U : 0U;
+        specs[i].attempts = 4U;
+        specs[i].startupTicks = 20000000U;
+        specs[i].healthTicks = 30000000U;
+        specs[i].reportTicks = 10000000U;
+        specs[i].retryTicks = 10000000U;
+        specs[i].sliceLimit = 4096U;
+        specs[i].required = UMICOM_TRUE;
+    }
+    const UmicomKernelServiceManagerStatus status = UmicomKernelServiceManagerInitialize(
+        &umicomConsoleManager, specs, sizeof specs / sizeof specs[0], 0, 0);
+    if (umicomConsoleManager.initialised) umicomManagedConsole = shell;
+    return UmicomManagedShellResult(status);
+}
+
+UmicomKernelShellStatus UmicomKernelServiceConsoleStartDefault(UmicomKernelConsoleShell *shell)
+{
+    if (!shell || !shell->output) return UMICOM_SHELL_BAD_STATE;
+    UmicomKernelShellStatus status = UmicomManagedStart(shell, "healthy");
+    if (status != UMICOM_SHELL_OK) return status;
+
+    /* Bound boot admission by both the platform clock and a finite poll count.
+     * A loaded program is not enough. Both services must report readiness. */
+    const UmicomU64 begin = UmicomPlatformTimerRead();
+    for (UmicomSize poll = 0U; poll < 1000000U; ++poll) {
+        const UmicomKernelServiceManagerStatus step = UmicomKernelServiceManagerStep(
+            &umicomConsoleManager, 100000U);
+        if (step != UMICOM_MANAGER_OK) return UmicomManagedShellResult(step);
+        if (umicomConsoleManager.phase == UMICOM_MANAGER_HEALTHY) return UMICOM_SHELL_OK;
+        const UmicomU64 now = UmicomPlatformTimerRead();
+        if (umicomConsoleManager.recovery || now < begin || now - begin >= UMICOM_MANAGED_SERVICE_TIME_LIMIT)
+            break;
+    }
+    return UMICOM_SHELL_BAD_STATE;
+}
+
 UmicomKernelShellStatus UmicomKernelServiceConsoleCommand(UmicomKernelConsoleShell *shell,
     const UmicomKernelShellCommand *command, UmicomBoolean *handled)
 {
@@ -57,6 +137,9 @@ UmicomKernelShellStatus UmicomKernelServiceConsoleCommand(UmicomKernelConsoleShe
     if (!command->count || !UmicomManagedWord(command->bytes + command->offsets[0], "daemons")) return UMICOM_SHELL_OK;
     *handled = UMICOM_TRUE;
     const char *operation = command->count > 1U ? command->bytes + command->offsets[1] : "status";
+    /* Boot and manual commands now share typed admission. Retain the former
+     * inline plan for engineering review and keep the shell messages. */
+#if 0
     if (UmicomManagedWord(operation, "start") && command->count <= 3U) {
         if (umicomConsoleManager.initialised) {
             UmicomManagedText(shell, "Managed plan already used. Stop retains its report; reboot for a new plan.\r\n");
@@ -94,6 +177,14 @@ UmicomKernelShellStatus UmicomKernelServiceConsoleCommand(UmicomKernelConsoleShe
         if (status == UMICOM_MANAGER_OK)
             UmicomManagedText(shell, "Native service plan admitted. Readiness still requires a report. Use daemons status.\r\n");
         return UmicomManagedShellResult(status);
+    }
+#endif
+    if (UmicomManagedWord(operation, "start") && command->count <= 3U) {
+        const char *mode = command->count == 3U ? command->bytes + command->offsets[2] : "healthy";
+        const UmicomKernelShellStatus status = UmicomManagedStart(shell, mode);
+        if (status == UMICOM_SHELL_OK)
+            UmicomManagedText(shell, "Native service plan admitted. Readiness still requires a report. Use daemons status.\r\n");
+        return status;
     }
     if (!umicomConsoleManager.initialised || umicomManagedConsole != shell) {
         UmicomManagedText(shell, "No managed service plan is attached to this console.\r\n"); return UMICOM_SHELL_OK;

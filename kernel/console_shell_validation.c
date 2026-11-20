@@ -90,6 +90,12 @@ void UmicomKernelConsoleShellValidateExecution(void)
     /* Read-only interface inspection shares the normal command parser.
      * Additional arguments must be refused instead of silently ignored. */
     UmicomConsoleCommand("abi");
+    /* A framed read must pass through the existing command owner. Only one
+     * explicit selector is supported; trailing tokens remain invalid. */
+    UmicomConsoleCommand("abi --record");
+    UmicomConsoleExpect(UmicomKernelConsoleShellExecute(&umicomConsoleValidation,
+        "abi --record extra", sizeof("abi --record extra") - 1U) != UMICOM_SHELL_OK,
+        "framed ABI inspection refuses trailing arguments");
     UmicomConsoleExpect(UmicomKernelConsoleShellExecute(&umicomConsoleValidation,
         "abi extra", sizeof("abi extra") - 1U) != UMICOM_SHELL_OK,
         "ABI inspection refuses extra arguments");

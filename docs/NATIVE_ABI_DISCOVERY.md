@@ -1,5 +1,9 @@
 # Native ABI discovery
 
+![Umicom](../assets/branding/umicom-logo.svg)
+
+[Umicom application icon](../assets/branding/umicom.ico)
+
 A native Umicom program can ask the running Kernel which interface it provides.
 An **application binary interface**, or **ABI**, describes how compiled code
 passes information: which registers carry arguments, which numbers select
@@ -176,3 +180,32 @@ uses immutable static metadata so a freestanding debug build does not require
 a compiler-generated aggregate copy through hosted `memcpy`.
 See [the console exercise](CONSOLE_LEARNING_GUIDE.md) for commands and expected
 meaning. User programs continue using ABI_QUERY through their Assembly bridge.
+
+### Save a framed ABI record for a host tool
+
+1. Boot the native Kernel console using the existing local QEMU workflow. At
+   `umicom>`, enter `abi --record`. The read uses the same compiled metadata as
+   `abi`. It does not invoke a user program or spend its syscall budget.
+2. Copy from `UMICOM_NATIVE_ABI_REPORT 1` through `UMICOM_NATIVE_ABI_END`.
+   Include the final newline and keep the fields in the displayed order. Save
+   the frame to a separate text file in your evidence folder. Keep the complete
+   serial transcript separately for context.
+3. Pass the file to a host client built against Framework's
+   `UmiNativeKernelAbiReportLoad`. A consumer can also use
+   `UmiNativeKernelAbiReportParse` on an exact record already in memory.
+4. Compare the recorded ABI major/minor and required capability bits with the
+   consumer's own contract before using another interface. The frame header's
+   `1` identifies the capture format. `abi.version` identifies the native ABI.
+   The feature mask describes compiled routes. Authority remains with each
+   native handle or caller check.
+
+Keep the first and last lines when transferring the record between systems.
+LF and CRLF are accepted. If the reader rejects the frame, check for a command
+echo, missing final newline or shell prompt. A rejected record must leave the
+previously accepted observation visible. Existing `abi` output stays available
+for human inspection.
+
+The selected Windows serial journey exercises this from the current image.
+The host reader also has separate checks for malformed or unsupported frames.
+The capture describes the guest that emitted it. Keep the executable and
+firmware identities with the guest run when recording qualification.

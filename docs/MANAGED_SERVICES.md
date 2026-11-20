@@ -1,5 +1,7 @@
 # Umicom Kernel — Managed services, readiness and health
 
+<img src="../assets/branding/umicom-logo.svg" alt="Umicom" width="180">
+
 Author: Sammy Hegab, Umicom Foundation. Licence: MIT.
 
 ## A running process is not automatically a ready service
@@ -18,6 +20,44 @@ meaning of the existing `services` console report.
 This is a bounded development service domain, not yet an indefinitely running
 production daemon manager. Existing per-task syscall and slice limits remain
 in force. Successful heartbeats do not reset those limits.
+
+## Start the sample services during normal boot
+
+1. In a PowerShell terminal with Clang, LLD, Ninja and QEMU on your path,
+   configure the Kernel source with the opt-in normal service plan.
+
+   ```powershell
+   cmake -S . -B build/riscv64-managed -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/riscv64-clang.cmake -DUMICOM_SYSTEM_MANAGED_SERVICES=ON
+   cmake --build build/riscv64-managed --target umicom-system-image umicom-console-image
+   ```
+
+2. Boot the normal image and wait for `UMICOM_KERNEL_NORMAL_MANAGED_SERVICES_READY`.
+   It appears after the prerequisite and dependent both report readiness.
+
+   ```powershell
+   qemu-system-riscv64 -machine virt,aclint=off -bios build/riscv64-managed/bin/umicom-system.elf -display none -monitor none -serial stdio -m 128M -smp 1 -no-reboot
+   ```
+
+3. At the Kernel prompt, enter `daemons status`. Expect healthy records
+   for `clock-sample` and `consumer-sample`. The consumer has a later
+   process identity because it waits for the clock sample to become ready.
+   Enter `daemons stop` to collect both tasks, then enter `poweroff`.
+
+Use `UMICOM_SYSTEM_MANAGED_SERVICES=OFF` for the normal image that starts
+the sample only through `daemons start`. The independent recovery image
+continues to bypass the service plan. If the selected normal plan cannot
+establish readiness, its owner attempts orderly collection before entering
+recovery. The Kernel stops if resource cleanup or machine state is unsafe.
+
+On Windows, the automated check uses a loopback serial connection and checks
+the guest's health records. Configure the host fixture from the Kernel source
+directory using the two images produced above.
+
+```powershell
+cmake -S tests/console_session -B build/managed-console-check -G Ninja -DUMICOM_CONSOLE_IMAGE="$PWD/build/riscv64-managed/bin/umicom-console.elf" -DUMICOM_CONSOLE_MANAGED_BOOT_TESTS=ON
+cmake --build build/managed-console-check --target umicom-console-managed-boot-tests
+ctest --test-dir build/managed-console-check -R managed-normal-boot --output-on-failure --no-tests=error
+```
 
 ## What the controller owns
 

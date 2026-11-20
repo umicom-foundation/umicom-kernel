@@ -96,7 +96,11 @@ static void CheckImage(const UmicomU8 *begin, const UmicomU8 *end, const char *m
         0xc03cU, 0xc03dU, 0xc03eU, 0xc03fU, 0xc040U,
         0xc041U, 0xc042U, 0xc043U, 0xc044U,
         /* Path bounds, sufficient fuel, arithmetic limits and refusal atomicity. */
-        0xc045U, 0xc046U, 0xc047U, 0xc048U
+        0xc045U, 0xc046U, 0xc047U, 0xc048U,
+#ifdef UMICOM_KERNEL_CVM_HOST_ARTIFACT
+        /* Exact hosted compiler bytes and truncated admission through the VM. */
+        0xc049U, 0xc04aU,
+#endif
     };
     UmicomKernelConsoleWrite("cvm.optimization=");
     UmicomKernelConsoleWriteLine(mode);

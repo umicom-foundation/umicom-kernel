@@ -1,3 +1,5 @@
+![Umicom](../assets/branding/umicom-logo.svg)
+
 # Reading a boot handoff safely
 
 A boot handoff is a small description passed from startup code to the kernel. It describes memory and optional display or firmware data. The reader in `kernel/boot_handoff.c` validates a byte buffer and returns an owned observation. It does not boot a machine, map physical memory, initialise a display or replace the existing RISC-V device-tree startup.
@@ -26,7 +28,8 @@ ctest --test-dir build/host-boot-handoff --output-on-failure --no-tests=error
 ```
 
 <!-- The earlier reader-only expectation is retained for review: all 18 kernel.boot_handoff.* cases pass. The group now includes 28 producer cases. -->
-Expected result: all 46 `kernel.boot_handoff.*` cases pass. This is an acceptance criterion, not a statement that these commands have already run. A failed assertion prints the source line and condition. Fix the first failure and rerun its named case before rerunning the group.
+<!-- The former 46-case expectation is kept for comparison. Native RISC-V projection adds seven hosted checks. -->
+Expect all 53 `kernel.boot_handoff.*` cases to pass. A failed assertion prints the source line and condition. Fix the first failure and rerun its named case before rerunning the group.
 
 ## Buffer contract
 
@@ -78,7 +81,44 @@ After configuring the existing `riscv64-clang-debug` preset, build `umicom-boot-
 
 ## Extension boundary
 
+<!-- Preserve the earlier integration boundary for review. Normal RISC-V startup now owns and reports the checked observation alongside the existing allocator. -->
+<!--
 The next integration step is a startup adapter that creates this record from validated platform data, reserves the record and its referenced memory, and passes the observation into existing memory admission. That adapter is not present here. Continue using the existing RISC-V boot path. ARM and x86 boot entries, UEFI handling, ACPI parsing and hardware framebuffer ownership require their own implementation and qualification.
+-->
+
+Normal RISC-V startup projects the platform RAM, linked Kernel bytes and FDT
+into the handoff format. It copies the page reservation plan already applied by
+the allocator. The Kernel image has its own exact span, while the reservation
+can include additional pages before the image. The observation keeps the
+device-tree address and length as integers. The ASCII command line and the
+framebuffer remain empty in this startup profile.
+
+The Kernel publishes the report when physical memory has initialized and its
+owner has validated the reservations. Reports can show an unavailable handoff
+if the platform description cannot fit the version-1 format. The allocator
+continues to own the accepted physical plan. Forced recovery starts without
+initializing physical memory, so it has no handoff observation to display.
+ARM and x86 boot entries, UEFI handling, ACPI parsing and ownership of a real
+framebuffer require their own implementation and qualification.
+
+## Check the normal boot observation in QEMU
+
+1. Configure the `riscv64-clang-debug` preset with Clang, LLD and QEMU installed.
+2. Build `umicom-kernel-evidence` and `umicom-boot-memory-contracts`. The second
+   target links the early boot code at two optimization levels, without a
+   hosted C runtime.
+3. Run the named guest check from the Kernel checkout.
+
+   ```powershell
+   ctest --test-dir build/riscv64-clang-debug --output-on-failure --no-tests=error -R '^kernel[.]riscv64[.]boot_handoff_normal$'
+   ```
+
+   Normal startup prints `boot.memory=reserved`, then `boot.handoff=validated`.
+   Look for `boot handoff: riscv64 ram=1 reserved=` followed by a positive
+   range count. The required-service failure image reaches recovery after the
+   same observation. The forced-recovery image reports its selection without
+   claiming memory or a handoff. Use the transcript to identify which stage
+   failed and rebuild if the test reports a source or image identity mismatch.
 
 ## Produce a validated record
 

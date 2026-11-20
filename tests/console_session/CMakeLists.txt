@@ -18,6 +18,7 @@ include(CTest)
 if(NOT WIN32)
     message(FATAL_ERROR "This host fixture currently uses Windows process and socket APIs. Use the Kernel console guide on other hosts.")
 endif()
+
 set(UMICOM_CONSOLE_IMAGE "" CACHE FILEPATH "Previously built current umicom-console.elf")
 find_program(UMICOM_CONSOLE_QEMU NAMES qemu-system-riscv64 REQUIRED)
 if(NOT EXISTS "${UMICOM_CONSOLE_IMAGE}")
@@ -91,4 +92,24 @@ if(UMICOM_CONSOLE_CVM_TESTS)
     set_tests_properties(kernel.console_session.cvm-program PROPERTIES
         TIMEOUT 75 PASS_REGULAR_EXPRESSION "UMICOM_KERNEL_SERIAL_SESSION_PASS"
         LABELS "kernel;cvm;guest;console")
+endif()
+
+# The regular RAM/storage suites keep their own image choices. The managed
+# journey requires the opt-in normal system image built from the same source.
+option(UMICOM_CONSOLE_MANAGED_BOOT_TESTS "Check the managed normal system over QEMU serial" OFF)
+if(UMICOM_CONSOLE_MANAGED_BOOT_TESTS)
+    add_executable(umicom-console-managed-boot-tests session_tests.c)
+    target_compile_definitions(umicom-console-managed-boot-tests PRIVATE UMICOM_CONSOLE_SESSION_MANAGED_BOOT=1)
+    target_link_libraries(umicom-console-managed-boot-tests PRIVATE ws2_32)
+    set_target_properties(umicom-console-managed-boot-tests PROPERTIES
+        C_STANDARD 23 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+    if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
+        target_compile_options(umicom-console-managed-boot-tests PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)
+    endif()
+    add_test(NAME kernel.console_session.managed-normal-boot
+        COMMAND umicom-console-managed-boot-tests "${UMICOM_CONSOLE_QEMU}" "${UMICOM_CONSOLE_SYSTEM_IMAGE}")
+    set_tests_properties(kernel.console_session.managed-normal-boot PROPERTIES
+        TIMEOUT 75 PASS_REGULAR_EXPRESSION "UMICOM_KERNEL_SERIAL_SESSION_PASS"
+        LABELS "kernel;managed-services;guest;console")
 endif()

@@ -21,6 +21,7 @@ if(BUILD_TESTING AND UMICOM_QEMU_RISCV64)
 endif()
 
 option(UMICOM_BUILD_SYSTEM_IMAGES "Build normal-system and independent recovery images" ON)
+option(UMICOM_SYSTEM_MANAGED_SERVICES "Start the supervised sample services in the normal system image" OFF)
 function(UmicomConfigureNormalBootImages)
     if(NOT UMICOM_BUILD_SYSTEM_IMAGES)
         return()
@@ -45,6 +46,11 @@ function(UmicomConfigureNormalBootImages)
         target_include_directories(${UMICOM_STARTUP_TARGET} PRIVATE ${UMICOM_STARTUP_INCLUDES})
         target_compile_options(${UMICOM_STARTUP_TARGET} PRIVATE ${UMICOM_STARTUP_OPTIONS})
         target_compile_definitions(${UMICOM_STARTUP_TARGET} PRIVATE UMICOM_KERNEL_NORMAL_BOOT=1)
+        # The existing diagnostic and recovery profiles retain their independent
+        # startup paths. Only the selected normal system owns this live plan.
+        if(UMICOM_SYSTEM_MANAGED_SERVICES AND UMICOM_STARTUP_PROFILE STREQUAL "system")
+            target_compile_definitions(${UMICOM_STARTUP_TARGET} PRIVATE UMICOM_KERNEL_MANAGED_SYSTEM_BOOT=1)
+        endif()
         if(UMICOM_STARTUP_DEFINITIONS)
             target_compile_definitions(${UMICOM_STARTUP_TARGET} PRIVATE ${UMICOM_STARTUP_DEFINITIONS})
         endif()
@@ -92,6 +98,16 @@ function(UmicomConfigureNormalBootImages)
                 PASS_REGULAR_EXPRESSION "${UMICOM_STARTUP_MARKER}"
                 FAIL_REGULAR_EXPRESSION "UMICOM_KERNEL_FAIL;unexpected-trap;panic;PANIC")
         endforeach()
+        # Require the exact observation at the production call site and ensure
+        # independent recovery never claims that physical RAM was allocated.
+        add_test(NAME kernel.riscv64.boot_handoff_normal
+            COMMAND "${CMAKE_COMMAND}" "-DQEMU=${UMICOM_QEMU_RISCV64}"
+                "-DNORMAL=$<TARGET_FILE:umicom-startup-check-image>"
+                "-DSERVICE_RECOVERY=$<TARGET_FILE:umicom-recovery-check-image>"
+                "-DFORCED_RECOVERY=$<TARGET_FILE:umicom-forced-recovery-check-image>"
+                -P "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/RunNormalBootHandoffGuest.cmake")
+        set_tests_properties(kernel.riscv64.boot_handoff_normal PROPERTIES TIMEOUT 80
+            FIXTURES_REQUIRED kernel_current_image LABELS "kernel;boot-handoff;guest")
     endif()
 endfunction()
 cmake_language(DEFER CALL UmicomConfigureNormalBootImages)

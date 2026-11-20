@@ -11,8 +11,12 @@
  *   no UART interrupt is enabled to wake a sleeping hart. This is deliberately
  *   a development console, not an energy-efficient terminal or full init system.
  *
- * AUTHOR AND ORGANISATION: Sammy Hegab, Umicom Foundation
- * LICENCE: MIT
+ * AUTHOR AND ORGANISATION:
+ * Sammy Hegab
+ * Umicom Foundation
+ *
+ * LICENCE:
+ * MIT
  *---------------------------------------------------------------------------*/
 #ifdef UMICOM_KERNEL_SERVICE_CONSOLE
 /* Optional live-service domain; the original boot-job report is unchanged. */
@@ -101,6 +105,20 @@ void UmicomKernelConsoleShellRun(void)
         UmicomPlatformFinishFailure(0x96U);
         UmicomPlatformHalt();
     }
+#endif
+#ifdef UMICOM_KERNEL_MANAGED_SYSTEM_BOOT
+    /* Start after shell ownership is established and before accepting input.
+     * Confirm that managed handles can be collected before entering recovery. */
+    const UmicomKernelShellStatus managed = UmicomKernelServiceConsoleStartDefault(&umicomInteractiveShell);
+    if (managed != UMICOM_SHELL_OK) {
+        if (managed != UMICOM_SHELL_UNSAFE &&
+            UmicomKernelConsoleShellClose(&umicomInteractiveShell) == UMICOM_SHELL_OK)
+            UmicomKernelNormalBootRecover("managed-services-initialisation");
+        UmicomKernelConsoleWriteLine("UMICOM_KERNEL_FAIL");
+        UmicomPlatformFinishFailure(0xb7U);
+        UmicomPlatformHalt();
+    }
+    UmicomKernelConsoleWriteLine("UMICOM_KERNEL_NORMAL_MANAGED_SERVICES_READY");
 #endif
     UmicomKernelConsoleWriteLine("UMICOM_KERNEL_CONSOLE_READY");
     UmicomKernelConsoleWriteLine("Umicom Kernel development console. Type help.");

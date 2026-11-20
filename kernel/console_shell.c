@@ -637,6 +637,8 @@ UmicomKernelShellStatus UmicomKernelConsoleShellExecute(UmicomKernelConsoleShell
     if (UmicomShellEqual(name, "help") && command.count == 1U) {
         UmicomShellText(shell, "Focused guides: help files | help programs | help boot\r\n");
         UmicomShellText(shell, "abi (compiled native interface metadata; no authority granted)\r\n");
+        /* The framed form can be copied from serial for offline inspection. */
+        UmicomShellText(shell, "abi --record (bounded native ABI capture)\r\n");
 #ifdef UMICOM_KERNEL_FAT16_FILE_COMMIT
         UmicomShellText(shell, "fatfileopen SLOT PART | fatfiletime YYYY-MM-DDTHH:MM:SS | fatfilestage PATH OFFSET \"TEXT\" | fatfilecommit | fatfileinfo | fatfileclose\r\n");
         UmicomShellText(shell, "fatfileappend PATH \"TEXT\" | append at EOF within the file's existing final-cluster space; then fatfilecommit\r\n");
@@ -719,7 +721,12 @@ UmicomKernelShellStatus UmicomKernelConsoleShellExecute(UmicomKernelConsoleShell
 #endif
 #endif
 #endif /* Preserve the established about strings for their original profiles. */
-    } else if (UmicomShellEqual(name, "abi") && command.count == 1U) {
+    } else if (UmicomShellEqual(name, "abi") && (command.count == 1U ||
+            (command.count == 2U && UmicomShellEqual(path, "--record")))) {
+        /* Add only framing around the same read-only monitor fields. The
+         * unframed command keeps its established report and explanation. */
+        const UmicomBoolean framed = command.count == 2U ? UMICOM_TRUE : UMICOM_FALSE;
+        if (framed == UMICOM_TRUE) UmicomShellText(shell, "UMICOM_NATIVE_ABI_REPORT 1\r\n");
         /* The monitor owns feature selection. Reading it here avoids a second
          * list inferred from the console translation unit's build definitions. */
         const UmicomU64 version = UmicomKernelUserAbiQuery(UMICOM_USER_ABI_QUERY_VERSION, 0U, 0U);
@@ -760,7 +767,8 @@ UmicomKernelShellStatus UmicomKernelConsoleShellExecute(UmicomKernelConsoleShell
             UmicomShellNumber(shell, UmicomKernelUserAbiQuery(fields[index].selector, 0U, 0U));
             UmicomShellText(shell, "\r\n");
         }
-        UmicomShellText(shell, "Compiled services describe this image, not granted permissions.\r\n");
+        if (framed == UMICOM_TRUE) UmicomShellText(shell, "UMICOM_NATIVE_ABI_END\r\n");
+        else UmicomShellText(shell, "Compiled services describe this image, not granted permissions.\r\n");
     } else if (UmicomShellEqual(name, "pwd") && command.count == 1U) {
         UmicomShellText(shell, "/\r\n"); /* There is no mutable working directory. */
     } else if (UmicomShellEqual(name, "status") && command.count == 1U) {

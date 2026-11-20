@@ -70,6 +70,39 @@ ctest --test-dir build/riscv64-cvm-debug -R "^kernel[.]riscv64[.]cvm$" --output-
 
 The required current-image fixture may perform its own build check. If CTest reports no matching test, confirm QEMU was discovered and the optional CVM profile was enabled. Keep the configure, build and test output in your private qualification logs. No test result is claimed by this guide.
 
+## Carry a compiler-produced artifact into the guest
+
+The optional host compiler adds two cases to the existing diagnostic. It
+compiles `programs/cvm/host_fixture.uc` on the development machine. Both
+native ELF programs embed the resulting bytes in a read-only section and
+run the same freestanding interpreter under the Kernel's U-mode monitor.
+
+1. Build Umicom C with its `windows-ucrt64-debug` preset. Select the
+   resulting `umicom-c.exe` by absolute path.
+2. Configure a separate Kernel build with the runtime source and host
+   executable. The Kernel build runs the compiler and checks the
+   fingerprints of the source, compiler and output artifact.
+3. Run the existing CVM guest test. For each optimization level, expect
+   `cvm.case=73 complete` and `cvm.case=74 complete`, followed by
+   `UMICOM_KERNEL_CVM_READY`.
+
+```powershell
+$cSource = 'C:/umicom/umicom-c'
+$hostCompiler = Join-Path $cSource 'build/windows-ucrt64-debug/bin/umicom-c.exe'
+$kernelBuild = 'build/riscv64-cvm-host-artifact'
+cmake --preset riscv64-clang-debug -B $kernelBuild -DUMICOM_KERNEL_CVM=ON "-DUMICOM_C_SOURCE_DIR=$cSource" "-DUMICOM_KERNEL_CVM_HOST_COMPILER=$hostCompiler"
+cmake --build $kernelBuild --parallel 2
+ctest --test-dir $kernelBuild --output-on-failure --no-tests=error -R '^kernel[.]riscv64[.]cvm$'
+```
+
+Case 73 checks the result 42 and the six executed instructions. Case 74
+removes the last byte and checks that decoding refuses the incomplete
+artifact without publishing an instruction. If the receipt reports
+changed bytes, rebuild the host compiler when its sources change and
+rebuild the Kernel before rerunning the guest check. The fixture is
+embedded at build time through a reviewed compiler path. Loading
+user-selected bytecode files requires a separate loader workflow.
+
 ## Use the program from the normal console
 
 When the optional CVM profile is enabled, the normal system and interactive console copy the reviewed O2 native envelope into RAMFS as `/bin/umicom-cvm.elf`. All four existing demonstration programs remain available. A build without the option keeps its original program list.

@@ -38,6 +38,7 @@
 extern const UmicomU8 UmicomLaunchExecutableStart[];
 extern const UmicomU8 UmicomLaunchExecutableEnd[];
 static UmicomKernelBootServices umicomSystemServices;
+static UmicomKernelBootMemoryObservation umicomSystemBootObservation;
 static UmicomBoolean umicomSystemSelected;
 static UmicomBoolean umicomSystemMemoryReady;
 static UmicomBoolean umicomStartupLineStart = UMICOM_TRUE;
@@ -81,6 +82,19 @@ void UmicomKernelNormalBootReport(void *context, UmicomKernelStartupOutput outpu
     }
     const char *memory = umicomSystemMemoryReady ? "boot memory: reserved\r\n" : "boot memory: unavailable\r\n";
     output(context, memory, UmicomStartupLength(memory));
+    if (umicomSystemMemoryReady) {
+        if (umicomSystemBootObservation.handoffStatus == UMICOM_BOOT_HANDOFF_OK) {
+            const UmicomKernelBootHandoff *handoff = &umicomSystemBootObservation.handoff;
+            output(context, "boot handoff: riscv64 ram=", sizeof "boot handoff: riscv64 ram=" - 1U);
+            UmicomStartupNumber(context, output, handoff->ramCount);
+            output(context, " reserved=", sizeof " reserved=" - 1U);
+            UmicomStartupNumber(context, output, handoff->reservedCount);
+        } else {
+            output(context, "boot handoff unavailable: ", sizeof "boot handoff unavailable: " - 1U);
+            UmicomStartupNumber(context, output, (UmicomU64)umicomSystemBootObservation.handoffStatus);
+        }
+        output(context, "\r\n", 2U);
+    }
     if (!umicomSystemServices.initialised) {
         const char *message = "Startup services were not admitted.\r\n";
         output(context, message, UmicomStartupLength(message)); return;
@@ -214,14 +228,24 @@ _Noreturn void UmicomKernelNormalBoot(UmicomU64 hart, UmicomAddress deviceTree)
     UmicomStartupRecovery("forced-recovery", UMICOM_TRUE);
 #endif
     UmicomKernelConsoleWriteLine("boot.mode=normal");
+    /* Retain the former no-observation call for review. The observed entry
+     * follows the same allocator path and owns its completed boot report. */
+#if 0
     if (UmicomKernelBootMemoryInitialize(hart, deviceTree,
             UMICOM_KERNEL_LINKER_ADDRESS(__kernel_start), UMICOM_KERNEL_LINKER_ADDRESS(__kernel_end))
         != UMICOM_BOOT_MEMORY_OK) UmicomStartupRecovery("boot-memory-input", UMICOM_FALSE);
+#endif
+    if (UmicomKernelBootMemoryInitializeObserved(hart, deviceTree,
+            UMICOM_KERNEL_LINKER_ADDRESS(__kernel_start), UMICOM_KERNEL_LINKER_ADDRESS(__kernel_end),
+            &umicomSystemBootObservation) != UMICOM_BOOT_MEMORY_OK)
+        UmicomStartupRecovery("boot-memory-input", UMICOM_FALSE);
     umicomSystemMemoryReady = UMICOM_TRUE;
     UmicomKernelPhysicalMemorySnapshot beforeServices;
     if (UmicomKernelPhysicalMemorySnapshotRead(&beforeServices) != UMICOM_KERNEL_MEMORY_OK)
         UmicomStartupRecovery("boot-memory-accounting", UMICOM_FALSE);
     UmicomKernelConsoleWriteLine("boot.memory=reserved");
+    UmicomKernelConsoleWriteLine(umicomSystemBootObservation.handoffStatus == UMICOM_BOOT_HANDOFF_OK
+        ? "boot.handoff=validated" : "boot.handoff=unavailable");
 
     /* Copy the checked description without replacing the existing RAM/device
      * policy. Unsupported inventory is visible through the hardware command. */

@@ -1,0 +1,23 @@
+/*-----------------------------------------------------------------------------
+ * Umicom Kernel
+ * File: programs/cvm/host_artifact.S.in
+ *
+ * PURPOSE:
+ *   Place the host compiler's exact artifact bytes in the read-only segment
+ *   of each native CVM user program.
+ *
+ * AUTHOR AND ORGANISATION:
+ * Sammy Hegab
+ * Umicom Foundation
+ *
+ * LICENCE:
+ * MIT
+ *---------------------------------------------------------------------------*/
+
+    .section .rodata.umicom_cvm_host_artifact, "a", @progbits
+    .balign 8
+    .global UmicomHostCvmArtifactStart
+    .global UmicomHostCvmArtifactEnd
+UmicomHostCvmArtifactStart:
+    .incbin "@UMICOM_KERNEL_CVM_HOST_ARTIFACT_FILE@"
+UmicomHostCvmArtifactEnd:

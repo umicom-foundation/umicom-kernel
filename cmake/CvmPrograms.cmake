@@ -34,6 +34,11 @@ if(UMICOM_KERNEL_CVM)
         "-DSOURCE=${UMICOM_C_SOURCE_DIR}" "-DKERNEL=${CMAKE_CURRENT_SOURCE_DIR}"
         "-DO0=${UMICOM_CVM_O0_FILE}" "-DO2=${UMICOM_CVM_O2_FILE}"
         "-DRECEIPT=${_cvm_receipt}" "-DRECIPE=${_cvm_recipe}")
+    if(UMICOM_KERNEL_CVM_HOST_ARTIFACT_FILE)
+        target_compile_definitions(umicom-kernel PRIVATE UMICOM_KERNEL_CVM_HOST_ARTIFACT=1)
+        list(APPEND _cvm_evidence_args "-DHOST_COMPILER=${UMICOM_KERNEL_CVM_HOST_COMPILER}"
+            "-DHOST_ARTIFACT=${UMICOM_KERNEL_CVM_HOST_ARTIFACT_FILE}")
+    endif()
     add_custom_target(umicom-cvm-evidence
         COMMAND "${CMAKE_COMMAND}" -DMODE=capture ${_cvm_evidence_args}
             -P "${CMAKE_CURRENT_LIST_DIR}/CvmEvidence.cmake"
