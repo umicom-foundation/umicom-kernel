@@ -1,6 +1,10 @@
+![Umicom](../assets/branding/umicom-logo.svg)
+
 # Umicom Kernel — Checked device-tree discovery and hardware inventory
 
 Author: Sammy Hegab, Umicom Foundation. Licence: MIT.
+
+[Umicom SVG icon](../assets/branding/umicom-icon.svg) · [Windows icon](../assets/branding/umicom.ico)
 
 ## Why discovery comes before a storage driver
 
@@ -216,6 +220,30 @@ It consumes no allocator frames and performs no peripheral I/O beyond writing
 text through the shell's existing output callback. The parser/catalogue workspaces
 are static Kernel storage and therefore do increase the reserved image size.
 
+## Read the CPU inventory
+
+A *hart* is a RISC-V hardware thread. The Assembly entry reads `mhartid`, a
+register containing the current hart's identifier. The C boot path keeps the
+first identifier that reaches it. This records hart `0` in the current boot
+profile. Hart zero remains a valid identifier when a firmware tree is missing.
+
+The `hardware` command reports the two sources of evidence together.
+
+| Record | What it tells you |
+|---|---|
+| `hardware.cpu.firmware` | Whether the Kernel accepted a checked device tree and built its catalogue |
+| `hardware.cpu.described` | The number of CPU entries in that catalogue, including disabled entries |
+| `hardware.cpu.firmware-enabled` | The number of CPU entries enabled by firmware, taking disabled parent nodes into account |
+| `hardware.cpu.boot-hart` | The identifier observed entering the C boot path, when available |
+| `hardware.cpu.boot-description` | The result of looking up the observed identifier in the checked catalogue |
+
+The last record can be `firmware-enabled`, `firmware-disabled`, `not-described`,
+`firmware-unavailable` or `unobserved`. If a disabled CPU entry shares the ID of
+an enabled one, the enabled match takes precedence. When the tree is missing
+or refused, the two firmware counts are omitted. Each count describes firmware
+entries. The current bootstrap parks secondary harts before the C entry, so
+even two enabled entries provide evidence of only one hart entering the Kernel.
+
 ## Build, test and try it
 
 Use the existing PowerShell workflow:
@@ -230,6 +258,23 @@ ctest --preset riscv64-clang-debug --output-on-failure --no-tests=error
 The additional main test is `kernel.riscv64.hardware_discovery`. It requires the
 existing current-image fixture and runs the automatically terminating diagnostic
 image. It does not launch an indefinitely waiting shell as a test.
+
+For the CPU inventory comparison, run both discovery cases with verbose
+output. The second case uses the automated normal-startup image with `-smp 2`.
+It is available when `UMICOM_BUILD_SYSTEM_IMAGES` is enabled in the configure
+preset. Keep the cumulative diagnostic and ordinary system launch on the
+one-hart profile. The cumulative diagnostic's storage check requires it.
+
+```powershell
+ctest --preset riscv64-clang-debug -R 'kernel[.]riscv64[.](hardware_discovery|hardware_cpu_topology)$' --verbose --no-tests=error
+```
+
+Expect `hardware.cpu-validation=boot=0 described=1 enabled=1` from the first
+case and `hardware.cpu-validation=boot=0 described=2 enabled=2` from the second.
+Both should report `UMICOM_KERNEL_HARDWARE_DISCOVERY_READY`. If the marker is
+missing, check that the current-image build passed and read
+`hardware.catalogue-status` or `hardware.check` in the verbose output before
+changing any machine settings.
 
 Run `bin\umicom-system.elf` with the existing QEMU command and unchanged options.
 At `umicom>` enter:

@@ -247,9 +247,18 @@ _Noreturn void UmicomKernelNormalBoot(UmicomU64 hart, UmicomAddress deviceTree)
     UmicomKernelConsoleWriteLine(umicomSystemBootObservation.handoffStatus == UMICOM_BOOT_HANDOFF_OK
         ? "boot.handoff=validated" : "boot.handoff=unavailable");
 
+    /* Record entry evidence independently of firmware. A refused tree can
+     * leave the CPU counts unknown while this hart remains observed. */
+    UmicomKernelHardwareObserveBootHart(hart);
     /* Copy the checked description without replacing the existing RAM/device
      * policy. Unsupported inventory is visible through the hardware command. */
     UmicomKernelHardwareCapture(deviceTree);
+#ifdef UMICOM_KERNEL_STARTUP_CHECK_HARDWARE
+    /* The named startup fixture can observe a spare parked hart. Give it the
+     * same discovery invariants as the diagnostic, then continue its existing
+     * boot jobs and shutdown. Storage and independent recovery stay separate. */
+    UmicomKernelHardwareValidateExecution();
+#endif
 
     /* Compiled startup definitions are trusted immutable inputs. These jobs
      * exercise the real structured launch client, with no file grants and EOF

@@ -39,6 +39,8 @@ set(UMICOM_HARDWARE_CASES
     register_stride register_overflow zero_phandle duplicate_phandle dangling_interrupt_reference
     malformed_timebase missing_timebase catalogue_capacity multiple_memory_spans register_capacity
     nested_bus_translation deterministic_mutations capture_and_report capture_bounds phandle_alias_mismatch
+    cpu_topology_boot_enabled cpu_topology_boot_disabled cpu_topology_boot_absent
+    cpu_topology_boot_alias cpu_topology_missing_firmware cpu_topology_unobserved
     chosen_alias_literal failure_outputs node_name_capacity trailing_end reservation_header_overlap zero_sized_resource legacy_zero_phandle range_cell_width_overflow
     register_cell_width_overflow duplicate_hart_id overlapping_memory property_name_capacity
     catalogue_owner_overlap range_capacity)

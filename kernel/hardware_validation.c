@@ -2,11 +2,18 @@
  * Umicom Kernel
  * File: kernel/hardware_validation.c
  *
- * Qualify the observed description against the existing QEMU test command,
- * without turning description bytes into MMIO accesses. A future driver must
- * negotiate and validate a real device separately; this check proves no such
- * device was needed just to enumerate its advertised transport window.
- * Author: Sammy Hegab, Umicom Foundation. Licence: MIT.
+ * PURPOSE:
+ *   Qualify the observed description against the existing QEMU test command,
+ *   without turning description bytes into MMIO accesses. A future driver must
+ *   negotiate and validate a real device separately; this check proves no such
+ *   device was needed just to enumerate its advertised transport window.
+ *
+ * AUTHOR AND ORGANISATION:
+ * Sammy Hegab
+ * Umicom Foundation
+ *
+ * LICENCE:
+ * MIT
  *---------------------------------------------------------------------------*/
 #include "umicom/kernel/hardware_catalogue.h"
 #include "umicom/kernel/physical_memory.h"
@@ -34,6 +41,14 @@ void UmicomKernelHardwareValidateExecution(void)
     UmicomHardwareRequire(c && UmicomKernelHardwareCaptureStatus() == UMICOM_TREE_OK, "complete-tree");
     if (!c) return; /* The platform stop is non-returning, but its old declaration is not. */
     UmicomHardwareRequire(c->nodes > 0U && c->timebaseFrequency > 0U, "timebase");
+    /* Compare the entry observation with the checked firmware. Each emulator
+     * profile verifies its own expected CPU count through the receipt below. */
+    UmicomKernelHardwareCpuTopology topology = {0};
+    UmicomHardwareRequire(UmicomKernelHardwareCpuTopologyRead(&topology) == UMICOM_TREE_OK &&
+        topology.firmwareAvailable && topology.bootHartObserved && topology.bootHartId == 0U &&
+        topology.bootHartDescription == UMICOM_BOOT_HART_FIRMWARE_ENABLED &&
+        topology.firmwareEnabledCpuEntries > 0U &&
+        topology.firmwareEnabledCpuEntries <= topology.describedCpuEntries, "cpu-topology");
     UmicomPlatformPhysicalMemoryInfo ram = {0};
     UmicomPlatformPhysicalMemoryDescribe(&ram);
     UmicomBoolean memory = UMICOM_FALSE, hart = UMICOM_FALSE, serial = UMICOM_FALSE, timer = UMICOM_FALSE;
@@ -62,6 +77,14 @@ void UmicomKernelHardwareValidateExecution(void)
         UmicomKernelPhysicalMemoryValidate() == UMICOM_KERNEL_MEMORY_OK, "final-accounting");
     UmicomKernelConsoleWriteLine("hardware.mmio-probes=none");
     UmicomKernelConsoleWriteLine("hardware.frame-accounting=unchanged");
+    /* Keep the diagnostic fields together so the harness checks one boot. */
+    UmicomKernelConsoleWrite("hardware.cpu-validation=boot=");
+    UmicomKernelConsoleWriteUnsigned(topology.bootHartId);
+    UmicomKernelConsoleWrite(" described=");
+    UmicomKernelConsoleWriteUnsigned(topology.describedCpuEntries);
+    UmicomKernelConsoleWrite(" enabled=");
+    UmicomKernelConsoleWriteUnsigned(topology.firmwareEnabledCpuEntries);
+    UmicomKernelConsoleWriteLine("");
     UmicomKernelConsoleWriteLine("hardware-discovery-test=pass");
     UmicomKernelConsoleWriteLine("UMICOM_KERNEL_HARDWARE_DISCOVERY_READY");
 }

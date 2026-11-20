@@ -17,4 +17,17 @@ if(BUILD_TESTING AND UMICOM_QEMU_RISCV64)
         TIMEOUT 30 FIXTURES_REQUIRED kernel_current_image
         PASS_REGULAR_EXPRESSION "UMICOM_KERNEL_HARDWARE_DISCOVERY_READY"
         FAIL_REGULAR_EXPRESSION "UMICOM_KERNEL_FAIL;unexpected-trap;panic;PANIC;failed;FAILED")
+
+    if(UMICOM_BUILD_SYSTEM_IMAGES)
+        # The startup check can observe a second parked hart independently of
+        # the cumulative diagnostic's single-hart storage acceptance profile.
+        add_test(NAME kernel.riscv64.hardware_cpu_topology
+            COMMAND "${UMICOM_QEMU_RISCV64}" -machine "virt,aclint=off"
+            -bios "$<TARGET_FILE:umicom-startup-check-image>"
+            -display none -monitor none -serial stdio -m 128M -smp 2 -no-reboot)
+        set_tests_properties(kernel.riscv64.hardware_cpu_topology PROPERTIES
+            TIMEOUT 30 FIXTURES_REQUIRED kernel_current_image
+            PASS_REGULAR_EXPRESSION "hardware[.]cpu-validation=boot=0 described=2 enabled=2[\r\n]+hardware-discovery-test=pass[\r\n]+UMICOM_KERNEL_HARDWARE_DISCOVERY_READY"
+            FAIL_REGULAR_EXPRESSION "UMICOM_KERNEL_FAIL;unexpected-trap;panic;PANIC;failed;FAILED")
+    endif()
 endif()

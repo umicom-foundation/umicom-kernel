@@ -10,7 +10,12 @@
  * later driver can establish whether a device is attached and which features
  * it offers. This layer never reads that slot or changes allocator ownership.
  *
- * Author: Sammy Hegab, Umicom Foundation. Licence: MIT.
+ * AUTHOR AND ORGANISATION:
+ * Sammy Hegab
+ * Umicom Foundation
+ *
+ * LICENCE:
+ * MIT
  *---------------------------------------------------------------------------*/
 #ifndef UMICOM_KERNEL_HARDWARE_CATALOGUE_H
 #define UMICOM_KERNEL_HARDWARE_CATALOGUE_H
@@ -72,6 +77,32 @@ const char *UmicomKernelHardwareKindName(UmicomKernelHardwareKind kind);
 void UmicomKernelHardwareCapture(UmicomAddress deviceTreeAddress);
 UmicomKernelTreeStatus UmicomKernelHardwareCaptureStatus(void);
 const UmicomKernelHardwareCatalogue *UmicomKernelHardwareCatalogueRead(void);
+
+typedef enum UmicomKernelBootHartDescription {
+    UMICOM_BOOT_HART_UNOBSERVED,
+    UMICOM_BOOT_HART_FIRMWARE_UNAVAILABLE,
+    UMICOM_BOOT_HART_NOT_DESCRIBED,
+    UMICOM_BOOT_HART_FIRMWARE_DISABLED,
+    UMICOM_BOOT_HART_FIRMWARE_ENABLED
+} UmicomKernelBootHartDescription;
+
+typedef struct UmicomKernelHardwareCpuTopology {
+    UmicomU32 describedCpuEntries;
+    UmicomU32 firmwareEnabledCpuEntries;
+    UmicomU64 bootHartId;
+    UmicomBoolean firmwareAvailable;
+    UmicomBoolean bootHartObserved;
+    UmicomKernelBootHartDescription bootHartDescription;
+} UmicomKernelHardwareCpuTopology;
+
+/* The single boot owner supplies the hart observed by the existing entry
+ * code. Later calls preserve that first observation, including hart zero. */
+void UmicomKernelHardwareObserveBootHart(UmicomU64 hartId);
+/* Return a value copy. The counts describe CPU entries in checked firmware
+ * and are unspecified when firmware is unavailable. An enabled entry does
+ * not establish that the named hart has reached Kernel startup. */
+UmicomKernelTreeStatus UmicomKernelHardwareCpuTopologyRead(UmicomKernelHardwareCpuTopology *topology);
+
 typedef void (*UmicomKernelHardwareWrite)(void *context, const char *text, UmicomSize bytes);
 void UmicomKernelHardwareReport(void *context, UmicomKernelHardwareWrite write);
 void UmicomKernelHardwareValidateExecution(void);

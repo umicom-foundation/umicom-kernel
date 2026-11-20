@@ -1560,6 +1560,8 @@ void UmicomKernelMain(UmicomU64 hartId, UmicomAddress deviceTreeAddress)
     /* Install the direct machine-mode trap vector while interrupts are disabled. */
     UmicomRiscvTrapInstall();
 
+    /* Keep the actual boot-entry hart before collecting independent firmware evidence. */
+    UmicomKernelHardwareObserveBootHart(hartId);
     /* Capture immutable firmware evidence before later allocation tests run. */
     UmicomKernelHardwareCapture(deviceTreeAddress);
 

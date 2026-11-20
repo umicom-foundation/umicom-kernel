@@ -71,6 +71,11 @@ function(UmicomConfigureNormalBootImages)
         if(UMICOM_STARTUP_PROFILE STREQUAL "recovery-check")
             target_compile_definitions(${UMICOM_STARTUP_TARGET} PRIVATE UMICOM_KERNEL_STARTUP_FAILURE=1)
         endif()
+        # Check CPU discovery in the ordinary startup fixture without entering
+        # the cumulative image's separate single-hart storage qualification.
+        if(UMICOM_STARTUP_PROFILE STREQUAL "startup-check")
+            target_compile_definitions(${UMICOM_STARTUP_TARGET} PRIVATE UMICOM_KERNEL_STARTUP_CHECK_HARDWARE=1)
+        endif()
         set_target_properties(${UMICOM_STARTUP_TARGET} PROPERTIES
             OUTPUT_NAME "umicom-${UMICOM_STARTUP_PROFILE}" SUFFIX ".elf"
             RUNTIME_OUTPUT_DIRECTORY "${UMICOM_STARTUP_DIRECTORY}"

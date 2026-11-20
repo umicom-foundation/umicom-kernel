@@ -2,12 +2,18 @@
  * Umicom Kernel
  * File: kernel/hardware_boot.c
  *
- * Capture firmware descriptions once, then expose only copied observations.
- * The established platform profile still owns boot RAM, UART and timer setup.
- * Discovery is deliberately not allowed to reconfigure those working owners.
- * Recovery never calls this path and gains no dependency on a valid tree.
+ * PURPOSE:
+ *   Capture firmware descriptions once, then expose only copied observations.
+ *   The established platform profile still owns boot RAM, UART and timer setup.
+ *   Discovery is deliberately not allowed to reconfigure those working owners.
+ *   Recovery never calls this path and gains no dependency on a valid tree.
  *
- * Author: Sammy Hegab, Umicom Foundation. Licence: MIT.
+ * AUTHOR AND ORGANISATION:
+ * Sammy Hegab
+ * Umicom Foundation
+ *
+ * LICENCE:
+ * MIT
  *---------------------------------------------------------------------------*/
 #include "umicom/kernel/hardware_catalogue.h"
 #include "umicom/kernel/device_tree.h"
@@ -18,6 +24,9 @@ static UmicomKernelDeviceTreeReader umicomHardwareReader;
 static UmicomKernelHardwareCatalogue umicomHardwareCatalogue;
 static UmicomKernelTreeStatus umicomHardwareStatus = UMICOM_TREE_NOT_FOUND;
 static UmicomBoolean umicomHardwareAttempted;
+/* The boot-entry observation has its own lifetime even if the DTB is missing. */
+static UmicomU64 umicomHardwareBootHartId;
+static UmicomBoolean umicomHardwareBootHartObserved;
 
 /* Keep producer compatibility inside this one boot-capture owner. The input
  * stays immutable, the temporary copy has the same bound as the strict reader,
@@ -72,6 +81,50 @@ const UmicomKernelHardwareCatalogue *UmicomKernelHardwareCatalogueRead(void)
 {
     return umicomHardwareStatus == UMICOM_TREE_OK && umicomHardwareCatalogue.ready ? &umicomHardwareCatalogue : 0;
 }
+
+void UmicomKernelHardwareObserveBootHart(UmicomU64 hartId)
+{
+    /* The serial boot boundary is authoritative for this first observation. */
+    if (umicomHardwareBootHartObserved) return;
+    umicomHardwareBootHartId = hartId;
+    umicomHardwareBootHartObserved = UMICOM_TRUE;
+}
+
+UmicomKernelTreeStatus UmicomKernelHardwareCpuTopologyRead(UmicomKernelHardwareCpuTopology *topology)
+{
+    if (topology == 0) return UMICOM_TREE_INVALID_ARGUMENT;
+    const UmicomKernelHardwareCatalogue *catalogue = UmicomKernelHardwareCatalogueRead();
+    /* Separate absence of a checked description from a checked tree that
+     * does not describe the hart. Both observations can be retained. */
+    UmicomKernelHardwareCpuTopology observation = {0};
+    observation.bootHartObserved = umicomHardwareBootHartObserved;
+    observation.bootHartId = umicomHardwareBootHartId;
+    observation.firmwareAvailable = catalogue != 0 ? UMICOM_TRUE : UMICOM_FALSE;
+    if (observation.bootHartObserved) {
+        observation.bootHartDescription = catalogue != 0 ? UMICOM_BOOT_HART_NOT_DESCRIBED :
+            UMICOM_BOOT_HART_FIRMWARE_UNAVAILABLE;
+    }
+    if (catalogue != 0) {
+        /* The catalogue rejects duplicate enabled CPU IDs but may retain
+         * disabled entries. Count entries as published and let an enabled
+         * match take precedence over a disabled match for the boot ID. */
+        for (UmicomU32 i = 0U; i < catalogue->devices; ++i) {
+            const UmicomKernelHardwareDevice *entry = &catalogue->entries[i];
+            if (entry->kind != UMICOM_HARDWARE_CPU) continue;
+            ++observation.describedCpuEntries;
+            if (entry->enabled) ++observation.firmwareEnabledCpuEntries;
+            if (observation.bootHartObserved && entry->registerCount != 0U &&
+                entry->registers[0].busAddress == observation.bootHartId &&
+                observation.bootHartDescription != UMICOM_BOOT_HART_FIRMWARE_ENABLED) {
+                observation.bootHartDescription = entry->enabled ? UMICOM_BOOT_HART_FIRMWARE_ENABLED :
+                    UMICOM_BOOT_HART_FIRMWARE_DISABLED;
+            }
+        }
+    }
+    *topology = observation;
+    return UMICOM_TREE_OK;
+}
+
 static void UmicomHardwareText(void *context, UmicomKernelHardwareWrite write, const char *text)
 {
     UmicomSize n = 0U;
@@ -94,6 +147,33 @@ static void UmicomHardwareRecord(void *context, UmicomKernelHardwareWrite write,
     UmicomHardwareNumber(context, write, value, UMICOM_FALSE);
     UmicomHardwareText(context, write, "\r\n");
 }
+
+/* Expose both evidence owners through the existing hardware command. Avoid
+ * reporting zero firmware counts when no valid description was available. */
+static void UmicomHardwareReportCpuTopology(void *context, UmicomKernelHardwareWrite write)
+{
+    static const char *const descriptions[] = {
+        [UMICOM_BOOT_HART_UNOBSERVED] = "unobserved",
+        [UMICOM_BOOT_HART_FIRMWARE_UNAVAILABLE] = "firmware-unavailable",
+        [UMICOM_BOOT_HART_NOT_DESCRIBED] = "not-described",
+        [UMICOM_BOOT_HART_FIRMWARE_DISABLED] = "firmware-disabled",
+        [UMICOM_BOOT_HART_FIRMWARE_ENABLED] = "firmware-enabled"
+    };
+    UmicomKernelHardwareCpuTopology topology;
+    if (UmicomKernelHardwareCpuTopologyRead(&topology) != UMICOM_TREE_OK) return;
+    UmicomHardwareText(context, write, topology.firmwareAvailable ?
+        "hardware.cpu.firmware=available\r\n" : "hardware.cpu.firmware=unavailable\r\n");
+    if (topology.firmwareAvailable) {
+        UmicomHardwareRecord(context, write, "hardware.cpu.described=", topology.describedCpuEntries);
+        UmicomHardwareRecord(context, write, "hardware.cpu.firmware-enabled=", topology.firmwareEnabledCpuEntries);
+    }
+    if (topology.bootHartObserved)
+        UmicomHardwareRecord(context, write, "hardware.cpu.boot-hart=", topology.bootHartId);
+    UmicomHardwareText(context, write, "hardware.cpu.boot-description=");
+    UmicomHardwareText(context, write, descriptions[topology.bootHartDescription]);
+    UmicomHardwareText(context, write, "\r\n");
+}
+
 void UmicomKernelHardwareReport(void *context, UmicomKernelHardwareWrite write)
 {
     if (!write) return;
@@ -103,6 +183,7 @@ void UmicomKernelHardwareReport(void *context, UmicomKernelHardwareWrite write)
     const UmicomKernelHardwareCatalogue *c = UmicomKernelHardwareCatalogueRead();
     UmicomHardwareRecord(context, write, "hardware.canonicalised-property-padding-bytes=",
         umicomHardwareCanonicalisedPropertyPaddingBytes);
+    UmicomHardwareReportCpuTopology(context, write);
     if (!c) {
         UmicomHardwareText(context, write, "No complete hardware inventory is available. Existing fixed-profile drivers are unchanged.\r\n");
         return;

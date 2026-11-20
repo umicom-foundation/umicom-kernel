@@ -2,11 +2,18 @@
  * Umicom Kernel device-tree and hardware-catalogue regression tests
  * File: tests/hardware_catalogue/device_tree_tests.c
  *
- * Fixtures are constructed as byte protocols so every malformed offset and
- * truncated span is deliberate. No dtc executable, third-party parser, device
- * register or RISC-V emulator is needed for these host tests. Their boot-model
- * coverage is not a claim that the real firmware or guest has executed here.
- * Author: Sammy Hegab, Umicom Foundation. Licence: MIT.
+ * PURPOSE:
+ *   Fixtures are constructed as byte protocols so every malformed offset and
+ *   truncated span is deliberate. No dtc executable, third-party parser, device
+ *   register or RISC-V emulator is needed for these host tests. Their boot-model
+ *   coverage is not a claim that the real firmware or guest has executed here.
+ *
+ * AUTHOR AND ORGANISATION:
+ * Sammy Hegab
+ * Umicom Foundation
+ *
+ * LICENCE:
+ * MIT
  *---------------------------------------------------------------------------*/
 #include "umicom/kernel/hardware_catalogue.h"
 #include "umicom/kernel/platform.h"
@@ -352,6 +359,117 @@ static void TestCaptureBounds(void)
     UmicomKernelHardwareCapture(hostRamBase-1U);CHECK(UmicomKernelHardwareCaptureStatus()==UMICOM_TREE_OUTSIDE_BUFFER);
     CHECK(!UmicomKernelHardwareCatalogueRead());UmicomKernelHardwareReport(0,Write);CHECK(strstr(output,"No complete hardware inventory"));
 }
+
+/* Each CTest case starts a new process because the real boot owner captures
+ * once. A second CPU node can carry an alias ID if that node is disabled. */
+static void CaptureTwoCpuEntries(UmicomU32 secondId)
+{
+    Reset();
+    Root();
+    Begin("cpus");
+    Cell("#address-cells", 1U);
+    Cell("#size-cells", 0U);
+    Begin("cpu@0");
+    Text("device_type", "cpu");
+    Cell("reg", 0U);
+    Text("status", "okay");
+    End();
+    Begin("cpu@1");
+    Text("device_type", "cpu");
+    Cell("reg", secondId);
+    Text("status", "disabled");
+    End();
+    End();
+    End();
+    Finish();
+    hostRamBase = (UmicomAddress)fixture.blob;
+    hostRamBytes = fixture.bytes;
+    UmicomKernelHardwareCapture(hostRamBase);
+    OK(UmicomKernelHardwareCaptureStatus());
+}
+
+/* Verify both the typed ownership contract and the console records. Hart zero
+ * is an actual observation and a later call cannot replace it. */
+static void TestCpuTopologyBootEnabled(void)
+{
+    UmicomKernelHardwareObserveBootHart(0U);
+    CaptureTwoCpuEntries(1U);
+    UmicomKernelHardwareObserveBootHart(1U);
+    UmicomKernelHardwareCpuTopology topology;
+    OK(UmicomKernelHardwareCpuTopologyRead(&topology));
+    CHECK(topology.firmwareAvailable && topology.bootHartObserved && topology.bootHartId == 0U);
+    CHECK(topology.describedCpuEntries == 2U && topology.firmwareEnabledCpuEntries == 1U);
+    CHECK(topology.bootHartDescription == UMICOM_BOOT_HART_FIRMWARE_ENABLED);
+    CHECK(UmicomKernelHardwareCpuTopologyRead(0) == UMICOM_TREE_INVALID_ARGUMENT);
+    UmicomKernelHardwareReport(0, Write);
+    CHECK(strstr(output, "hardware.cpu.firmware=available\r\n"));
+    CHECK(strstr(output, "hardware.cpu.described=2\r\n"));
+    CHECK(strstr(output, "hardware.cpu.firmware-enabled=1\r\n"));
+    CHECK(strstr(output, "hardware.cpu.boot-hart=0\r\n"));
+    CHECK(strstr(output, "hardware.cpu.boot-description=firmware-enabled\r\n"));
+}
+
+/* Keep disabled, absent and conflicting entries separately visible. These
+ * cases exercise firmware semantics through the parser and catalogue. */
+static void TestCpuTopologyBootDisabled(void)
+{
+    UmicomKernelHardwareObserveBootHart(1U);
+    CaptureTwoCpuEntries(1U);
+    UmicomKernelHardwareCpuTopology topology;
+    OK(UmicomKernelHardwareCpuTopologyRead(&topology));
+    CHECK(topology.bootHartObserved && topology.bootHartId == 1U);
+    CHECK(topology.bootHartDescription == UMICOM_BOOT_HART_FIRMWARE_DISABLED);
+}
+
+static void TestCpuTopologyBootAbsent(void)
+{
+    UmicomKernelHardwareObserveBootHart(0x100000002ULL);
+    CaptureTwoCpuEntries(1U);
+    UmicomKernelHardwareCpuTopology topology;
+    OK(UmicomKernelHardwareCpuTopologyRead(&topology));
+    CHECK(topology.firmwareAvailable && topology.bootHartId == 0x100000002ULL);
+    CHECK(topology.bootHartDescription == UMICOM_BOOT_HART_NOT_DESCRIBED);
+}
+
+static void TestCpuTopologyBootAlias(void)
+{
+    UmicomKernelHardwareObserveBootHart(0U);
+    CaptureTwoCpuEntries(0U);
+    UmicomKernelHardwareCpuTopology topology;
+    OK(UmicomKernelHardwareCpuTopologyRead(&topology));
+    CHECK(topology.describedCpuEntries == 2U && topology.firmwareEnabledCpuEntries == 1U);
+    CHECK(topology.bootHartDescription == UMICOM_BOOT_HART_FIRMWARE_ENABLED);
+}
+
+/* A refused DTB cannot erase boot evidence or turn unknown counts into zero
+ * in the console. Without an entry observation, a valid DTB supplies no ID. */
+static void TestCpuTopologyMissingFirmware(void)
+{
+    UmicomKernelHardwareObserveBootHart(0U);
+    UmicomKernelHardwareCapture(0U);
+    UmicomKernelHardwareCpuTopology topology;
+    OK(UmicomKernelHardwareCpuTopologyRead(&topology));
+    CHECK(!topology.firmwareAvailable && topology.bootHartObserved && topology.bootHartId == 0U);
+    CHECK(topology.bootHartDescription == UMICOM_BOOT_HART_FIRMWARE_UNAVAILABLE);
+    UmicomKernelHardwareReport(0, Write);
+    CHECK(strstr(output, "hardware.cpu.firmware=unavailable\r\n"));
+    CHECK(strstr(output, "hardware.cpu.boot-hart=0\r\n"));
+    CHECK(strstr(output, "hardware.cpu.boot-description=firmware-unavailable\r\n"));
+    CHECK(!strstr(output, "hardware.cpu.described=") && !strstr(output, "hardware.cpu.firmware-enabled="));
+}
+
+static void TestCpuTopologyUnobserved(void)
+{
+    CaptureTwoCpuEntries(1U);
+    UmicomKernelHardwareCpuTopology topology;
+    OK(UmicomKernelHardwareCpuTopologyRead(&topology));
+    CHECK(topology.firmwareAvailable && !topology.bootHartObserved);
+    CHECK(topology.bootHartDescription == UMICOM_BOOT_HART_UNOBSERVED);
+    UmicomKernelHardwareReport(0, Write);
+    CHECK(strstr(output, "hardware.cpu.boot-description=unobserved\r\n"));
+    CHECK(!strstr(output, "hardware.cpu.boot-hart="));
+}
+
 static void TestPhandleMismatch(void)
 { Reset();Root();Begin("controller");Cell("phandle",1U);Cell("linux,phandle",2U);End();End();Finish();RejectBuild(); }
 static void TestChosenAlias(void)
@@ -431,6 +549,12 @@ static const struct { const char *name; void (*run)(void); } cases[] = {
     {"register_capacity",TestRegisterCapacity},{"nested_bus_translation",TestNestedRanges},
     {"deterministic_mutations",TestMutations},{"capture_and_report",TestCaptureAndReport},
     {"capture_bounds",TestCaptureBounds},{"phandle_alias_mismatch",TestPhandleMismatch},
+    {"cpu_topology_boot_enabled", TestCpuTopologyBootEnabled},
+    {"cpu_topology_boot_disabled", TestCpuTopologyBootDisabled},
+    {"cpu_topology_boot_absent", TestCpuTopologyBootAbsent},
+    {"cpu_topology_boot_alias", TestCpuTopologyBootAlias},
+    {"cpu_topology_missing_firmware", TestCpuTopologyMissingFirmware},
+    {"cpu_topology_unobserved", TestCpuTopologyUnobserved},
     {"chosen_alias_literal",TestChosenAlias},{"failure_outputs",TestReadFailureOutputs},
     {"node_name_capacity",TestNodeNameCapacity},{"trailing_end",TestTrailingEnd},
     {"reservation_header_overlap",TestReserveHeaderOverlap},{"zero_sized_resource",TestZeroSizedAddressable},
